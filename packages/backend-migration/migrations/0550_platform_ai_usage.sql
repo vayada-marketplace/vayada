@@ -30,13 +30,13 @@ CREATE TABLE platform.ai_usage_ledger (
   user_id             UUID        REFERENCES identity.users(id) ON DELETE SET NULL,
   surface             TEXT        NOT NULL
                         CHECK (surface IN ('inbox', 'assistant', 'concierge', 'model_test')),
-  task                TEXT        NOT NULL CHECK (task ~ '^[a-z][a-z_]{0,63}$'),
+  task                TEXT        NOT NULL CHECK (task ~ '^[a-z][a-z0-9_]{0,63}$'),
   request_id          TEXT        NOT NULL CHECK (length(request_id) BETWEEN 1 AND 200),
   provider            TEXT        NOT NULL CHECK (length(provider) BETWEEN 1 AND 64),
   region              TEXT        NOT NULL CHECK (length(region) BETWEEN 1 AND 64),
   model               TEXT        NOT NULL CHECK (length(model) BETWEEN 1 AND 200),
   price_table_version TEXT        NOT NULL CHECK (length(price_table_version) BETWEEN 1 AND 32),
-  budget_month        DATE        NOT NULL CHECK (budget_month = date_trunc('month', budget_month)::date),
+  budget_month        DATE        NOT NULL CHECK (EXTRACT(DAY FROM budget_month) = 1),
   status              TEXT        NOT NULL DEFAULT 'reserved'
                         CHECK (status IN ('reserved', 'completed', 'failed')),
   reserved_micro_usd  BIGINT      NOT NULL CHECK (reserved_micro_usd >= 0),
@@ -66,3 +66,9 @@ CREATE INDEX idx_platform_ai_usage_ledger_account_month
 
 -- vayada's total for the month, for the spending alert.
 CREATE INDEX idx_platform_ai_usage_ledger_month ON platform.ai_usage_ledger (budget_month);
+
+-- Deleting a user or a property clears its id here without scanning every call.
+CREATE INDEX idx_platform_ai_usage_ledger_user
+  ON platform.ai_usage_ledger (user_id) WHERE user_id IS NOT NULL;
+CREATE INDEX idx_platform_ai_usage_ledger_property
+  ON platform.ai_usage_ledger (property_id) WHERE property_id IS NOT NULL;

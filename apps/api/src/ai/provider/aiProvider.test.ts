@@ -189,15 +189,21 @@ describe("createAiProvider", () => {
     expect(network.calls).toHaveLength(0);
   });
 
-  it("calls no model when the budget can not be checked", async () => {
+  it("calls no model when the budget can not be checked, and frees its place", async () => {
     const network = fakeFetch(() => anthropicReply("x", { input_tokens: 1, output_tokens: 1 }));
     const warn = vi.fn();
+    const reserve = vi
+      .fn<AiBudget["reserve"]>()
+      .mockRejectedValueOnce(new Error("connection terminated"))
+      .mockResolvedValue({ ok: true, reservationId: "res-2" });
     const provider = createAiProvider({
       enabledProviders: ["bedrock"],
-      budget: fakeBudget(new Error("connection terminated")).budget,
+      budget: { reserve, settle: async () => undefined },
       fetch: network.fetch,
       awsCredentials: CREDENTIALS,
       log: { warn },
+      maxConcurrentCalls: 1,
+      callWaitMs: 10,
     });
 
     expect(await provider.run("inbox_draft", INPUT, OPTIONS)).toEqual({
@@ -209,6 +215,61 @@ describe("createAiProvider", () => {
       "AI budget check failed",
     );
     expect(network.calls).toHaveLength(0);
+    // The only place under the provider-call limit is free again.
+    expect(await provider.run("inbox_draft", INPUT, OPTIONS)).toMatchObject({ ok: true });
+  });
+
+  it("keeps the full reservation only when a request may have been billed", async () => {
+    const failing = async (
+      fetch: typeof globalThis.fetch,
+      options = OPTIONS,
+      credentials = CREDENTIALS,
+    ) => {
+      const ledger = fakeBudget();
+      const provider = createAiProvider({
+        enabledProviders: ["bedrock"],
+        budget: ledger.budget,
+        fetch,
+        awsCredentials: credentials,
+      });
+      expect(await provider.run("inbox_translate", INPUT, options)).toEqual({
+        ok: false,
+        reason: "failed",
+      });
+      return {
+        settled: ledger.settlements[0]![1],
+        reserved: ledger.reservations[0]!.reservedMicroUsd,
+      };
+    };
+    const unused = fakeFetch(() => anthropicReply("x", { input_tokens: 1, output_tokens: 1 }));
+
+    // No AWS credentials: nothing was sent.
+    const noCredentials = await failing(unused.fetch, OPTIONS, async () => {
+      throw new Error("Could not load credentials from any providers");
+    });
+    expect(noCredentials.settled).toEqual({ status: "failed", costMicroUsd: 0 });
+
+    // The person gave up before the call started: nothing was sent.
+    const gaveUp = await failing(unused.fetch, { ...OPTIONS, abortSignal: AbortSignal.abort() });
+    expect(gaveUp.settled).toEqual({ status: "failed", costMicroUsd: 0 });
+    expect(unused.calls).toHaveLength(0);
+
+    // The connection broke after sending, then the retry was throttled: the first may be billed.
+    let attempt = 0;
+    const broken = fakeFetch(() => {
+      attempt += 1;
+      if (attempt === 1)
+        throw new TypeError("fetch failed", { cause: new Error("read ECONNRESET") });
+      return new Response(JSON.stringify({ message: "Too many requests" }), {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after-ms": "1" },
+      });
+    });
+    const brokeAfterSending = await failing(broken.fetch);
+    expect(brokeAfterSending.settled).toEqual({
+      status: "failed",
+      costMicroUsd: brokeAfterSending.reserved,
+    });
   });
 
   it("still returns a paid answer whose usage could not be recorded", async () => {
@@ -433,9 +494,10 @@ describe("createAiProvider", () => {
         }),
     );
     const warn = vi.fn();
+    const ledger = fakeBudget();
     const provider = createAiProvider({
       enabledProviders: ["bedrock"],
-      budget: fakeBudget().budget,
+      budget: ledger.budget,
       fetch: network.fetch,
       awsCredentials: CREDENTIALS,
       log: { warn },
@@ -446,6 +508,8 @@ describe("createAiProvider", () => {
       reason: "failed",
     });
     expect(network.calls).toHaveLength(2);
+    // Bedrock turned both attempts down, so nothing was billed.
+    expect(ledger.settlements).toEqual([["res-1", { status: "failed", costMicroUsd: 0 }]]);
     expect(warn).toHaveBeenCalledWith(
       expect.objectContaining({ error: { name: "AI_RetryError", statusCode: 429 } }),
       "AI provider call failed",

@@ -93,7 +93,7 @@ export type AiReservation =
 
 export type AiSettlement =
   | { status: "completed"; costMicroUsd: number; usage: TokenUsage }
-  /** No answer: cost 0 when the provider turned the request down, else the reserved amount. */
+  /** No answer: cost 0 when no request was billable, else the reserved amount. */
   | { status: "failed"; costMicroUsd: number };
 
 export type AiBudget = {
@@ -158,24 +158,36 @@ export function createAiProvider(config: AiProviderConfig): AiProvider {
     config.callWaitMs ?? DEFAULT_CALL_WAIT_MS,
   );
   const credentials = config.awsCredentials ?? defaultProvider();
-  const bedrockByRegion = new Map<string, ReturnType<typeof createAmazonBedrockAnthropic>>();
+  const baseFetch = config.fetch ?? globalThis.fetch;
 
-  function languageModel(route: ModelRoute): LanguageModel {
-    let bedrock = bedrockByRegion.get(route.region);
-    if (!bedrock) {
-      bedrock = createAmazonBedrockAnthropic({
-        region: route.region,
-        // An explicit address and an empty API key make the SDK ignore AWS_ENDPOINT_URL* and
-        // AWS_BEARER_TOKEN_BEDROCK, which would otherwise move calls out of the EU or off the
-        // task role's signed requests (research 09c a).
-        baseURL: `https://bedrock-runtime.${route.region}.amazonaws.com`,
-        apiKey: "",
-        credentialProvider: credentials,
-        ...(config.fetch ? { fetch: config.fetch } : {}),
-      });
-      bedrockByRegion.set(route.region, bedrock);
-    }
-    return bedrock(route.model);
+  /**
+   * A client per call, so its network layer can note whether Bedrock may bill the call: once a
+   * request was sent and not turned down with an error status (Bedrock bills none of those).
+   */
+  function languageModel(route: ModelRoute, trace: { maybeBilled: boolean }): LanguageModel {
+    const fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      // As fetch itself does: an abandoned call sends nothing.
+      if (init?.signal?.aborted) throw init.signal.reason;
+      try {
+        const response = await baseFetch(url, init);
+        if (response.status < 400) trace.maybeBilled = true;
+        return response;
+      } catch (error) {
+        // The connection may have broken after Bedrock took the request.
+        trace.maybeBilled = true;
+        throw error;
+      }
+    }) as typeof globalThis.fetch;
+    return createAmazonBedrockAnthropic({
+      region: route.region,
+      // An explicit address and an empty API key make the SDK ignore AWS_ENDPOINT_URL* and
+      // AWS_BEARER_TOKEN_BEDROCK, which would otherwise move calls out of the EU or off the
+      // task role's signed requests (research 09c a).
+      baseURL: `https://bedrock-runtime.${route.region}.amazonaws.com`,
+      apiKey: "",
+      credentialProvider: credentials,
+      fetch,
+    })(route.model);
   }
 
   return {
@@ -246,8 +258,8 @@ export function createAiProvider(config: AiProviderConfig): AiProvider {
   };
 
   /**
-   * One model call. The settlement is null when it is unknown whether the provider ran (and
-   * billed) the request, e.g. a timeout: the reservation is then kept at its full amount.
+   * One model call. The settlement is null when a request may have been billed but no answer
+   * says what it cost (a timeout, a broken connection): the full reservation is then kept.
    */
   async function call(
     task: AiTask,
@@ -259,9 +271,10 @@ export function createAiProvider(config: AiProviderConfig): AiProvider {
   ): Promise<{ result: AiRunResult; settlement: AiSettlement | null }> {
     const started = now();
     const timeout = AbortSignal.timeout(timeoutMs);
+    const trace = { maybeBilled: false };
     try {
       const result = await generateText({
-        model: languageModel(route),
+        model: languageModel(route, trace),
         instructions: input.instructions,
         messages: input.messages.map((message) => ({
           role: message.role,
@@ -303,13 +316,10 @@ export function createAiProvider(config: AiProviderConfig): AiProvider {
       }
       return { result: { ok: true, text: result.text, ...record }, settlement };
     } catch (error) {
-      const summary = errorSummary(error);
-      config.log?.warn({ ...fields, error: summary }, "AI provider call failed");
-      // An error status means the provider turned the request down and bills nothing.
-      const declined = summary.statusCode !== undefined && summary.statusCode >= 400;
+      config.log?.warn({ ...fields, error: errorSummary(error) }, "AI provider call failed");
       return {
         result: { ok: false, reason: "failed" },
-        settlement: declined ? { status: "failed", costMicroUsd: 0 } : null,
+        settlement: trace.maybeBilled ? null : { status: "failed", costMicroUsd: 0 },
       };
     }
   }

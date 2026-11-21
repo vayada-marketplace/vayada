@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import pg from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   createHotelSetupOrdinaryLoginFixture,
@@ -100,10 +100,30 @@ describe.skipIf(!url)("AI budgets and the usage ledger (VAY-2504)", () => {
     const budget = createPgAiBudget({ pool, defaultMonthlyLimitMicroUsd: 0, now: () => NOVEMBER });
     const account = await newAccount(1_000);
 
-    const results = await Promise.all([
+    // Hold the account's lock so both calls are waiting for it at the same moment.
+    await admin.query("BEGIN");
+    await admin.query(
+      "SELECT pg_advisory_xact_lock(hashtext('platform.ai_budget'), hashtext($1::uuid::text))",
+      [account],
+    );
+    const both = Promise.all([
       budget.reserve(request(account, 600)),
       budget.reserve(request(account, 600)),
     ]);
+    try {
+      await vi.waitFor(
+        async () => {
+          const { rows } = await admin.query<{ waiting: number }>(
+            "SELECT count(*)::int AS waiting FROM pg_locks WHERE locktype = 'advisory' AND NOT granted",
+          );
+          expect(rows[0]!.waiting).toBe(2);
+        },
+        { timeout: 5_000 },
+      );
+    } finally {
+      await admin.query("COMMIT");
+    }
+    const results = await both;
 
     expect(results.filter((result) => result.ok)).toHaveLength(1);
     expect(results).toContainEqual({ ok: false, reason: "allowance_used_up" });
@@ -226,6 +246,23 @@ describe.skipIf(!url)("AI budgets and the usage ledger (VAY-2504)", () => {
       usedMicroUsd: 1_000,
       limitMicroUsd: 1_000,
     });
+  });
+
+  it("counts a call reserved just before midnight as running in the new month", async () => {
+    let at = new Date("2026-11-30T23:59:50Z");
+    const budget = createPgAiBudget({
+      pool,
+      defaultMonthlyLimitMicroUsd: 1_000_000,
+      now: () => at,
+    });
+    const account = await newAccount();
+    await budget.reserve(request(account, 100));
+    await budget.reserve(request(account, 100));
+
+    at = new Date("2026-12-01T00:00:05Z");
+
+    expect(await budget.reserve(request(account, 100))).toEqual({ ok: false, reason: "busy" });
+    expect(await budget.monthStatus(account)).toMatchObject({ usedMicroUsd: 0 });
   });
 });
 

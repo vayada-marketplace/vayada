@@ -42,16 +42,19 @@ export function createPgAiBudget(config: {
 
   async function readMonth(client: pg.PoolClient | pg.Pool, organizationId: string, at: Date) {
     const month = monthStart(at);
+    // Running calls also count from last month: one reserved at 23:59 may still be running.
     const { rows } = await client.query<{ limit: string; used: string; running: number }>(
       `SELECT
          COALESCE(
            (SELECT monthly_limit_micro_usd FROM platform.ai_budgets WHERE organization_id = $1::uuid),
            $3::bigint
          )::text AS limit,
-         COALESCE(SUM(COALESCE(cost_micro_usd, reserved_micro_usd)), 0)::text AS used,
+         COALESCE(SUM(COALESCE(cost_micro_usd, reserved_micro_usd))
+                    FILTER (WHERE budget_month = $2::date), 0)::text AS used,
          (COUNT(*) FILTER (WHERE status = 'reserved' AND hold_until > $4::timestamptz))::int AS running
        FROM platform.ai_usage_ledger
-       WHERE organization_id = $1::uuid AND budget_month = $2::date`,
+       WHERE organization_id = $1::uuid
+         AND budget_month IN ($2::date, ($2::date - interval '1 month')::date)`,
       [organizationId, month, config.defaultMonthlyLimitMicroUsd, at],
     );
     const row = rows[0]!;
@@ -61,7 +64,6 @@ export function createPgAiBudget(config: {
   return {
     async reserve(request: AiReservationRequest) {
       const { context, route } = request;
-      const at = now();
       const client = await config.pool.connect();
       try {
         await client.query("BEGIN");
@@ -69,6 +71,8 @@ export function createPgAiBudget(config: {
           "SELECT pg_advisory_xact_lock(hashtext('platform.ai_budget'), hashtext($1::uuid::text))",
           [context.organizationId],
         );
+        // After the wait for the lock, so the hold starts about when the call does.
+        const at = now();
         const state = await readMonth(client, context.organizationId, at);
         if (state.used + request.reservedMicroUsd > state.limit) {
           await client.query("ROLLBACK");
