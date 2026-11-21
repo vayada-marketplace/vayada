@@ -154,6 +154,26 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open settings concurrency
     });
   });
 
+  it("says the calendar is behind a new time zone, and refuses to turn auto-open on (VAY-2582)", async () => {
+    // Auto-open is on by default, so the calendar is checked.
+    await expect(firstRepository.findContext(propertyId)).resolves.toMatchObject({
+      setting: { enabled: true },
+      setupError: null,
+    });
+    // The hotel's time zone moved; its calendar was saved in Vienna's.
+    await admin.query(
+      "UPDATE hotel_catalog.property_locations SET timezone='Asia/Colombo' WHERE property_id=$1",
+      [propertyId],
+    );
+    await expect(firstRepository.findContext(propertyId)).resolves.toMatchObject({
+      setupError: { code: "operating_calendar_time_zone_stale" },
+    });
+    await expect(firstRepository.update(command(true, "zone-on"))).resolves.toMatchObject({
+      ok: false,
+      error: { code: "operating_calendar_time_zone_stale" },
+    });
+  });
+
   it("rereads after the property lock and rejects a stale virtual-default save", async () => {
     await blocker.query("BEGIN");
     await blocker.query("SELECT id FROM hotel_catalog.properties WHERE id = $1::uuid FOR UPDATE", [

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FormRow, SettingsCard } from "@vayada/settings-ui";
 import {
   getPmsCalendarAutoOpen,
+  refreshPmsOperatingCalendar,
   updatePmsCalendarAutoOpen,
   type PmsCalendarAutoOpenRead,
   type PmsCalendarAutoOpenSetting,
@@ -25,6 +26,7 @@ export function CalendarAutoOpenEditor() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [success, setSuccess] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const errorRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -45,6 +47,28 @@ export function CalendarAutoOpenEditor() {
   useEffect(() => {
     if (saveError) errorRef.current?.focus();
   }, [saveError]);
+
+  /** VAY-2582: saves the calendar again with the hotel's own settings, then reads it back. */
+  const saveCalendarAgain = async () => {
+    setRefreshing(true);
+    setSaveError("");
+    setSuccess("");
+    try {
+      await refreshPmsOperatingCalendar();
+      const current = await getPmsCalendarAutoOpen();
+      setRead(current);
+      setDraft(current.setting);
+      setSuccess(t("settings.autoOpen.calendarSavedAgain"));
+    } catch (error) {
+      setSaveError(
+        error instanceof ApiErrorResponse && error.data.code === "calendar_refresh_needs_review"
+          ? t("settings.autoOpen.calendarSaveAgainNeedsReview")
+          : t("settings.autoOpen.calendarSaveAgainFailed"),
+      );
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const save = async () => {
     if (!draft) return;
@@ -87,6 +111,7 @@ export function CalendarAutoOpenEditor() {
         if (
           code === "operating_calendar_not_configured" ||
           code === "operating_calendar_room_bindings_stale" ||
+          code === "operating_calendar_time_zone_stale" ||
           code === "physical_room_labels_unverified"
         ) {
           setRead((current) => current && { ...current, setupError: { code } });
@@ -268,19 +293,35 @@ export function CalendarAutoOpenEditor() {
           className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
         >
           <p>{setupErrorMessage(read.setupError.code, t)}</p>
-          {/* The local /setup alias hands the session to Booking Admin (VAY-2266). */}
-          <a
-            href={`${buildSharedHotelSetupRedirectPath({
-              entryProduct: "pms",
-              returnProduct: "pms",
-              returnTo: "/settings/calendar",
-              propertyId: read.setting.propertyId,
-            })}&recovery=pms-calendar&step=${read.setupError.code === "physical_room_labels_unverified" ? "rooms" : "calendar"}`}
-            className="mt-2 inline-block font-medium underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
-          >
-            {t("settings.autoOpen.openSetup")}
-          </a>
-          <p className="mt-2">{t("settings.autoOpen.setupAuthority")}</p>
+          {CALENDAR_BEHIND.has(read.setupError.code) ? (
+            // VAY-2582: a hotel that is set up saves its calendar here, never through setup's first run.
+            <button
+              type="button"
+              onClick={() => void saveCalendarAgain()}
+              disabled={refreshing}
+              className="mt-2 rounded-lg border border-amber-300 bg-white px-3 py-1.5 font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+            >
+              {refreshing
+                ? t("settings.autoOpen.savingCalendar")
+                : t("settings.autoOpen.saveCalendarAgain")}
+            </button>
+          ) : (
+            <>
+              {/* The local /setup alias hands the session to Booking Admin (VAY-2266). */}
+              <a
+                href={`${buildSharedHotelSetupRedirectPath({
+                  entryProduct: "pms",
+                  returnProduct: "pms",
+                  returnTo: "/settings/calendar",
+                  propertyId: read.setting.propertyId,
+                })}&recovery=pms-calendar&step=${read.setupError.code === "physical_room_labels_unverified" ? "rooms" : "calendar"}`}
+                className="mt-2 inline-block font-medium underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+              >
+                {t("settings.autoOpen.openSetup")}
+              </a>
+              <p className="mt-2">{t("settings.autoOpen.setupAuthority")}</p>
+            </>
+          )}
         </div>
       )}
 
@@ -354,10 +395,18 @@ function formatDate(value: string, locale: string): string {
     : value;
 }
 
+/** A saved calendar behind its rooms or time zone: "Save calendar again" catches it up (VAY-2582). */
+const CALENDAR_BEHIND: ReadonlySet<string> = new Set([
+  "operating_calendar_room_bindings_stale",
+  "operating_calendar_time_zone_stale",
+]);
+
 function setupErrorMessage(code: unknown, t: (key: string) => string): string | null {
   if (code === "operating_calendar_not_configured") return t("settings.autoOpen.setupCalendar");
   if (code === "operating_calendar_room_bindings_stale")
     return t("settings.autoOpen.setupBindingsStale");
+  if (code === "operating_calendar_time_zone_stale")
+    return t("settings.autoOpen.setupTimeZoneStale");
   if (code === "physical_room_labels_unverified")
     return t("settings.autoOpen.setupLabelsUnverified");
   return null;

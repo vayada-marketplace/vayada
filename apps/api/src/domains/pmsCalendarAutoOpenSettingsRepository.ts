@@ -252,10 +252,11 @@ async function readSetupError(
     await client.query<{
       calendarRevision: number | string | null;
       roomBindingsStale: boolean;
+      timeZoneStale: boolean;
       labelsUnverified: boolean;
     }>(
       `WITH current_calendar AS (
-         SELECT calendar_revision
+         SELECT calendar_revision, property_time_zone
          FROM pms.operating_calendar_revisions
          WHERE property_id=$1::uuid
          ORDER BY calendar_revision DESC
@@ -289,6 +290,11 @@ async function readSetupError(
              AND room.id IS NULL
          ) AS "roomBindingsStale",
          EXISTS (
+           SELECT 1 FROM current_calendar
+           JOIN hotel_catalog.property_locations location ON location.property_id=$1::uuid
+           WHERE location.timezone IS DISTINCT FROM current_calendar.property_time_zone
+         ) AS "timeZoneStale",
+         EXISTS (
            SELECT 1 FROM pms.rooms room
            JOIN pms.room_types room_type
              ON room_type.property_id=room.property_id AND room_type.id=room.room_type_id
@@ -304,7 +310,8 @@ async function readSetupError(
     return { code: "operating_calendar_not_configured" };
   }
   if (row.labelsUnverified) return { code: "physical_room_labels_unverified" };
-  return row.roomBindingsStale ? { code: "operating_calendar_room_bindings_stale" } : null;
+  if (row.roomBindingsStale) return { code: "operating_calendar_room_bindings_stale" };
+  return row.timeZoneStale ? { code: "operating_calendar_time_zone_stale" } : null;
 }
 
 async function findReplay(

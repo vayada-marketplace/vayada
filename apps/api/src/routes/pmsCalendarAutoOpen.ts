@@ -11,6 +11,10 @@ import {
 } from "@vayada/domain-pms";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
+import type {
+  PmsOperatingCalendarRoomRefreshActor,
+  PmsOperatingCalendarRoomRefreshResult,
+} from "../domains/pmsOperatingCalendarRoomRefresh.js";
 import { enforcePmsPropertyRoutePolicy } from "./pmsPropertyPolicy.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -24,6 +28,10 @@ export type PmsCalendarAutoOpenRoutesOptions = {
   settings: PmsCalendarAutoOpenSettingsPort;
   propertyAccessRepository: PropertyAccessRepository;
   allowedOrigins?: string[];
+  /** VAY-2582: "Save calendar again", with the hotel's own calendar settings (unset: not mounted). */
+  refreshCalendar?: (
+    actor: PmsOperatingCalendarRoomRefreshActor,
+  ) => Promise<PmsOperatingCalendarRoomRefreshResult>;
 };
 
 export async function registerPmsCalendarAutoOpenRoutes(
@@ -47,6 +55,55 @@ export async function registerPmsCalendarAutoOpenRoutes(
       return reply.status(403).send({ code: "origin_not_allowed" });
     return reply.code(204).send();
   });
+
+  const { refreshCalendar } = options;
+  if (refreshCalendar) {
+    const path = "/properties/:propertyId/operating-calendar/refresh";
+    app.options(path, async (request, reply) => {
+      if (!writeCorsHeaders(request, reply, options.allowedOrigins ?? []))
+        return reply.status(403).send({ code: "origin_not_allowed" });
+      return reply.code(204).send();
+    });
+    /**
+     * VAY-2582: a hotel that is set up saves its calendar again after its rooms or its time zone
+     * changed: the same opening schedule, minimum stay and room limits, then its nights prepared
+     * again through the calendar's current end. Never the setup's first run, which also writes
+     * payment methods, prices and the plan.
+     */
+    app.post<{ Params: PropertyParams }>(path, { onRequest: authorize }, async (request, reply) => {
+      const scope = requireAuthorizedScope(authorized, request);
+      const { context } = scope;
+      let result: PmsOperatingCalendarRoomRefreshResult;
+      try {
+        result = await refreshCalendar({
+          organizationId: context.selectedOrganization.organizationId,
+          propertyId: scope.propertyId,
+          userId: context.actor.internalUserId,
+          requestId: context.audit.requestId,
+          correlationId: context.audit.correlationId ?? null,
+        });
+      } catch (error) {
+        request.log.error({ err: error, propertyId: scope.propertyId }, "Calendar refresh failed");
+        return reply.status(503).send({ code: "calendar_refresh_unavailable" });
+      }
+      if (result.outcome === "refreshed")
+        return reply
+          .status(200)
+          .send({ outcome: "refreshed", calendarRevision: result.calendarRevision });
+      if (result.outcome === "current") return reply.status(200).send({ outcome: "current" });
+      request.log.warn(
+        { propertyId: scope.propertyId, ...result },
+        "Calendar refresh did not save the calendar",
+      );
+      if (result.outcome === "no_calendar" || result.outcome === "no_inventory")
+        return reply.status(409).send({ code: "operating_calendar_not_configured" });
+      if (result.outcome === "not_room_change")
+        return reply
+          .status(409)
+          .send({ code: "calendar_refresh_needs_review", reason: result.reason });
+      return reply.status(409).send({ code: "calendar_refresh_failed", step: result.step });
+    });
+  }
 
   app.get<{ Params: PropertyParams }>(
     "/properties/:propertyId/calendar-auto-open",
@@ -270,7 +327,7 @@ function writeCorsHeaders(
   reply
     .header("Access-Control-Allow-Origin", origin)
     .header("Access-Control-Allow-Headers", "authorization,content-type,idempotency-key,x-hotel-id")
-    .header("Access-Control-Allow-Methods", "GET,PATCH,OPTIONS")
+    .header("Access-Control-Allow-Methods", "GET,PATCH,POST,OPTIONS")
     .header("Vary", "Origin");
   return true;
 }

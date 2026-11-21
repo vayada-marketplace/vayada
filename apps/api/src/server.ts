@@ -185,6 +185,7 @@ import { createPgPmsPhysicalRoomUnitReconcileRepository } from "./domains/pmsPhy
 import { createPgPmsPhysicalRoomOperationalLabelRepository } from "./domains/pmsPhysicalRoomOperationalLabelRepository.js";
 import {
   followRoomChangesInCalendar,
+  refreshPmsOperatingCalendarRooms,
   repairPmsOperatingCalendarRooms,
   type PmsOperatingCalendarRoomRefreshPorts,
   type PmsRoomChangeCommand,
@@ -2354,6 +2355,12 @@ const app = buildApp({
   pmsRoomAssignmentSettings,
   pmsRoomAssignmentHistory,
   pmsCalendarAutoOpenSettings,
+  pmsOperatingCalendarRefresh: pmsCalendarRoomRefreshPorts
+    ? (actor) =>
+        refreshPmsOperatingCalendarRooms(pmsCalendarRoomRefreshPorts, actor, {
+          acceptTimeZone: true,
+        })
+    : undefined,
   pmsRoomPublication: pmsRoomPublicationRuntime
     ? {
         mediaCommandPort: pmsRoomPublicationRuntime.commandRepository,

@@ -70,6 +70,8 @@ type Start = {
   crowded?: readonly string[];
   /** The changed room type still has rooms waiting for their name. */
   unnamed?: boolean;
+  /** The time zone the save took (the hotel's current one). */
+  savedTimeZone?: string;
 };
 
 function fake(start: Start = {}) {
@@ -130,7 +132,17 @@ function fake(start: Start = {}) {
     calendar: {
       upsertOperatingCalendar: async (command: Record<string, unknown>) => {
         calls.push(["save", command]);
-        return start.save ?? { ok: true, response: { configuration: { calendarRevision: 5 } } };
+        return (
+          start.save ?? {
+            ok: true,
+            response: {
+              configuration: {
+                calendarRevision: 5,
+                sourceInputs: { propertyTimeZone: start.savedTimeZone ?? "Asia/Makassar" },
+              },
+            },
+          }
+        );
       },
     },
     materialization: {
@@ -290,6 +302,38 @@ describe("the calendar follows room changes (VAY-2469)", () => {
       expect(await refreshPmsOperatingCalendarRooms(ports, actor)).toEqual(expected);
       expect(calls.filter(([name]) => name !== "crowded")).toEqual([]);
     }
+  });
+
+  it("takes a new time zone only when the hotel asks: Save calendar again (VAY-2582)", async () => {
+    // The hotel moved to Los Angeles; its rooms didn't change.
+    const moved = {
+      conflicts: [{ code: "property_profile_revision_conflict", currentRevision: 9 }],
+    };
+    const automatic = fake(moved);
+    expect(await refreshPmsOperatingCalendarRooms(automatic.ports, actor)).toEqual({
+      outcome: "not_room_change",
+      reason: "property_profile_revision_conflict",
+    });
+    expect(automatic.calls.filter(([name]) => name !== "crowded")).toEqual([]);
+
+    const asked = fake({ ...moved, savedTimeZone: "America/Los_Angeles" });
+    expect(
+      await refreshPmsOperatingCalendarRooms(asked.ports, actor, { acceptTimeZone: true }),
+    ).toEqual({ outcome: "refreshed", calendarRevision: 5, savedCalendar: true });
+    const steps = asked.calls.filter(([name]) => name !== "crowded");
+    expect(steps.map(([name]) => name)).toEqual(["preview", "save", "materialize"]);
+    // The hotel's own schedule, minimum stay and room limits; never the first run's defaults.
+    expect(steps[1]![1]).toMatchObject({
+      expectedPropertyProfileRevision: 9,
+      schedule: configuration.schedule,
+      defaultMinimumStayNights: 2,
+      roomTypeLimits: [
+        expect.objectContaining({ roomTypeId: studio, startingSellableLimitCount: 3 }),
+        expect.objectContaining({ roomTypeId: garden, startingSellableLimitCount: 1 }),
+      ],
+    });
+    // 02:00 UTC on 3 November is still 2 November in Los Angeles: the nights start there.
+    expect(steps[2]![1]["horizon"]).toEqual({ from: "2026-11-02", through: "2027-03-31" });
   });
 
   it("reports a refused preview, save or night preparation without going further", async () => {
