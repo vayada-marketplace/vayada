@@ -81,17 +81,20 @@ const identity: IdentityRepository = {
   },
 } as IdentityRepository;
 
-// Both roles get the same keys, so only the property scope differs.
+// Both roles get the same keys, so only the property scope differs. Reviews read on the inbox key
+// (VAY-2575); hotel managers and owners hold it.
 const keys: PermissionKey[] = [
   "booking.settings.manage",
   "booking.promos.read",
   "booking.promos.manage",
   "booking.addons.read",
   "pms.operations.read",
+  "pms.inbox.read",
 ];
+let roleKeys: readonly PermissionKey[] = keys;
 const rolePermissions: RolePermissionRepository = {
   async findPermissionsForRole() {
-    return keys;
+    return [...roleKeys];
   },
 };
 const entitlements: EntitlementRepository = {
@@ -227,6 +230,7 @@ afterAll(async () => {
 });
 beforeEach(() => {
   reads.length = 0;
+  roleKeys = keys;
 });
 
 const get = (token: string, url: string) =>
@@ -259,6 +263,15 @@ describe("member property scope on group-checked routes (VAY-2574)", () => {
     expect(reads).toEqual([]);
     // P1 passes the access check and stops at body validation.
     expect((await create(P1)).statusCode).toBe(422);
+  });
+
+  it("needs the inbox key for reviews as well as the property (VAY-2575)", async () => {
+    roleKeys = keys.filter((key) => key !== "pms.inbox.read");
+    const reviews = (id: string) => `/api/pms/properties/${id}/reviews`;
+
+    expect((await get("manager", reviews(P1))).statusCode).toBe(403);
+    expect((await get("owner", reviews(P1))).statusCode).toBe(403);
+    expect(reads).toEqual([]);
   });
 
   it.each(areas)("%s: the owner with every property keeps both", async (_area, url) => {
