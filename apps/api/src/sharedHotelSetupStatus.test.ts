@@ -360,6 +360,59 @@ describe("shared hotel setup status route", () => {
     expect(profile.statusCode).toBe(403);
   });
 
+  it("limits the property profile to the member's assigned properties (VAY-2574)", async () => {
+    const profiles = new Map<string, SharedPropertyProfile>([
+      [propertyId, profileResponse(propertyId, minimalHotelInput(), 2)],
+      [secondPropertyId, profileResponse(secondPropertyId, minimalHotelInput(), 2)],
+    ]);
+    const repository = profileRepository(profiles);
+    const getPropertyProfile = vi.spyOn(repository, "getPropertyProfile");
+    const updatePropertyProfile = vi.spyOn(repository, "updatePropertyProfile");
+    app = buildSharedSetupApp({
+      roleKey: "hotel_manager",
+      permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+      linkedResources: [propertyLink(propertyId), propertyLink(secondPropertyId)],
+      propertyAccessRepository: propertyScopeRepository(
+        agencyScope({
+          mode: "assigned",
+          roleKey: "hotel_manager",
+          assignedPropertyIds: [propertyId],
+        }),
+      ),
+      repository,
+    });
+    const headers = { authorization: "Bearer valid-token" };
+    const update = (id: string) =>
+      injectJson(app!, {
+        method: "PUT",
+        url: `/api/hotel-setup/properties/${id}/profile`,
+        headers,
+        payload: { expectedProfileRevision: 2, patch: { displayName: "Renamed" } },
+      });
+
+    const readB = await injectJson(app, {
+      method: "GET",
+      url: `/api/hotel-setup/properties/${secondPropertyId}/profile`,
+      headers,
+    });
+    const updateB = await update(secondPropertyId);
+    expect(readB.statusCode).toBe(403);
+    expect(updateB.statusCode).toBe(403);
+    expect(getPropertyProfile).not.toHaveBeenCalled();
+    expect(updatePropertyProfile).not.toHaveBeenCalled();
+
+    const readA = await injectJson(app, {
+      method: "GET",
+      url: `/api/hotel-setup/properties/${propertyId}/profile`,
+      headers,
+    });
+    expect(readA.statusCode).toBe(200);
+    expect((await update(propertyId)).statusCode).toBe(200);
+    expect(updatePropertyProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ propertyId, expectedProfileRevision: 2 }),
+    );
+  });
+
   it("returns the same denial for an unassigned or cross-tenant property before data reads", async () => {
     const repository = repositoryWith([]);
     const getHotelSetupStatus = vi.spyOn(repository, "getHotelSetupStatus");

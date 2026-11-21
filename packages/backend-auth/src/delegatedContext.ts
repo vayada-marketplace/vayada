@@ -9,9 +9,9 @@
 //   every request (tool-call ids come from AI clients and are not unique);
 // - only contexts this module minted are accepted by injectAsDelegate: they are deep-frozen, and
 //   expire after DELEGATED_CONTEXT_MAX_AGE_MS so a cached one stops working;
-// - narrowed to the member's own properties (VAY-2567 rank 1a): about 21 route files only check that
-//   a property is linked to the hotel group, so the delegated context keeps only the links of the
-//   properties this member may use. Narrowing can only take rights away, never add one.
+// - narrowed to the member's own properties (VAY-2567 rank 1a): the delegated context keeps only the
+//   links of the properties this member may use, on top of the routes' own member check (VAY-2574),
+//   and can narrow further to the action's properties. Narrowing can only take rights away.
 import { randomUUID } from "node:crypto";
 
 import { AuthError, DelegationRefusedError } from "./errors.js";
