@@ -64,10 +64,13 @@ describe("Cloudflare custom hostnames", () => {
     const cloudflare = createCloudflareCustomHostnames({ apiToken: "t", zoneId: "zone-1", fetch });
 
     await expect(cloudflare.create(hostname)).resolves.toEqual({
-      id: "ch-1",
-      status: "pending",
-      sslStatus: "pending_validation",
-      errors: ["custom hostname does not CNAME to this zone.", "CAA blocks"],
+      custom: {
+        id: "ch-1",
+        status: "pending",
+        sslStatus: "pending_validation",
+        errors: ["custom hostname does not CNAME to this zone.", "CAA blocks"],
+      },
+      registered: true,
     });
     const [url, init] = fetch.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(base);
@@ -92,7 +95,11 @@ describe("Cloudflare custom hostnames", () => {
       );
     const cloudflare = createCloudflareCustomHostnames({ apiToken: "t", zoneId: "zone-1", fetch });
 
-    await expect(cloudflare.create(hostname)).resolves.toMatchObject({ id: "ch-1" });
+    // Not registered by this call, so this check doesn't record it (VAY-2580).
+    await expect(cloudflare.create(hostname)).resolves.toMatchObject({
+      custom: { id: "ch-1" },
+      registered: false,
+    });
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
@@ -133,6 +140,36 @@ describe("Cloudflare custom hostnames", () => {
     expect(JSON.parse(String(init.body))).toEqual({
       ssl: { method: "http", type: "dv", settings: { min_tls_version: "1.2" } },
     });
+  });
+
+  it("deletes a hostname by id and tells when it was already gone (VAY-2580)", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(cloudflareResponse(200, { success: true, result: { id: "ch-1" } }))
+      .mockResolvedValueOnce(
+        cloudflareResponse(404, {
+          success: false,
+          errors: [{ code: 1436, message: "The custom hostname was not found." }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        cloudflareResponse(403, { success: false, errors: [{ code: 9109, message: "No" }] }),
+      );
+    const cloudflare = createCloudflareCustomHostnames({
+      apiToken: "secret-token",
+      zoneId: "zone-1",
+      fetch,
+    });
+
+    await expect(cloudflare.remove("ch-1")).resolves.toBe(true);
+    const [url, init] = fetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${base}/ch-1`);
+    expect(init.method).toBe("DELETE");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer secret-token");
+    await expect(cloudflare.remove("ch-1")).resolves.toBe(false);
+    const refused = await cloudflare.remove("ch-1").catch((caught: unknown) => caught);
+    expect(refused).toMatchObject({ httpStatus: 403, codes: [9109] });
+    expect(String((refused as Error).message)).not.toContain("secret-token");
   });
 });
 
@@ -179,20 +216,33 @@ describe("custom-domain verifier", () => {
   function verifier(
     found: CloudflareCustomHostname | null,
     dnsAnswer: { target: string | null; host?: string | null },
-    options: { created?: CloudflareCustomHostname; routes?: Map<string, string> } = {},
+    options: {
+      created?: CloudflareCustomHostname;
+      adopted?: boolean;
+      routes?: Map<string, string>;
+    } = {},
   ) {
     const cloudflare: CloudflareCustomHostnames = {
       find: vi.fn(async () => found),
-      create: vi.fn(async () => options.created ?? pending),
+      create: vi.fn(async () => ({
+        custom: options.created ?? pending,
+        registered: !options.adopted,
+      })),
       restartValidation: vi.fn(async () => ({ ...pending, sslStatus: "pending_validation" })),
+      remove: vi.fn(async () => true),
     };
     const dns: CustomDomainDns = {
       cnameTarget: vi.fn(async () => dnsAnswer.target),
       recordHost: vi.fn(async () => dnsAnswer.host ?? "booking"),
     };
     const routes = options.routes ?? new Map([[hostname, propertyId]]);
-    const { check } = createBookingCustomDomainVerifier({ cloudflare, dns, routes });
-    return { cloudflare, dns, check: (host = hostname) => check(host, propertyId.toUpperCase()) };
+    const { check, release } = createBookingCustomDomainVerifier({ cloudflare, dns, routes });
+    return {
+      cloudflare,
+      dns,
+      check: (host = hostname) => check(host, propertyId.toUpperCase()),
+      release,
+    };
   }
 
   it("verifies an active hostname routed for this property, without asking DNS", async () => {
@@ -257,6 +307,7 @@ describe("custom-domain verifier", () => {
       issue: { code: "certificate_pending", foundTarget: null },
       recordHost: "booking",
       errors: [],
+      registeredHostnameId: "ch-1",
     });
     expect(cloudflare.create).toHaveBeenCalledWith(hostname);
   });
@@ -318,6 +369,46 @@ describe("custom-domain verifier", () => {
       status: "failed",
       issue: { code: "hostname_rejected" },
       errors: ["Cloudflare rejected booking.hotel.example (certificate deleted)."],
+    });
+  });
+
+  describe("only hostnames a check registered are recorded and deleted (VAY-2580)", () => {
+    it("records the hostname it registered, also once the certificate is active", async () => {
+      const { check } = verifier(
+        null,
+        { target: "custom.booking.vayada.com" },
+        { created: active },
+      );
+
+      await expect(check()).resolves.toMatchObject({
+        status: "verified",
+        registeredHostnameId: "ch-1",
+      });
+    });
+
+    it("records nothing for a hostname that was there already or that it adopted", async () => {
+      // An existing hostname may be the old booking-api's (www.booking.aetherhilltopvillas.com).
+      for (const { found, adopted } of [
+        { found: active, adopted: false },
+        { found: pending, adopted: false },
+        { found: null, adopted: true },
+      ]) {
+        const { check } = verifier(found, { target: "custom.booking.vayada.com" }, { adopted });
+
+        const result = await check();
+        expect(result).not.toHaveProperty("registeredHostnameId");
+      }
+    });
+
+    it("deletes a registered hostname by its id and tells when it was gone already", async () => {
+      const { cloudflare, release } = verifier(null, { target: null });
+
+      await expect(release("ch-1")).resolves.toBe("deleted");
+      expect(cloudflare.remove).toHaveBeenCalledWith("ch-1");
+      expect(cloudflare.find).not.toHaveBeenCalled();
+
+      vi.mocked(cloudflare.remove).mockResolvedValueOnce(false);
+      await expect(release("ch-1")).resolves.toBe("absent");
     });
   });
 });

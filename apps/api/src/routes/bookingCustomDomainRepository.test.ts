@@ -88,9 +88,14 @@ describe("target booking custom-domain repository", () => {
       "book.hotel.example",
       "failed",
       bookingCustomDomainLockKey(propertyId),
+      null,
     ]);
+    // A check that registered a Cloudflare hostname keeps its id on the row (VAY-2580).
+    await repository.recordCheckResult(propertyId, "book.hotel.example", "pending", "ch-1");
+    expect(queries[1]!.text).toContain("cloudflare_hostname_id = COALESCE($5::text");
+    expect(queries[1]!.values?.[4]).toBe("ch-1");
 
     await repository.projectPublicProfile(propertyId);
-    expect(queries[1]!.text).toContain("hotel_catalog");
+    expect(queries[2]!.text).toContain("hotel_catalog");
   });
 });

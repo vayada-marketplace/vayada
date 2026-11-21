@@ -115,4 +115,40 @@ describe.skipIf(!TEST_DATABASE_URL)("booking custom-domain checks in PostgreSQL 
       expect.objectContaining({ hostname: "www.vay2568.example", verification_status: "pending" }),
     ]);
   });
+
+  it("keeps the Cloudflare hostname a check registered until the domain changes (VAY-2580)", async () => {
+    const hostnameId = async () =>
+      (
+        await admin.query(
+          `SELECT cloudflare_hostname_id FROM hotel_catalog.property_domains
+           WHERE property_id = $1::uuid`,
+          [propertyId],
+        )
+      ).rows[0]?.cloudflare_hostname_id ?? null;
+
+    await expect(
+      repository.recordCheckResult(propertyId, hostname, "pending", "0f6c-registered"),
+    ).resolves.toMatchObject({ cloudflareHostnameId: "0f6c-registered" });
+    // A later check that registered nothing keeps it, and so does saving the same domain again.
+    await repository.recordCheckResult(propertyId, hostname, "failed");
+    await repository.upsertForPropertyId(propertyId, hostname);
+    expect(await hostnameId()).toBe("0f6c-registered");
+    await expect(repository.findByPropertyId(propertyId)).resolves.toMatchObject({
+      cloudflareHostnameId: "0f6c-registered",
+    });
+    expect(await repository.isHostnameSaved(hostname)).toBe(true);
+
+    // A replaced domain's row goes; the new one starts without a hostname.
+    await repository.upsertForPropertyId(propertyId, "www.vay2568.example");
+    expect(await hostnameId()).toBeNull();
+    expect(await repository.isHostnameSaved(hostname)).toBe(false);
+
+    await expect(
+      admin.query(
+        `UPDATE hotel_catalog.property_domains SET cloudflare_hostname_id = 'not an id'
+         WHERE property_id = $1::uuid`,
+        [propertyId],
+      ),
+    ).rejects.toThrow(/chk_property_domains_cloudflare_hostname_id/);
+  });
 });

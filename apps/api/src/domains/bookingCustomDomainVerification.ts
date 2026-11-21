@@ -18,10 +18,18 @@ export type BookingCustomDomainCheckResult = {
    * null when unknown, and the page then shows the whole hostname. */
   recordHost: string | null;
   errors: string[];
+  /** The Cloudflare hostname this check registered (VAY-2580). The domain row keeps it, so removing
+   * the domain deletes that hostname and no other. */
+  registeredHostnameId?: string;
 };
 
 export type BookingCustomDomainVerifier = {
   check(hostname: string, propertyId: string): Promise<BookingCustomDomainCheckResult>;
+  /**
+   * Deletes a Cloudflare hostname that a check registered (`registeredHostnameId`), once its domain
+   * is removed or replaced (VAY-2580). "absent" when it was already gone.
+   */
+  release(hostnameId: string): Promise<"deleted" | "absent">;
 };
 
 export type CloudflareCustomHostname = {
@@ -33,10 +41,12 @@ export type CloudflareCustomHostname = {
 
 export type CloudflareCustomHostnames = {
   find(hostname: string): Promise<CloudflareCustomHostname | null>;
-  /** Registers the hostname; adopts it when a concurrent check registered it a moment ago. */
-  create(hostname: string): Promise<CloudflareCustomHostname>;
+  /** Registers the hostname; adopts it (`registered: false`) when it was registered a moment ago. */
+  create(hostname: string): Promise<{ custom: CloudflareCustomHostname; registered: boolean }>;
   /** Asks Cloudflare to validate again after its validation window ran out. */
   restartValidation(id: string): Promise<CloudflareCustomHostname>;
+  /** Deletes the hostname and its certificate; false when it was already gone. */
+  remove(id: string): Promise<boolean>;
 };
 
 export type CustomDomainDns = {
@@ -61,6 +71,7 @@ export class CloudflareCustomHostnameError extends Error {
 // The same SSL settings the old booking-api used: HTTP validation through the hotel's CNAME.
 const SSL_SETTINGS = { method: "http", type: "dv", settings: { min_tls_version: "1.2" } };
 const HOSTNAME_ALREADY_EXISTS = 1406;
+const HOSTNAME_NOT_FOUND = 1436;
 // Cloudflare is removing or refusing the hostname: Vayada has to look at it.
 const REJECTED_STATUSES = new Set(["blocked", "deleted", "pending_deletion"]);
 
@@ -101,20 +112,21 @@ export function createCloudflareCustomHostnames(config: {
     find,
     async create(hostname) {
       try {
-        return toCustomHostname(
+        const custom = toCustomHostname(
           await call(base, {
             method: "POST",
             body: JSON.stringify({ hostname, ssl: SSL_SETTINGS }),
           }),
         );
+        return { custom, registered: true };
       } catch (error) {
-        // Created by a concurrent check a moment ago.
+        // Created a moment ago, most likely by a concurrent check, which records it itself.
         if (
           error instanceof CloudflareCustomHostnameError &&
           error.codes.includes(HOSTNAME_ALREADY_EXISTS)
         ) {
           const created = await find(hostname);
-          if (created) return created;
+          if (created) return { custom: created, registered: false };
         }
         throw error;
       }
@@ -126,6 +138,21 @@ export function createCloudflareCustomHostnames(config: {
           body: JSON.stringify({ ssl: SSL_SETTINGS }),
         }),
       );
+    },
+    async remove(id) {
+      try {
+        await call(`${base}/${encodeURIComponent(id)}`, { method: "DELETE" });
+        return true;
+      } catch (error) {
+        // Already deleted (by hand, or by a concurrent removal).
+        if (
+          error instanceof CloudflareCustomHostnameError &&
+          (error.httpStatus === 404 || error.codes.includes(HOSTNAME_NOT_FOUND))
+        ) {
+          return false;
+        }
+        throw error;
+      }
     },
   };
 }
@@ -225,7 +252,16 @@ export function createBookingCustomDomainVerifier(dependencies: {
         };
       }
 
-      let custom = found ?? (await dependencies.cloudflare.create(hostname));
+      // Only a hostname this check registered is recorded, and only such a one is ever deleted: the
+      // old booking-api's hostnames share the zone, and its pages may still use them.
+      let registeredHostnameId: string | undefined;
+      let custom = found;
+      if (!custom) {
+        const created = await dependencies.cloudflare.create(hostname);
+        custom = created.custom;
+        if (created.registered && custom.id) registeredHostnameId = custom.id;
+      }
+      const registered = registeredHostnameId ? { registeredHostnameId } : {};
       if (REJECTED_STATUSES.has(custom.status) || REJECTED_STATUSES.has(custom.sslStatus)) {
         return {
           status: "failed",
@@ -235,6 +271,7 @@ export function createBookingCustomDomainVerifier(dependencies: {
             `Cloudflare rejected ${hostname} (${REJECTED_STATUSES.has(custom.status) ? custom.status : `certificate ${custom.sslStatus}`}).`,
             ...custom.errors,
           ],
+          ...registered,
         };
       }
       // The record is right now: validation that timed out, expired or lost the CNAME starts over.
@@ -246,13 +283,17 @@ export function createBookingCustomDomainVerifier(dependencies: {
       ) {
         custom = await dependencies.cloudflare.restartValidation(custom.id);
       }
-      if (active(custom)) return ready(hostname, propertyId, recordHost);
+      if (active(custom)) return { ...ready(hostname, propertyId, recordHost), ...registered };
       return {
         status: "pending",
         issue: { code: "certificate_pending", foundTarget: null },
         recordHost,
         errors: custom.errors,
+        ...registered,
       };
+    },
+    async release(hostnameId) {
+      return (await dependencies.cloudflare.remove(hostnameId)) ? "deleted" : "absent";
     },
   };
 }

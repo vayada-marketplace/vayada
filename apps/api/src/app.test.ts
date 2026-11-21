@@ -40,7 +40,7 @@ import { readFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import Fastify from "fastify";
 import type { QueryResult, QueryResultRow } from "pg";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "./app.js";
 import { agencyPropertyAccessRepository } from "./testAuthorization.js";
@@ -91,9 +91,10 @@ import {
   type BookingCustomDomainPool,
   type BookingCustomDomainRepository,
 } from "./routes/bookingCustomDomain.js";
-import type {
-  BookingCustomDomainCheckResult,
-  BookingCustomDomainVerifier,
+import {
+  CloudflareCustomHostnameError,
+  type BookingCustomDomainCheckResult,
+  type BookingCustomDomainVerifier,
 } from "./domains/bookingCustomDomainVerification.js";
 import { type BookingHotelChangeRequestRepository } from "./routes/bookingWebPublic.js";
 import { unusedBookingWebCheckoutAdapter } from "./routes/bookingWebPublic.fixtures.js";
@@ -809,6 +810,7 @@ const bookingCustomDomainRepository: BookingCustomDomainRepository = {
       verificationStatus: "verified",
       verifiedAt: "2026-06-22T10:00:00.000Z",
       updatedAt: "2026-06-22T10:00:00.000Z",
+      cloudflareHostnameId: "ch-alpenrose",
     };
   },
   async upsertForPropertyId(propertyId, domain) {
@@ -824,6 +826,9 @@ const bookingCustomDomainRepository: BookingCustomDomainRepository = {
   },
   async deleteForPropertyId(propertyId) {
     return propertyId === "f6853000-0000-0000-0000-000000000001";
+  },
+  async isHostnameSaved() {
+    return false;
   },
   async projectPublicProfile() {},
   async recordCheckResult(propertyId, domain, status) {
@@ -5443,6 +5448,10 @@ describe("vayada-api", () => {
             operationCount += 1;
             return candidateRepository.recordCheckResult(propertyId, domain, status);
           },
+          async isHostnameSaved(hostname) {
+            operationCount += 1;
+            return candidateRepository.isHostnameSaved(hostname);
+          },
           async projectPublicProfile(propertyId) {
             operationCount += 1;
             return candidateRepository.projectPublicProfile(propertyId);
@@ -5450,6 +5459,10 @@ describe("vayada-api", () => {
         },
         customDomainVerifier: {
           async check() {
+            operationCount += 1;
+            throw new Error("sensitive verifier call");
+          },
+          async release() {
             operationCount += 1;
             throw new Error("sensitive verifier call");
           },
@@ -5642,6 +5655,9 @@ describe("vayada-api", () => {
           checked.push(hostname);
           return result;
         },
+        async release() {
+          throw new Error("A check never removes a hostname.");
+        },
       };
       return { checked, verifier };
     };
@@ -5775,6 +5791,9 @@ describe("vayada-api", () => {
           async check(): Promise<BookingCustomDomainCheckResult> {
             throw new Error("Cloudflare custom hostname request failed (HTTP 403).");
           },
+          async release() {
+            return "absent" as const;
+          },
         },
       ]) {
         let writes = 0;
@@ -5903,6 +5922,145 @@ describe("vayada-api", () => {
       expect(response.body).toMatchObject({
         status: "pending",
         verificationIssue: { code: "routing_pending", foundTarget: null },
+      });
+    });
+
+    describe("a removed domain's Cloudflare hostname (VAY-2580)", () => {
+      const released: string[] = [];
+      let releaseFails = false;
+      const verifier: BookingCustomDomainVerifier = {
+        async check(): Promise<BookingCustomDomainCheckResult> {
+          return {
+            status: "pending",
+            issue: { code: "certificate_pending", foundTarget: null },
+            recordHost: "book",
+            errors: [],
+            registeredHostnameId: "ch-new",
+          };
+        },
+        async release(hostnameId) {
+          released.push(hostnameId);
+          if (releaseFails) throw new CloudflareCustomHostnameError(403, [9109]);
+          return "deleted";
+        },
+      };
+      const save = (domain: string) =>
+        injectJson(app!, {
+          method: "PUT",
+          url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+          headers: { authorization: "Bearer valid-token" },
+          payload: { domain },
+        });
+      const remove = () =>
+        app!.inject({
+          method: "DELETE",
+          url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+          headers: { authorization: "Bearer valid-token" },
+        });
+      const withRepository = (overrides: Partial<BookingCustomDomainRepository>) =>
+        buildAuthenticatedApp({
+          customDomainRepository: { ...bookingCustomDomainRepository, ...overrides },
+          customDomainVerifier: verifier,
+        });
+      beforeEach(() => {
+        released.length = 0;
+        releaseFails = false;
+      });
+
+      it("is deleted when the domain is removed or replaced, and a failure doesn't block it", async () => {
+        const deletes: string[] = [];
+        app = withRepository({
+          async deleteForPropertyId(propertyId) {
+            deletes.push(propertyId);
+            return true;
+          },
+        });
+
+        // Saving the same domain again keeps its hostname.
+        expect((await save("Book.Alpenrose.Example")).statusCode).toBe(200);
+        expect(released).toEqual([]);
+
+        expect((await save("booking.alpenrose.example")).statusCode).toBe(200);
+        expect(released).toEqual(["ch-alpenrose"]);
+
+        expect((await remove()).statusCode).toBe(204);
+        expect(released).toEqual(["ch-alpenrose", "ch-alpenrose"]);
+
+        // Cloudflare refusing doesn't undo or block the removal.
+        releaseFails = true;
+        expect((await remove()).statusCode).toBe(204);
+        expect(deletes).toEqual([pmsPropertyId, pmsPropertyId]);
+        expect(released).toHaveLength(3);
+      });
+
+      it("stays when next-api didn't register it, when the domain is saved again, or when nothing was removed", async () => {
+        const cases: Array<Partial<BookingCustomDomainRepository>> = [
+          // The old booking-api's hostname (no id on the row), e.g. www.booking.aetherhilltopvillas.com.
+          {
+            async findByPropertyId(propertyId) {
+              const state = await bookingCustomDomainRepository.findByPropertyId(propertyId);
+              return state && { ...state, cloudflareHostnameId: null };
+            },
+          },
+          // Another tab or hotel saved the same domain meanwhile; its check may use the hostname.
+          {
+            async isHostnameSaved() {
+              return true;
+            },
+          },
+          // Nothing removed: not found, the write failed, or the domain couldn't be read first.
+          {
+            async deleteForPropertyId() {
+              return false;
+            },
+            async upsertForPropertyId() {
+              throw new Error("write failed");
+            },
+          },
+          {
+            async deleteForPropertyId() {
+              throw new Error("write failed");
+            },
+            async upsertForPropertyId() {
+              return null;
+            },
+          },
+          {
+            async findByPropertyId() {
+              throw new Error("read failed");
+            },
+          },
+        ];
+        for (const overrides of cases) {
+          app = withRepository(overrides);
+          await save("booking.alpenrose.example");
+          await remove();
+          await app.close();
+          app = null;
+        }
+        expect(released).toEqual([]);
+      });
+
+      it("is recorded when a check registers it, and deleted if the domain went meanwhile", async () => {
+        const recorded: Array<[string, string | undefined]> = [];
+        let replacedMeanwhile = false;
+        app = withRepository({
+          ...pendingDomain,
+          async recordCheckResult(propertyId, domain, status, registeredHostnameId) {
+            recorded.push([status, registeredHostnameId]);
+            if (replacedMeanwhile) return null;
+            return bookingCustomDomainRepository.recordCheckResult(propertyId, domain, status);
+          },
+        });
+
+        // Still pending, but the new hostname is stored on the row.
+        expect((await checkDomain()).statusCode).toBe(200);
+        expect(recorded).toEqual([["pending", "ch-new"]]);
+        expect(released).toEqual([]);
+
+        replacedMeanwhile = true;
+        expect((await checkDomain()).statusCode).toBe(200);
+        expect(released).toEqual(["ch-new"]);
       });
     });
   });
