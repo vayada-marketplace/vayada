@@ -79,6 +79,8 @@ export interface FinancePaymentSettingsPatchResponse {
   contractVersion: string;
   propertyId: string;
   paymentSettings: Record<string, unknown>;
+  /** VAY-2583: the booking-page rates as the saved settings leave them (absent before go-live). */
+  rateCoverage?: RatePaymentCoverage;
   commandMeta: {
     commandId: string;
     idempotencyKey: string;

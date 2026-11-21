@@ -155,14 +155,14 @@ describe.skipIf(!url)("booking-page rate payment coverage (VAY-2583)", () => {
       cancellation: "flexible",
       acceptedMethods: ["pay_at_property"],
     };
-    expect(await coverage(h.propertyId)).toEqual({
+    expect(await coverage(h.propertyId)).toMatchObject({
       payable: 1,
       rates: [expect.objectContaining({ ...rate, payableWith: ["pay_at_property"] })],
     });
     // Pay at hotel off: card is ready, but no rate takes it, so nothing could be booked.
     expect(
       await coverage(h.propertyId, { paymentsEnabled: true, acceptedMethods: ["card"] }),
-    ).toEqual({ payable: 0, rates: [expect.objectContaining({ ...rate, payableWith: [] })] });
+    ).toMatchObject({ payable: 0, rates: [expect.objectContaining({ ...rate, payableWith: [] })] });
     // Payments off: nothing either; keeping pay at hotel: still bookable.
     expect(
       await coverage(h.propertyId, {

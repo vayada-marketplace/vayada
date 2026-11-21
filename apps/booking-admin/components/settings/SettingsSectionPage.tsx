@@ -1244,7 +1244,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
             body: settingsBody(keepPlainPayAtHotel),
           });
         let keptPlain = keepPlain;
-        let response: FinancePaymentSettingsResponse;
+        let response: Awaited<ReturnType<typeof updateFinancePaymentSettings>>;
         try {
           response = await save(keptPlain);
         } catch (error) {
