@@ -19,6 +19,7 @@ export type SharedHotelSetupGuardDecision =
       redirectPath: null;
     }
   | {
+      /** Leaves the product for redirectPath: setup, or this app's property picker (VAY-2585). */
       action: "redirect_to_setup";
       propertyId: string | null;
       redirectPath: string;
@@ -51,10 +52,18 @@ export function resolveSharedHotelSetupGuardDecision(
   }
 
   const propertyId = entryDecision?.propertyId ?? status.propertySelection.selectedPropertyId;
+  // The API asks for a property both when the login has none (setup creates one) and when it
+  // has several and none is chosen: then the picker, not setup (VAY-2585). The picker is this app's
+  // own page, so it ignores setupBaseUrl.
+  const choosesProperty =
+    entryDecision?.reasonCode === "property_selection_required" &&
+    status.propertySelection.state === "multiple_properties";
   return {
     action: "redirect_to_setup",
     propertyId,
-    redirectPath: buildSharedHotelSetupRedirectPath({ ...input, propertyId }),
+    redirectPath: choosesProperty
+      ? "/choose-property"
+      : buildSharedHotelSetupRedirectPath({ ...input, propertyId }),
     entryDecision: entryDecision?.decision ?? "not_evaluated",
     reasonCode: entryDecision?.reasonCode ?? null,
   };

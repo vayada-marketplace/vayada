@@ -120,6 +120,37 @@ describe("resolveSharedHotelSetupGuardDecision", () => {
     });
   });
 
+  it("sends a login with several properties and none chosen to its picker, not setup (VAY-2585)", () => {
+    expect(
+      resolveSharedHotelSetupGuardDecision(propertySelectionStatus(["property-1", "property-2"]), {
+        entryProduct: "pms",
+        returnProduct: "pms",
+        returnTo: "/dashboard",
+        setupBaseUrl: "https://marketplace.localhost:1355",
+      }),
+    ).toEqual({
+      action: "redirect_to_setup",
+      propertyId: null,
+      redirectPath: "/choose-property",
+      entryDecision: "setup_required",
+      reasonCode: "property_selection_required",
+    });
+  });
+
+  it("still sends a login with no property to setup", () => {
+    expect(
+      resolveSharedHotelSetupGuardDecision(propertySelectionStatus([]), {
+        entryProduct: "pms",
+        returnProduct: "pms",
+        returnTo: "/dashboard",
+      }),
+    ).toMatchObject({
+      action: "redirect_to_setup",
+      redirectPath: "/setup?entryProduct=pms&returnProduct=pms&returnTo=%2Fdashboard",
+      reasonCode: "property_selection_required",
+    });
+  });
+
   it("drops unsafe return paths from the canonical redirect", () => {
     const status = baseStatus();
 
@@ -182,7 +213,53 @@ describe("resolveSharedHotelSetupGuard", () => {
     expect(getStatus).toHaveBeenNthCalledWith(2, { entryProduct: "booking", propertyId: null });
     expect(onInvalidPropertyId).toHaveBeenCalledOnce();
   });
+
+  it("drops a stale property and shows the picker to a login with several properties (VAY-2585)", async () => {
+    const getStatus = vi
+      .fn()
+      .mockRejectedValueOnce({ status: 403, data: { code: "missing_property_resource_link" } })
+      .mockResolvedValueOnce(propertySelectionStatus(["property-1", "property-2"]));
+    const onInvalidPropertyId = vi.fn();
+
+    await expect(
+      resolveSharedHotelSetupGuard(
+        { getStatus },
+        {
+          entryProduct: "pms",
+          returnProduct: "pms",
+          returnTo: "/dashboard",
+          propertyId: "stale-property",
+          onInvalidPropertyId,
+        },
+      ),
+    ).resolves.toMatchObject({ action: "redirect_to_setup", redirectPath: "/choose-property" });
+    expect(getStatus).toHaveBeenCalledTimes(2);
+    expect(onInvalidPropertyId).toHaveBeenCalledOnce();
+  });
 });
+
+/** What the API answers when no property is chosen: setup, whether the login has none or several. */
+function propertySelectionStatus(propertyIds: string[]): AdaptiveHotelSetupStatus {
+  const status = baseStatus();
+  status.propertySelection = {
+    state: propertyIds.length === 0 ? "no_property" : "multiple_properties",
+    selectedPropertyId: null,
+    availableProperties: propertyIds.map((propertyId) => ({
+      propertyId,
+      publicId: propertyId,
+      displayName: propertyId,
+      locationSummary: null,
+    })),
+  };
+  status.entryDecision = {
+    requestedProduct: "pms",
+    propertyId: null,
+    decision: "setup_required",
+    destinationRouteKey: "hotel_setup",
+    reasonCode: "property_selection_required",
+  };
+  return status;
+}
 
 function baseStatus(): AdaptiveHotelSetupStatus {
   return {

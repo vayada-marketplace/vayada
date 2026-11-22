@@ -120,7 +120,65 @@ describe("resolveBookingSetupGuard", () => {
       reasonCode: "track_unavailable",
     });
   });
+
+  it("forgets a remembered property it can't open and shows a login with several properties the picker (VAY-2585)", async () => {
+    const storage = memoryStorage({ selectedSharedPropertyId: "property-removed" });
+    const api = {
+      getStatus: vi.fn(async (input: { propertyId?: string | null }) => {
+        if (input.propertyId) {
+          throw Object.assign(new Error("Missing property resource link"), {
+            status: 403,
+            data: { code: "missing_property_resource_link" },
+          });
+        }
+        return withoutChosenProperty(["property-1", "property-2"]);
+      }),
+    };
+
+    await expect(resolveBookingSetupGuard("/dashboard", api, storage)).resolves.toMatchObject({
+      action: "redirect_to_setup",
+      redirectPath: "/choose-property",
+    });
+    expect(api.getStatus).toHaveBeenCalledTimes(2);
+    expect(storage.getItem("selectedSharedPropertyId")).toBeNull();
+  });
+
+  it("still sends a login with no property to setup", async () => {
+    const api = { getStatus: vi.fn(async () => withoutChosenProperty([])) };
+
+    await expect(
+      resolveBookingSetupGuard("/dashboard", api, memoryStorage()),
+    ).resolves.toMatchObject({
+      action: "redirect_to_setup",
+      redirectPath: "/setup?entryProduct=booking&returnProduct=booking&returnTo=%2Fdashboard",
+    });
+  });
 });
+
+/** The API's answer without a chosen property: setup, whether the login has none or several. */
+function withoutChosenProperty(propertyIds: string[]): AdaptiveHotelSetupStatus {
+  return {
+    ...status({ decision: "setup_required" }),
+    propertySelection: {
+      state: propertyIds.length === 0 ? "no_property" : "multiple_properties",
+      selectedPropertyId: null,
+      availableProperties: propertyIds.map((propertyId) => ({
+        propertyId,
+        publicId: propertyId,
+        displayName: propertyId,
+        locationSummary: null,
+      })),
+    },
+    entryDecision: {
+      requestedProduct: "booking",
+      propertyId: null,
+      decision: "setup_required",
+      destinationRouteKey: "hotel_setup",
+      reasonCode: "property_selection_required",
+    },
+    setupPlan: null,
+  };
+}
 
 function status(input: {
   propertyId?: string;

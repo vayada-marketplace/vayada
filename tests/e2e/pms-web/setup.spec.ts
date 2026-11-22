@@ -308,6 +308,151 @@ test.describe("pms-web canonical setup redirect", () => {
   });
 });
 
+// VAY-2585: the browser remembers a property the login can no longer open (removed from it, or
+// deleted). The guard forgets it and asks again without a property; a login with several
+// properties then landed on setup instead of the property picker.
+test.describe("pms-web sign-in with a remembered property it can't open", () => {
+  test("shows a login with several properties the picker, and the chosen one opens", async ({
+    page,
+  }) => {
+    const handoffs = await signInWithRemovedProperty(page, [
+      { propertyId: PMS_WEB_PROPERTY_ID, displayName: "Alpenrose Munich" },
+      { propertyId: "pms_property_vienna", displayName: "Alpenrose Vienna" },
+      { propertyId: "pms_property_zurich", displayName: "Alpenrose Zurich" },
+    ]);
+
+    await expect(page).toHaveURL(/\/choose-property$/);
+    for (const name of ["Alpenrose Munich", "Alpenrose Vienna", "Alpenrose Zurich"]) {
+      await expect(page.getByRole("button", { name: new RegExp(name) })).toBeVisible();
+    }
+    expect(await rememberedProperty(page)).toEqual([null, null]);
+
+    await page.getByRole("button", { name: /Alpenrose Munich/ }).click();
+    await expect(page).toHaveURL(/\/dashboard$/);
+    expect(await rememberedProperty(page)).toEqual([PMS_WEB_PROPERTY_ID, PMS_WEB_PROPERTY_ID]);
+    expect(handoffs).toEqual([]);
+  });
+
+  test("still takes a login with one property straight into it", async ({ page }) => {
+    const handoffs = await signInWithRemovedProperty(page, [
+      { propertyId: PMS_WEB_PROPERTY_ID, displayName: "Alpenrose Munich" },
+    ]);
+
+    await expect(page).toHaveURL(/\/dashboard$/);
+    expect(await rememberedProperty(page)).toEqual([PMS_WEB_PROPERTY_ID, PMS_WEB_PROPERTY_ID]);
+    expect(handoffs).toEqual([]);
+  });
+
+  test("still sends a login with no property to setup", async ({ page }) => {
+    const handoffs = await signInWithRemovedProperty(page, []);
+
+    await expect.poll(() => page.url()).toBe(handoffDestination());
+    expect(handoffs.map((handoff) => handoff.targetPath)).toEqual([
+      canonicalSetupPath({ entryProduct: "pms", returnTo: "/dashboard" }),
+    ]);
+  });
+});
+
+const REMOVED_PROPERTY_ID = "pms_property_removed";
+
+async function signInWithRemovedProperty(
+  page: Page,
+  properties: { propertyId: string; displayName: string }[],
+) {
+  await mockPmsWebTargetRoutes(page);
+  // A browser that signed in to this hotel group before. Seeded once, so the guard's forgetting
+  // survives the full page loads after sign-in.
+  await page.addInitScript((propertyId) => {
+    if (sessionStorage.getItem("seededRemovedProperty")) return;
+    localStorage.setItem("selectedHotelId", propertyId);
+    localStorage.setItem("selectedSharedPropertyId", propertyId);
+    localStorage.setItem("selectedSharedPropertyOrganizationId", "org_pms_owner");
+    sessionStorage.setItem("seededRemovedProperty", "true");
+  }, REMOVED_PROPERTY_ID);
+  // As the API does: a removed property keeps its session resource but is answered like an
+  // unlinked one; without a property, one property is chosen for the login and several are not.
+  await page.route("**/api/hotel-setup/status**", (route) => {
+    const requested = new URL(route.request().url()).searchParams.get("propertyId");
+    if (requested === REMOVED_PROPERTY_ID) {
+      return route.fulfill({
+        status: 403,
+        json: {
+          code: "missing_property_resource_link",
+          detail: "The selected hotel group is not linked to that property.",
+        },
+      });
+    }
+    const selected = requested ?? (properties.length === 1 ? properties[0]!.propertyId : null);
+    const status = createAdaptiveHotelSetupStatusMock({
+      entryProduct: "pms",
+      organizationId: "org_pms_owner",
+      organizationDisplayName: "Alpenrose Hotel Group",
+      selectedTracks: ["hotel_operations"],
+      propertyId: selected,
+      propertyDisplayName: properties.find(({ propertyId }) => propertyId === selected)
+        ?.displayName,
+    });
+    return route.fulfill({
+      json: {
+        ...status,
+        propertySelection: {
+          state:
+            properties.length === 0
+              ? "no_property"
+              : properties.length === 1
+                ? "single_property"
+                : "multiple_properties",
+          selectedPropertyId: selected,
+          availableProperties: properties.map(({ propertyId, displayName }) => ({
+            propertyId,
+            publicId: propertyId,
+            displayName,
+            locationSummary: "Munich, DE",
+          })),
+        },
+      },
+    });
+  });
+  await page.route("**/auth/password/login", (route) =>
+    route.fulfill({
+      json: {
+        accessToken: "e2e-pms-token",
+        csrfToken: "e2e-pms-csrf-token",
+        organizationId: "org_pms_owner",
+        workosOrganizationId: "org_workos_pms_owner",
+        resources: {
+          "pms:pms_property": [
+            ...properties.map(({ propertyId }) => propertyId),
+            REMOVED_PROPERTY_ID,
+          ],
+        },
+        user: {
+          id: "user_pms_owner",
+          email: "owner@example.com",
+          name: "PMS Owner",
+          status: "active",
+          workosUserId: "workos_user_pms_owner",
+        },
+      },
+    }),
+  );
+  const handoffs = await mockSetupHandoff(page);
+
+  await page.goto("/login");
+  await waitForLoginFormHydration(page);
+  await page.getByLabel("Email address", { exact: true }).fill("owner@example.com");
+  await page.getByLabel("Password", { exact: true }).fill("test-password");
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
+  return handoffs;
+}
+
+function rememberedProperty(page: Page) {
+  return page.evaluate(() => [
+    localStorage.getItem("selectedHotelId"),
+    localStorage.getItem("selectedSharedPropertyId"),
+  ]);
+}
+
 async function mockSetupHandoff(page: Page) {
   const handoffs: { targetPath: string }[] = [];
   await page.route("**/auth/handoff/create", (route) => {
