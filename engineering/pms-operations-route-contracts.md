@@ -394,6 +394,13 @@ VAY-2373/2374 add the step-by-step check-in's data, outside `pmsOperations.ts`:
 - `POST .../reservations/:guestBookingId/mark-paid` takes an optional `settlementMethod` (`cash`,
   `manual_card`, `bank_transfer`, `other`): how staff took the money at the desk, recorded on the
   Finance payment instead of the booking's own method. Nothing is charged online.
+- Since VAY-2575, confirming a booking-page bank transfer or PayPal booking through `mark-paid`
+  needs the owner key `pms.operations.manage`. The one exception is a confirmed stay where the desk
+  took the money itself (`settlementMethod` `cash` or `manual_card`); a booking still waiting for
+  its payment needs the owner key with any method. Without it the command answers 403
+  `missing_permission` before anything is written. Pay-at-hotel bookings and a card deposit's
+  remainder stay on `pms.reservation.update` with any method. Only the account owner role holds
+  `pms.operations.manage`; staff roles, the Agency manager included, can't be given it.
 
 VAY-2420 adds guest profiles (`routes/pmsGuestProfiles.ts`, `booking.guest_profiles` and
 `booking.guest_notes`, migration 0527). A background job links every booking guest to one profile

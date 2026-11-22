@@ -32,6 +32,7 @@ export function AddonsPaymentStep({
   onChoice,
   recorded,
   settledElsewhere,
+  ownerConfirmsPayment = false,
 }: {
   booking: Booking;
   settings: CheckinSettings;
@@ -49,6 +50,9 @@ export function AddonsPaymentStep({
   recorded: string | null;
   /** Part of the balance is settled outside the desk (a channel collects it, or the booking is closed). */
   settledElsewhere: boolean;
+  /** The balance is a booking-page bank transfer or PayPal payment this member may not confirm
+   * (VAY-2575): the desk offers cash or card only, and "already paid" stays with the owner. */
+  ownerConfirmsPayment?: boolean;
 }) {
   const { t, locale } = useTranslation();
   const money = (amount: number) => formatCurrency(amount, booking.currency);
@@ -65,7 +69,9 @@ export function AddonsPaymentStep({
     (sum, offer) => sum + offer.amount * (quantities[offer.addon.id] ?? 0),
     0,
   );
-  const methods = deskMethods(settings.settlementOptions);
+  const methods = deskMethods(settings.settlementOptions).filter(
+    (method) => !ownerConfirmsPayment || method !== "bank_transfer",
+  );
   const methodLabel = (method: DeskMethod) => t(`settings.checkIn.settlement.${method}`);
   const detail = (offer: AddonOffer) => {
     const price = money(offer.addon.price);
@@ -273,7 +279,7 @@ export function AddonsPaymentStep({
                   onSelect={() => onChoice({ kind: "at_checkout" })}
                 />
               )}
-              {settings.settlementOptions.includes("already_paid") && (
+              {settings.settlementOptions.includes("already_paid") && !ownerConfirmsPayment && (
                 <ChoiceCard
                   on={choice?.kind === "already_paid"}
                   title={t("checkIn.flow.payment.alreadyPaid")}
@@ -282,6 +288,9 @@ export function AddonsPaymentStep({
                 />
               )}
             </div>
+            {ownerConfirmsPayment && (
+              <p className="text-sm text-gray-600">{t("bookings.detail.ownerConfirmsPayment")}</p>
+            )}
             {choice && (
               <p className="text-sm text-gray-600">
                 {choice.kind === "collect"

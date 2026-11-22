@@ -465,6 +465,7 @@
   "bookings.detail.depositExceedsTotal": "Die Anzahlung übersteigt den aktuellen Gesamtbetrag um {amount}.",
   "bookings.detail.paymentBeforeRelease": "Die Zahlung muss erfasst werden, bevor diese Reservierung freigegeben wird.",
   "bookings.detail.markBankTransferReceived": "Überweisung als erhalten markieren",
+  "bookings.detail.ownerConfirmsPayment": "Nur der Kontoinhaber kann diese Zahlung bestätigen.",
   "bookings.detail.markPayAtHotelReceived": "Zahlung vor Ort als eingegangen markieren",
   "bookings.detail.markRestPaid": "Rest als bezahlt markieren ({amount})",
   "bookings.detail.restDueAtHotel": "Die Anzahlung wurde bei der Buchung per Karte bezahlt. Der Rest von {amount} wird vor Ort bezahlt.",

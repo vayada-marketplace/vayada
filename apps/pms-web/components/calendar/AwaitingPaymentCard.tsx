@@ -5,6 +5,7 @@ import { ClockIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import Modal from "@/components/Modal";
 import { useTranslation } from "@/lib/i18n";
 import { AWAITING_PAYMENT_BADGE_CLASS, formatPaymentDeadline } from "@/lib/awaitingPayment";
+import { useHasPmsPermission } from "@/lib/settings/PmsAccessContext";
 import type { CalendarBooking } from "@/services/calendar";
 
 /** VAY-2348: what a click on an "awaiting payment" calendar bar shows: the payment deadline, that
@@ -24,6 +25,8 @@ export default function AwaitingPaymentCard({
   const deadline = booking.paymentDeadlineAt;
   // Until the release job runs, a passed deadline can't be marked received any more.
   const passed = !!deadline && Date.now() >= new Date(deadline).getTime();
+  // VAY-2575: only the owner key confirms a bank transfer or PayPal payment.
+  const canConfirm = useHasPmsPermission("pms.operations.manage");
   return (
     <Modal onClose={onClose} ariaLabel={name}>
       <div className="flex items-start justify-between gap-3">
@@ -65,7 +68,7 @@ export default function AwaitingPaymentCard({
         >
           {t("calendar.openBooking")}
         </Link>
-        {!passed && (
+        {!passed && canConfirm && (
           <Link
             href={`${href}?confirm=payment`}
             className="inline-flex min-h-9 items-center rounded-lg bg-primary-600 px-3 text-sm font-medium text-white hover:bg-primary-700"
@@ -78,6 +81,9 @@ export default function AwaitingPaymentCard({
           </Link>
         )}
       </div>
+      {!passed && !canConfirm && (
+        <p className="mt-2 text-xs text-gray-500">{t("bookings.detail.ownerConfirmsPayment")}</p>
+      )}
     </Modal>
   );
 }

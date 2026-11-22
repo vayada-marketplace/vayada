@@ -24,6 +24,7 @@ import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { localizeBuiltInCheckinStep } from "@/lib/settings/checklistCopy";
 import { DEFAULT_CHECKIN_SETTINGS, withGuestDataFields } from "@/lib/settings/checkinSettings";
 import { useGuestStayTimes } from "@/lib/settings/useGuestStayTimes";
+import { useHasPmsPermission } from "@/lib/settings/PmsAccessContext";
 import { guestDataSettingsService } from "@/services/guests";
 import { bookingChannelLabel, isChannelBooking } from "@/lib/bookings/channelLabel";
 import { guestProfileEdit, withBookerEdit } from "@/lib/bookings/guestProfileEdit";
@@ -44,7 +45,9 @@ import {
 import { addonOffer } from "@/lib/checkin/addons";
 import {
   deskChargeChanges,
+  deskChoiceLeft,
   deskPayableBalance,
+  ownerConfirmsBalance,
   settlementMethodFor,
   type DeskAddon,
   type DeskCharge,
@@ -128,6 +131,8 @@ export default function CheckInPage() {
   const [checklistValues, setChecklistValues] = useState<Record<string, string | boolean>>({});
   // The check-out time guests see on the booking page, for staff who may read it (VAY-2455).
   const checkOutTime = useGuestStayTimes()?.checkOutTime ?? null;
+  // VAY-2575: only the owner key confirms a booking-page bank transfer or PayPal payment.
+  const holdsOwnerKey = useHasPmsPermission("pms.operations.manage");
   // The open guest form's save, and whether it holds details it couldn't save (VAY-2418).
   const guestFlush = useRef<(() => Promise<boolean>) | null>(null);
   const [guestUnsaved, setGuestUnsaved] = useState(false);
@@ -414,6 +419,8 @@ export default function CheckInPage() {
   const { due } = bookingAmountDue(booking);
   const payable = deskPayableBalance(booking) !== null;
   const bookingDue = payable ? due : 0;
+  // The desk still takes cash or card on such a booking; a transfer or "already paid" is the owner's.
+  const ownerConfirmsPayment = ownerConfirmsBalance(booking, bookingDue, holdsOwnerKey);
   const unpaidAdded = addedItems.filter(
     (item) =>
       !charges.some(
@@ -483,7 +490,11 @@ export default function CheckInPage() {
   const arrivalReady = !request || !settings.confirmSpecialRequest || requestRead;
   const guestsReady = settings.allowIncompleteGuests || registration.incomplete.length === 0;
   const paymentReady =
-    recorded !== null || dueNow <= 0 || !settings.paymentChoiceRequired || choice !== null;
+    recorded !== null ||
+    dueNow <= 0 ||
+    !settings.paymentChoiceRequired ||
+    choice !== null ||
+    !deskChoiceLeft(settings.settlementOptions, ownerConfirmsPayment);
   const today = getPropertyToday();
   const arrivalLabel =
     booking.checkIn <= today
@@ -988,6 +999,7 @@ export default function CheckInPage() {
                 onChoice={setChoice}
                 recorded={recorded}
                 settledElsewhere={!payable && due > 0}
+                ownerConfirmsPayment={ownerConfirmsPayment}
               />
             </CheckinStepCard>
           )}
