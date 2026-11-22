@@ -42,6 +42,33 @@ export function deskPayableBalance(
   return null;
 }
 
+/** VAY-2575: the balance of a booking-page bank transfer or PayPal booking is the owner key's to
+ * confirm (the API refuses everyone else); the desk still takes cash or card for it. */
+export function ownerConfirmsBalance(
+  booking: Pick<Booking, "paymentMethod">,
+  bookingDue: number,
+  holdsOwnerKey: boolean,
+): boolean {
+  return (
+    bookingDue > 0 &&
+    !holdsOwnerKey &&
+    (booking.paymentMethod === "bank_transfer" || booking.paymentMethod === "paypal")
+  );
+}
+
+/** Whether the desk has a way left to settle now. When the owner confirms the balance, only cash,
+ * card or "at check-out" are the desk's; with none of them offered, check-in goes on and the balance
+ * stays open for the owner. */
+export function deskChoiceLeft(
+  options: CheckinSettlementOption[],
+  ownerConfirms: boolean,
+): boolean {
+  if (!ownerConfirms) return true;
+  return options.some(
+    (option) => option === "card" || option === "cash" || option === "at_checkout",
+  );
+}
+
 /** An add-on added at the desk, one desk charge each (VAY-2373 D3). */
 export interface DeskAddon {
   addonId: string;

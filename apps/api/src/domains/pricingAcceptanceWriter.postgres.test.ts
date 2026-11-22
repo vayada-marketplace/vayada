@@ -4444,6 +4444,8 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
         reason: "Payment received",
         requestedAt: new Date().toISOString(),
       },
+      // VAY-2575: the owner confirms PayPal payments.
+      allowRemoteConfirmation: true,
     });
     const deadline = (bookingId: string, interval: string) =>
       fixture.observer.query(
@@ -4589,7 +4591,21 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
           requestedAt: new Date().toISOString(),
         },
       };
-      await expect(pms.markBookingPaid(command)).resolves.toMatchObject({ ok: true });
+      // VAY-2575: without the owner key the desk can't confirm it, and nothing is written.
+      await expect(
+        pms.markBookingPaid({ ...command, allowRemoteConfirmation: false }),
+      ).resolves.toMatchObject({ ok: false, statusCode: 403, code: "missing_permission" });
+      const untouched = await fixture.observer.query(
+        `SELECT b.payment_status,
+           (SELECT count(*)::int FROM finance.payments p WHERE p.guest_booking_id=b.id) AS payments
+         FROM booking.guest_bookings b WHERE b.id=$1`,
+        [pending.bookingId],
+      );
+      expect(untouched.rows[0]).toEqual({ payment_status: "unpaid", payments: 0 });
+      // The owner's confirmation with the same key goes through.
+      await expect(
+        pms.markBookingPaid({ ...command, allowRemoteConfirmation: true }),
+      ).resolves.toMatchObject({ ok: true });
       await fixture.observer.query(
         "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
         [fixture.propertyId],
@@ -4689,6 +4705,7 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
             reason: "Bank transfer received",
             requestedAt: new Date().toISOString(),
           },
+          allowRemoteConfirmation: true,
         }),
       state: async () =>
         (

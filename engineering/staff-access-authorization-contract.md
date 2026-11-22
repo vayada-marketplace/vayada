@@ -114,7 +114,9 @@ and phone.
 
 Money and setup keep the owner-only keys `pms.operations.manage` and
 `pms.finance.manage`: waiving a checkout charge that is already paid (it undoes
-money taken), refunds, price corrections, a paid manual booking, a cancel that keeps
+money taken), confirming a booking-page bank transfer or PayPal payment (the money
+reaches the hotel away from the desk; cash or card the desk took itself for a
+confirmed stay stays desk work, VAY-2575), refunds, price corrections, a paid manual booking, a cancel that keeps
 charges, room types, rooms and room status (VAY-2557), prices, the operating
 calendar and auto-open, check-in and check-out template edits, the channel manager
 (including the no-show report to Booking.com) and the property profile.

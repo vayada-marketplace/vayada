@@ -1067,7 +1067,10 @@ describe("target PMS operations command repository", () => {
       throw new Error(`Unhandled SQL: ${text}`);
     });
 
-    await expect(repository.markBookingPaid(baseBookingLifecycleCommand())).resolves.toMatchObject({
+    // The owner confirms, so only the deadline refuses it.
+    await expect(
+      repository.markBookingPaid(baseBookingLifecycleCommand({ allowRemoteConfirmation: true })),
+    ).resolves.toMatchObject({
       ok: false,
       code: "invalid_status_transition",
     });
@@ -1075,6 +1078,91 @@ describe("target PMS operations command repository", () => {
       false,
     );
   });
+
+  // VAY-2575: confirming a booking-page bank transfer or PayPal payment needs the owner key.
+  it.each([
+    { paymentMethod: "paypal", lifecycleStatus: "pending_payment", settlementMethod: undefined },
+    { paymentMethod: "paypal", lifecycleStatus: "pending_payment", settlementMethod: "other" },
+    { paymentMethod: "bank_transfer", lifecycleStatus: "confirmed", settlementMethod: undefined },
+    { paymentMethod: "bank_transfer", lifecycleStatus: "confirmed", settlementMethod: "other" },
+    {
+      paymentMethod: "bank_transfer",
+      lifecycleStatus: "confirmed",
+      settlementMethod: "bank_transfer",
+    },
+    // A booking still waiting for its payment is the owner's, even when the desk says cash or card.
+    { paymentMethod: "paypal", lifecycleStatus: "pending_payment", settlementMethod: "cash" },
+    {
+      paymentMethod: "bank_transfer",
+      lifecycleStatus: "pending_payment",
+      settlementMethod: "manual_card",
+      targetSource: "pricing_quote_draft",
+    },
+    {
+      paymentMethod: "paypal",
+      lifecycleStatus: "pending_payment",
+      settlementMethod: "cash",
+      targetSource: "pricing_quote_draft",
+    },
+  ] as const)(
+    "refuses a desk confirmation of a $lifecycleStatus $paymentMethod payment (settlement $settlementMethod) before any write",
+    async (row) => {
+      const { paymentMethod, lifecycleStatus, settlementMethod } = row;
+      const targetSource = "targetSource" in row ? row.targetSource : undefined;
+      const fingerprints: unknown[] = [];
+      const { client, repository } = createRepository((text, values) => {
+        if (text === "BEGIN" || text === "ROLLBACK") return ok();
+        if (text.includes("FROM platform.idempotency_keys")) return ok();
+        if (text.includes("INSERT INTO platform.idempotency_keys")) {
+          fingerprints.push(values[2]);
+          return ok([{ id: "idem" }], 1);
+        }
+        if (text.includes("FROM booking.guest_bookings booking") && text.includes("FOR UPDATE")) {
+          return ok([
+            {
+              guestBookingId,
+              propertyId,
+              publicReference: "BK-REMOTE-001",
+              paymentMethod,
+              lifecycleStatus,
+              paymentStatus: "unpaid",
+              totalAmount: "600.00",
+              balanceAmount: "600.00",
+              currency: "EUR",
+              pendingExpiresAt: null,
+              acceptedPaymentDeadlineAt: null,
+              bookingMetadata: targetSource ? { targetSource } : {},
+            },
+          ]);
+        }
+        throw new Error(`Unexpected SQL after the refusal: ${text}`);
+      });
+      const command = (allowRemoteConfirmation: boolean) =>
+        baseBookingLifecycleCommand({
+          ...(settlementMethod ? { settlementMethod } : {}),
+          allowRemoteConfirmation,
+        });
+
+      await expect(repository.markBookingPaid(command(false))).resolves.toEqual({
+        ok: false,
+        statusCode: 403,
+        code: "missing_permission",
+        message: `Only the account owner can confirm a ${
+          paymentMethod === "paypal" ? "PayPal payment" : "bank transfer"
+        }.`,
+      });
+      expect(client.calls.some(({ text }) => text.includes("INSERT INTO finance.payments"))).toBe(
+        false,
+      );
+      expect(client.calls.some(({ text }) => text.includes("WITH booking_update AS"))).toBe(false);
+      expect(client.calls.some(({ text }) => text === "ROLLBACK")).toBe(true);
+
+      // Who may confirm is not part of the request: the owner's retry with the same key matches.
+      await repository.markBookingPaid(command(true)).catch(() => undefined);
+      expect(fingerprints).toHaveLength(2);
+      expect(fingerprints[0]).toBe(fingerprints[1]);
+    },
+  );
 
   it.each([
     { paymentMethod: "paypal", lifecycleStatus: "pending_payment" },
@@ -1117,17 +1205,20 @@ describe("target PMS operations command repository", () => {
   });
 
   it.each([
+    // VAY-2575: `owner` rows confirm with the owner key; the others are the desk without it.
     {
       method: "paypal",
       lifecycleStatus: "pending_payment",
       acceptanceMode: "instant",
       automaticallyAccepted: true,
+      owner: true,
     },
     {
       method: "paypal",
       lifecycleStatus: "pending_payment",
       acceptanceMode: "request",
       automaticallyAccepted: false,
+      owner: true,
     },
     {
       method: "pay_at_property",
@@ -1140,16 +1231,40 @@ describe("target PMS operations command repository", () => {
       lifecycleStatus: "pending_payment",
       acceptanceMode: undefined,
       automaticallyAccepted: false,
+      owner: true,
     },
     {
       method: "paypal",
       lifecycleStatus: "pending_payment",
       acceptanceMode: "legacy",
       automaticallyAccepted: false,
+      owner: true,
+    },
+    {
+      method: "bank_transfer",
+      lifecycleStatus: "confirmed",
+      acceptanceMode: "instant",
+      automaticallyAccepted: true,
+      owner: true,
     },
     // VAY-2373 (D2): staff record how they took it at the desk; Finance gets that method.
     {
       method: "pay_at_property",
+      lifecycleStatus: "confirmed",
+      acceptanceMode: "instant",
+      automaticallyAccepted: true,
+      settlementMethod: "cash",
+    },
+    // VAY-2575: money the desk took itself for a confirmed bank-transfer stay needs no owner key.
+    {
+      method: "bank_transfer",
+      lifecycleStatus: "confirmed",
+      acceptanceMode: "instant",
+      automaticallyAccepted: true,
+      settlementMethod: "manual_card",
+    },
+    {
+      method: "bank_transfer",
       lifecycleStatus: "confirmed",
       acceptanceMode: "instant",
       automaticallyAccepted: true,
@@ -1160,6 +1275,7 @@ describe("target PMS operations command repository", () => {
     async (row) => {
       const { method, lifecycleStatus, acceptanceMode, automaticallyAccepted } = row;
       const settlementMethod = "settlementMethod" in row ? row.settlementMethod : undefined;
+      const owner = "owner" in row && row.owner;
       const { client, repository } = createRepository((text, values) => {
         if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") return ok();
         if (text.includes("FROM platform.idempotency_keys")) return ok();
@@ -1299,6 +1415,7 @@ describe("target PMS operations command repository", () => {
           commandId: "cmd-booking-paid-001",
           idempotencyKey: "pms-booking-paid-001",
           ...(settlementMethod ? { settlementMethod } : {}),
+          allowRemoteConfirmation: owner,
         }),
       );
 
@@ -1322,13 +1439,14 @@ describe("target PMS operations command repository", () => {
       expect(client.calls.some(({ text }) => text.includes("WITH booking_scope AS"))).toBe(
         method === "paypal",
       );
+      // bookingEmails: a received payment confirms to the guest, except money due at the hotel.
       expect(
         client.calls.some(
           (call) =>
             call.text.includes("INSERT INTO platform.jobs") &&
             call.values.includes("email.booking-final-confirmation"),
         ),
-      ).toBe(method === "paypal");
+      ).toBe(method !== "pay_at_property");
     },
   );
 

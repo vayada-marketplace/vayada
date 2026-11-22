@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { Booking, BookingAddon } from "@/services/bookings";
 import type { CheckinRoom } from "./rooms";
 import { addonOffer } from "./addons";
-import { deskChargeChanges, deskMethods, deskPayableBalance, settlementMethodFor } from "./payment";
+import {
+  deskChargeChanges,
+  deskChoiceLeft,
+  deskMethods,
+  deskPayableBalance,
+  ownerConfirmsBalance,
+  settlementMethodFor,
+} from "./payment";
 
 const addon = (perPerson: boolean, perNight: boolean, price = 10): BookingAddon => ({
   id: `addon-${perPerson}-${perNight}`,
@@ -74,5 +81,23 @@ describe("check-in add-ons and payment (VAY-2373)", () => {
     const changes = deskChargeChanges([breakfast, scooter], created);
     expect(changes.create).toEqual([scooter]);
     expect(changes.waive.map((charge) => charge.chargeId)).toEqual(["c2"]);
+  });
+
+  it("leaves a booking-page transfer's balance to the owner key (VAY-2575)", () => {
+    const transfer = { paymentMethod: "bank_transfer" } as Booking;
+    expect(ownerConfirmsBalance(transfer, 400, false)).toBe(true);
+    expect(ownerConfirmsBalance(transfer, 400, true)).toBe(false);
+    expect(ownerConfirmsBalance(transfer, 0, false)).toBe(false);
+    expect(ownerConfirmsBalance({ paymentMethod: "pay_at_property" } as Booking, 400, false)).toBe(
+      false,
+    );
+    expect(ownerConfirmsBalance({ paymentMethod: "card" } as Booking, 400, false)).toBe(false);
+  });
+
+  it("lets check-in go on when the owner confirms and the desk has no way left (VAY-2575)", () => {
+    expect(deskChoiceLeft(["bank_transfer", "already_paid"], true)).toBe(false);
+    expect(deskChoiceLeft(["bank_transfer", "already_paid"], false)).toBe(true);
+    expect(deskChoiceLeft(["bank_transfer", "cash"], true)).toBe(true);
+    expect(deskChoiceLeft(["already_paid", "at_checkout"], true)).toBe(true);
   });
 });

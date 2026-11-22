@@ -467,6 +467,7 @@
   "bookings.detail.depositExceedsTotal": "Deposit exceeds current total by {amount}.",
   "bookings.detail.paymentBeforeRelease": "Payment must be recorded before this reservation is released.",
   "bookings.detail.markBankTransferReceived": "Mark transfer received",
+  "bookings.detail.ownerConfirmsPayment": "Only the account owner can confirm this payment.",
   "bookings.detail.markPayAtHotelReceived": "Mark pay-at-hotel payment received",
   "bookings.detail.markRestPaid": "Mark the rest paid ({amount})",
   "bookings.detail.restDueAtHotel": "The deposit was paid by card when booking. The rest, {amount}, is paid at the hotel.",

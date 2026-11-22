@@ -235,6 +235,41 @@ describe("PMS daily work for staff roles (VAY-2498)", () => {
     expect(allowed).toEqual([false, false, true]);
   });
 
+  it("lets only the owner key confirm a bank transfer or PayPal payment (VAY-2575)", async () => {
+    const allowed: unknown[] = [];
+    const statuses: unknown[] = [];
+    for (const actor of [frontDesk, agencyManager, owner]) {
+      app = await testApp(
+        actor,
+        { calls: [] },
+        {},
+        {
+          async markBookingPaid(command: { allowRemoteConfirmation?: boolean }) {
+            allowed.push(command.allowRemoteConfirmation);
+            return {
+              ok: false,
+              statusCode: 403,
+              code: "missing_permission",
+              message: "Only the account owner can confirm a bank transfer.",
+            };
+          },
+        },
+      );
+      const response = await app.inject({
+        method: "POST",
+        url: `${reservation}/mark-paid`,
+        headers: { authorization: "Bearer valid", "content-type": "application/json" },
+        payload: JSON.stringify({ commandId: "cmd-paid", idempotencyKey: "cmd-paid" }),
+      });
+      statuses.push([response.statusCode, response.json().category]);
+      await app.close();
+      app = undefined;
+    }
+    expect(allowed).toEqual([false, false, true]);
+    // The command's refusal reaches the client as a permission error.
+    expect(statuses).toEqual(Array(3).fill([403, "authorization"]));
+  });
+
   it.each(ownerOnly)("$method $url stays with the account admin", async (route) => {
     const allStaffKeys: Actor = {
       roleKey: "hotel_manager",
