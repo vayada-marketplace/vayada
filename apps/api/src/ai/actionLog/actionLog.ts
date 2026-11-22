@@ -95,6 +95,10 @@ const MAX_ARGUMENT_BYTES = 8_000;
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
+/** True for an id the log stores as a UUID column (anything else there is a caller mistake). */
+export const isLoggableUuid = (value: unknown): value is string =>
+  typeof value === "string" && UUID.test(value);
+
 function keepArgument(kind: AiArgumentKind, value: unknown): unknown {
   if (value === null || value === undefined) return null;
   const ok = (fits: boolean, kept: unknown = value) => (fits ? kept : "[invalid]");

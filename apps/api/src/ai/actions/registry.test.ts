@@ -3,6 +3,7 @@ import type { RequestContext } from "@vayada/backend-auth";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
+import { memoryAiActionLog } from "../actionLog/memoryActionLog.fixtures.js";
 import { calendarDays } from "./calendarDays.js";
 import { ActionDefinitionError, defineRouteAction } from "./defineRouteAction.js";
 import {
@@ -168,29 +169,54 @@ describe("the registry", () => {
 
   it("checks input before anything runs: the calendar range is capped at 62 nights", async () => {
     const context = {
+      actor: { internalUserId: crypto.randomUUID() },
+      selectedOrganization: { organizationId: crypto.randomUUID() },
       membership: { permissions: ["pms.calendar.read"] },
-      delegation: { channel: "in_app", toolCallId: "t" },
+      linkedResources: [],
+      audit: { requestId: crypto.randomUUID(), correlationId: "t", source: "agent" },
+      delegation: { channel: "in_app", conversationId: crypto.randomUUID(), toolCallId: "t" },
     } as unknown as RequestContext;
     const app = {} as never; // never reached
     const propertyId = crypto.randomUUID();
-    const tooLong = await runRouteAction(app, context, calendarDays, {
-      propertyId,
-      from: "2026-12-01",
-      to: "2027-02-15",
-    });
+    const options = { log: memoryAiActionLog(), client: "test" };
+    const tooLong = await runRouteAction(
+      app,
+      context,
+      calendarDays,
+      {
+        propertyId,
+        from: "2026-12-01",
+        to: "2027-02-15",
+      },
+      options,
+    );
     expect(tooLong).toMatchObject({ ok: false, error: { code: "invalid_input" } });
-    const backwards = await runRouteAction(app, context, calendarDays, {
-      propertyId,
-      from: "2026-12-05",
-      to: "2026-12-01",
-    });
+    const backwards = await runRouteAction(
+      app,
+      context,
+      calendarDays,
+      {
+        propertyId,
+        from: "2026-12-05",
+        to: "2026-12-01",
+      },
+      options,
+    );
     expect(backwards).toMatchObject({ ok: false, error: { code: "invalid_input" } });
-    const smuggled = await runRouteAction(app, context, calendarDays, {
-      propertyId,
-      from: "2026-12-01",
-      to: "2026-12-02",
-      hotelId: propertyId,
-    });
+    const smuggled = await runRouteAction(
+      app,
+      context,
+      calendarDays,
+      {
+        propertyId,
+        from: "2026-12-01",
+        to: "2026-12-02",
+        hotelId: propertyId,
+      },
+      options,
+    );
     expect(smuggled).toMatchObject({ ok: false, error: { code: "invalid_input" } });
+    // Each refused call still wrote its one row (VAY-2508).
+    expect(options.log.rows.map((row) => row.outcome)).toEqual(["invalid", "invalid", "invalid"]);
   });
 });
