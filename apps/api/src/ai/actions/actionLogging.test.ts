@@ -53,11 +53,17 @@ describe.each(ACTION_FIXTURES.map((fixture) => [fixture.action, fixture] as cons
   (key, fixture: ActionFixture) => {
     const action = AI_ACTIONS.find((candidate) => candidate.key === key)!;
     const granted: PermissionKey[] = [action.permission, ...(fixture.alsoNeeds ?? [])];
+    /** The request id each route request saw, as its own audit rows would carry it. */
+    const seenRequestIds: string[] = [];
     const appWith = (permissions: readonly PermissionKey[]) => {
       const app = buildApp({
         logger: false,
         ...fixture.appOptions(),
         auth: worldAuthorization(permissions).auth,
+      });
+      app.addHook("preHandler", async (request) => {
+        const seen = (request as { authContext?: RequestContext }).authContext;
+        if (seen) seenRequestIds.push(seen.audit.requestId);
       });
       apps.push(app);
       return app;
@@ -68,8 +74,11 @@ describe.each(ACTION_FIXTURES.map((fixture) => [fixture.action, fixture] as cons
 
     it("a call that succeeds: who, where, which action, its ids and dates, the join keys", async () => {
       const context = await worldContext(WORLD.OWNER, WORLD.ORG_A, granted);
+      seenRequestIds.length = 0;
       const { result, row } = await logged(app, context, action, input);
       expect(result).toMatchObject({ ok: true });
+      // The route's own audit rows carry the same two ids: the request id it saw, the tool call.
+      expect(seenRequestIds).toEqual([row.requestId]);
       expect(row).toMatchObject({
         organizationId: WORLD.ORG_A,
         userId: WORLD.OWNER,
@@ -87,8 +96,6 @@ describe.each(ACTION_FIXTURES.map((fixture) => [fixture.action, fixture] as cons
         outcome: "ok",
         errorCode: null,
         sensitive: action.tier === "R2" || action.tier === "R2-finance",
-        // The route's own audit rows carry the same two ids.
-        requestId: context.audit.requestId,
         correlationId: context.delegation!.toolCallId,
       });
       expect(row.arguments).toEqual(keptArguments(action, input));
@@ -118,6 +125,25 @@ describe.each(ACTION_FIXTURES.map((fixture) => [fixture.action, fixture] as cons
         propertyId: null,
       });
       expect(row.arguments).toMatchObject({ _omitted: 1 });
+    });
+
+    it("whatever the AI sends, the call answers and writes its one row", async () => {
+      const hostile = { toString: 1, valueOf: 1 };
+      const fields = [...new Set([...Object.keys(input), "propertyId"])];
+      const sent: unknown[] = [
+        ...fields.map((field) => ({ ...input, [field]: hostile })),
+        ...fields.map((field) => ({ ...input, [field]: [hostile] })),
+        hostile,
+        [hostile],
+        GUEST_TEXT,
+        42,
+        null,
+      ];
+      for (const raw of sent) {
+        const context = await worldContext(WORLD.OWNER, WORLD.ORG_A, granted);
+        const { result, row } = await logged(app, context, action, raw);
+        expect(row.outcome).toBe(result.ok ? "ok" : "invalid");
+      }
     });
 
     it("free text sent in any of its fields is stored as [invalid]", async () => {

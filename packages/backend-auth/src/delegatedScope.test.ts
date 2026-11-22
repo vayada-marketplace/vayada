@@ -276,6 +276,22 @@ describe("delegated scope (VAY-2506)", () => {
     expect([first.correlationId, second.correlationId]).toEqual(["tool_call_u_1", "tool_call_u_1"]);
   });
 
+  it("takes the request id the action runner minted, and only a UUID (VAY-2508)", async () => {
+    const instance = await buildTestApp();
+    const context = await mint("u_1");
+    const requestId = "25080000-0000-4000-8000-0000000000f1";
+    const call = (id: string) =>
+      injectAsDelegate(instance, {
+        context,
+        method: "GET",
+        routeUrl: "/api/test/whoami",
+        url: "/api/test/whoami",
+        requestId: id,
+      });
+    expect((await (await call(requestId)).json()).requestId).toBe(requestId);
+    await expect(call("tool_call_u_1")).rejects.toThrow(DelegationRefusedError);
+  });
+
   it("is never visible to an outside request, before, during or after", async () => {
     const instance = await buildTestApp();
     await instance.listen({ port: 0, host: "127.0.0.1" });

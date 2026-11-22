@@ -5,6 +5,11 @@
 // Every call writes exactly one AI action log row (VAY-2508), whatever its outcome: who, where,
 // which action, the ids, dates and enum values of its input (never free text, never its output)
 // and the keys that join it to the route's own audit rows.
+//
+// Whatever the AI sends comes back as a result. It throws only for the caller's own mistakes,
+// before anything runs: a context that is not delegated, or an entry the log would refuse.
+import { randomUUID } from "node:crypto";
+
 import {
   delegatedPropertyIds,
   DelegationRefusedError,
@@ -84,9 +89,11 @@ export async function runRouteAction(
   }
   const parsed = action.input.safeParse(rawInput ?? {});
   const propertyId = parsed.success ? propertyInScope(context, parsed.data) : null;
+  // The id the route sees as its request id, so the row joins the route's own audit rows.
+  const requestId = randomUUID();
   let ran = false;
   try {
-    return await withAiActionLog(
+    return await withAiActionLog<ActionResult>(
       options.log,
       {
         organizationId: context.selectedOrganization.organizationId,
@@ -104,7 +111,7 @@ export async function runRouteAction(
         argumentKinds: argumentKindsOf(action.input),
         sensitive: action.tier === "R2" || action.tier === "R2-finance",
         // What the route's own audit rows carry: this request id and the tool call's id.
-        requestId: context.audit.requestId,
+        requestId,
         correlationId: context.audit.correlationId ?? null,
         externalCallId: options.externalCallId ?? null,
         model: options.model ?? null,
@@ -113,7 +120,7 @@ export async function runRouteAction(
         ran = true;
         let result: ActionResult;
         try {
-          result = await runChecked(app, context, action, surface, parsed);
+          result = await runChecked(app, context, action, surface, parsed, requestId);
         } catch {
           result = failure("failed", "The request did not succeed.");
         }
@@ -160,6 +167,7 @@ async function runChecked(
   action: RouteAction,
   surface: AiSurface,
   parsed: ParsedInput,
+  requestId: string,
 ): Promise<ActionResult> {
   if (!action.surfaces.includes(surface)) {
     return failure("not_allowed", "This action is not available here.");
@@ -190,6 +198,7 @@ async function runChecked(
       routeUrl: action.routeUrl,
       params,
       query,
+      requestId,
     });
   } catch (error) {
     if (error instanceof DelegationRefusedError) {

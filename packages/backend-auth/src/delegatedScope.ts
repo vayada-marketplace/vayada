@@ -49,7 +49,15 @@ export type DelegatedInject = {
   routeUrl: string;
   /** Concrete URL to inject, e.g. "/api/pms/properties/<uuid>/rooms?from=2026-11-20". */
   url: string;
+  /**
+   * The request id the route sees: a fresh UUID for this one request. The AI action runner mints
+   * it, so its log row and the route's own audit rows carry the same id (VAY-2508). Without it,
+   * a new one is made here.
+   */
+  requestId?: string;
 };
+
+const REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const storage = new AsyncLocalStorage<DelegatedScope>();
 
@@ -77,12 +85,15 @@ export async function injectAsDelegate(
   if (!input.url.startsWith("/") || input.url.startsWith("//")) {
     throw new DelegationRefusedError("the URL must be a path on this server");
   }
+  if (input.requestId !== undefined && !REQUEST_ID.test(input.requestId)) {
+    throw new DelegationRefusedError("a request id must be a UUID");
+  }
   // Boot outside the scope, so no boot hook or timer ever holds it (review L3).
   await app.ready();
   // Each request gets its own copy with its own request id: the route may change its copy, and
   // tool-call ids are not unique enough to be request ids (review M2).
   const context: RequestContext = structuredClone(input.context);
-  context.audit.requestId = randomUUID();
+  context.audit.requestId = input.requestId ?? randomUUID();
   const nonce = randomBytes(24);
   const scope: DelegatedScope = {
     context,

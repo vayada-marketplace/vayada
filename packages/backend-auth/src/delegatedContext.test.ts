@@ -372,6 +372,16 @@ describe("resolveDelegatedContext (VAY-2506)", () => {
       },
     ],
     [
+      "a tool-call id longer than the AI action log keeps",
+      {
+        delegation: {
+          channel: "in_app" as const,
+          conversationId: CONVERSATION,
+          toolCallId: "c".repeat(129),
+        },
+      },
+    ],
+    [
       "MCP without a connection",
       { delegation: { channel: "mcp" as const, conversationId: CONVERSATION, toolCallId: "c" } },
     ],

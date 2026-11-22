@@ -99,20 +99,20 @@ const sha256 = (value: string) => createHash("sha256").update(value).digest("hex
 export const isLoggableUuid = (value: unknown): value is string =>
   typeof value === "string" && UUID.test(value);
 
+// Never throws, whatever the AI sent: a value is only converted once its type is checked.
 function keepArgument(kind: AiArgumentKind, value: unknown): unknown {
   if (value === null || value === undefined) return null;
-  const ok = (fits: boolean, kept: unknown = value) => (fits ? kept : "[invalid]");
+  const ok = (fits: boolean) => (fits ? value : "[invalid]");
   if (typeof kind === "object") return ok(typeof value === "string" && kind.oneOf.includes(value));
   switch (kind) {
     case "id":
-      return ok(typeof value === "string" && UUID.test(value), String(value).toLowerCase());
+      return typeof value === "string" && UUID.test(value) ? value.toLowerCase() : "[invalid]";
     case "ids":
-      return ok(
-        Array.isArray(value) &&
-          value.length <= MAX_IDS &&
-          value.every((item) => typeof item === "string" && UUID.test(item)),
-        Array.isArray(value) ? value.map((item) => String(item).toLowerCase()) : null,
-      );
+      return Array.isArray(value) &&
+        value.length <= MAX_IDS &&
+        value.every((item) => typeof item === "string" && UUID.test(item))
+        ? value.map((item: string) => item.toLowerCase())
+        : "[invalid]";
     case "date":
       return ok(typeof value === "string" && DATE.test(value));
     case "number":

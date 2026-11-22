@@ -26,7 +26,8 @@ import {
 } from "./types.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const TOOL_CALL_ID = /^[A-Za-z0-9_.:-]{1,200}$/;
+// At most 128: the AI action log keeps a correlation id that long as it is (VAY-2508).
+const TOOL_CALL_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 const LOCALE = /^[a-z]{2}(-[A-Z]{2})?$/;
 const CURRENCY = /^[A-Z]{3}$/;
 
