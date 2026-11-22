@@ -63,6 +63,7 @@ export type PmsCalendarAutoOpenRead = {
     code:
       | "operating_calendar_not_configured"
       | "operating_calendar_room_bindings_stale"
+      | "operating_calendar_time_zone_stale"
       | "physical_room_labels_unverified";
   } | null;
 };
@@ -303,6 +304,23 @@ export async function updatePmsCalendarAutoOpen(
   );
   pendingCalendarAutoOpenCommands.delete(fingerprint);
   return response;
+}
+
+/**
+ * VAY-2582: saves the calendar again with the hotel's own settings after its rooms or time zone
+ * changed, and prepares its nights again ("current" when nothing was behind).
+ */
+export async function refreshPmsOperatingCalendar(): Promise<{
+  outcome: "refreshed" | "current";
+}> {
+  const propertyId = await resolveSelectedPmsPropertyId("saving the calendar again");
+  // An empty JSON object: the client always sends a JSON content type, and the API refuses one
+  // without a body.
+  return pmsOperationsClient.post<{ outcome: "refreshed" | "current" }>(
+    propertyEndpoint(propertyId, "operating-calendar/refresh"),
+    {},
+    pmsOperationsRequestOptions,
+  );
 }
 
 export async function listPmsRoomShuffleHistory(

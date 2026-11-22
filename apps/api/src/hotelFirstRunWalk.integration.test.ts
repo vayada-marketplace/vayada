@@ -57,6 +57,10 @@ import { createPmsRoomFactsVocabularyValidationPort } from "./domains/pmsRoomFac
 import { createPgPmsRoomPublicationReadModel } from "./domains/pmsRoomPublicationReadModel.js";
 import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
 import { createReplacementPricingPublicationReader } from "./domains/replacementPricingPublicationReader.js";
+import {
+  refreshPmsOperatingCalendarRooms,
+  type PmsOperatingCalendarRoomRefreshPorts,
+} from "./domains/pmsOperatingCalendarRoomRefresh.js";
 import { createHotelSetupOrdinaryLoginFixture } from "./hotelSetupOrdinaryLogin.fixture.js";
 import { createPgHotelMediaResolutionPort } from "./platform/hotelMediaResolver.js";
 import {
@@ -471,6 +475,15 @@ describe.skipIf(!url)(
           profiles,
           designRepository,
           operatingCalendar,
+          // PMS Settings › Calendar's "Save calendar again", composed as in server.ts (VAY-2582).
+          calendarRefresh: {
+            pool,
+            calendarRead: operatingCalendar,
+            rooms: { roomFacts, roomCapacity: roomFacts },
+            preview: calendar.routes.impactPreviewPort,
+            calendar: calendar.routes.commandPort,
+            materialization: calendar.routes.materializationPort,
+          } as PmsOperatingCalendarRoomRefreshPorts,
         },
         email: `owner-${suffix}@example.test`,
         context,
@@ -788,6 +801,53 @@ describe.skipIf(!url)(
           placed.profileRevision,
         );
         expect(blockerCodes(await h.readiness())).toEqual([]);
+
+        // VAY-2582: the owner confirms a time zone move. Its calendar falls behind and the page can't
+        // sell...
+        const payMethods = async () =>
+          (await h.ports.financeRead.getPaymentReadiness(scope))?.methods
+            .filter((method) => method.selected)
+            .map((method) => method.method);
+        const paidBefore = await payMethods();
+        const zone = await api.inject({
+          method: "PUT",
+          url: `/api/hotel-setup/properties/${h.propertyId}/profile`,
+          headers: { "idempotency-key": `zone-${h.propertyId}` },
+          payload: {
+            expectedProfileRevision: placed.profileRevision,
+            patch: { location: { timezone: "Asia/Kolkata" } },
+            confirmLocationChange: true,
+          },
+        });
+        expect(zone.statusCode, zone.body).toBe(200);
+        expect(blockerCodes(await h.readiness())).toContainEqual(
+          expect.stringMatching(/operating_calendar_source_stale$/),
+        );
+        const refresher = {
+          organizationId: h.organizationId,
+          propertyId: h.propertyId,
+          userId: h.actor.userId,
+          requestId: `calendar-refresh-${h.propertyId}`,
+          correlationId: null,
+        };
+        // ...a room change or the hourly repair never takes a new time zone...
+        expect(await refreshPmsOperatingCalendarRooms(h.ports.calendarRefresh, refresher)).toEqual({
+          outcome: "not_room_change",
+          reason: "property_profile_revision_conflict",
+        });
+        // ..."Save calendar again" does, with the hotel's own calendar settings: the page sells again,
+        // and how guests pay is untouched (the first run switched on pay at property for Aether).
+        expect(
+          await refreshPmsOperatingCalendarRooms(h.ports.calendarRefresh, refresher, {
+            acceptTimeZone: true,
+          }),
+        ).toMatchObject({ outcome: "refreshed", savedCalendar: true });
+        expect(
+          (await h.ports.operatingCalendar.getCurrentOperatingCalendarConfiguration(h.propertyId))
+            ?.configuration.sourceInputs.propertyTimeZone,
+        ).toBe("Asia/Kolkata");
+        expect(blockerCodes(await h.readiness())).toEqual([]);
+        expect(await payMethods()).toEqual(paidBefore);
 
         // Two saves a moment apart (General saves the profile, then the settings): the second
         // refresh meets the first one's publication, waits for it and still lands.

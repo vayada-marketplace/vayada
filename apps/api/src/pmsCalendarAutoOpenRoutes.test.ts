@@ -14,7 +14,10 @@ import {
 import Fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { registerPmsCalendarAutoOpenRoutes } from "./routes/pmsCalendarAutoOpen.js";
+import {
+  registerPmsCalendarAutoOpenRoutes,
+  type PmsCalendarAutoOpenRoutesOptions,
+} from "./routes/pmsCalendarAutoOpen.js";
 
 const propertyId = "14340000-0000-4000-8000-000000000001";
 const otherPropertyId = "14340000-0000-4000-8000-000000000002";
@@ -224,6 +227,71 @@ describe("PMS calendar auto-open routes", () => {
     }
   });
 
+  it("saves the calendar again as the signed-in person, and says why it couldn't (VAY-2582)", async () => {
+    const refreshCalendar = vi.fn<NonNullable<PmsCalendarAutoOpenRoutesOptions["refreshCalendar"]>>(
+      async () => ({ outcome: "refreshed", calendarRevision: 7, savedCalendar: true }),
+    );
+    const test = await testApp({}, success(), null, setting(0, false), refreshCalendar);
+    app = test.app;
+    // As PMS sends it: a JSON content type with an empty object (an empty JSON body is refused).
+    const post = (requestHeaders = headers()) =>
+      test.app.inject({
+        method: "POST",
+        url: `/properties/${propertyId}/operating-calendar/refresh`,
+        headers: { ...requestHeaders, "content-type": "application/json" },
+        payload: {},
+      });
+
+    expect(await post()).toMatchObject({ statusCode: 200 });
+    expect((await post()).json()).toEqual({ outcome: "refreshed", calendarRevision: 7 });
+    expect(refreshCalendar).toHaveBeenCalledWith({
+      organizationId,
+      propertyId,
+      userId: actorUserId,
+      requestId: "request-1",
+      correlationId: "correlation-1",
+    });
+    const answers: Array<[unknown, number, unknown]> = [
+      [{ outcome: "current" }, 200, { outcome: "current" }],
+      [{ outcome: "no_inventory" }, 409, { code: "operating_calendar_not_configured" }],
+      [
+        { outcome: "not_room_change", reason: "room_capacity_protected" },
+        409,
+        { code: "calendar_refresh_needs_review", reason: "room_capacity_protected" },
+      ],
+      [
+        { outcome: "failed", step: "save", error: { code: "secret detail" } },
+        409,
+        { code: "calendar_refresh_failed", step: "save" },
+      ],
+    ];
+    for (const [result, status, body] of answers) {
+      refreshCalendar.mockResolvedValueOnce(result as never);
+      const response = await post();
+      expect([response.statusCode, response.json()]).toEqual([status, body]);
+    }
+    refreshCalendar.mockRejectedValueOnce(new Error("pool exhausted"));
+    expect((await post()).json()).toEqual({ code: "calendar_refresh_unavailable" });
+
+    // Only a manager of the hotel's PMS: the same access as auto-open.
+    const calls = refreshCalendar.mock.calls.length;
+    const denied = await testApp(
+      { permissions: [] },
+      success(),
+      null,
+      setting(0, false),
+      refreshCalendar,
+    );
+    const refused = await denied.app.inject({
+      method: "POST",
+      url: `/properties/${propertyId}/operating-calendar/refresh`,
+      headers: headers(),
+    });
+    await denied.app.close();
+    expect(refused.statusCode).toBe(403);
+    expect(refreshCalendar).toHaveBeenCalledTimes(calls);
+  });
+
   it("uses the PMS operations origin allowlist for browser requests", async () => {
     const test = await testApp();
     app = test.app;
@@ -255,6 +323,7 @@ async function testApp(
   updateResult: Awaited<ReturnType<PmsCalendarAutoOpenSettingsPort["update"]>> = success(),
   setupError: PmsCalendarAutoOpenSetupError | null = null,
   contextSetting = setting(0, false),
+  refreshCalendar?: PmsCalendarAutoOpenRoutesOptions["refreshCalendar"],
 ) {
   const app = Fastify({ logger: false });
   const updates: UpdatePmsCalendarAutoOpenSetting[] = [];
@@ -292,6 +361,7 @@ async function testApp(
       },
     },
     allowedOrigins: ["https://pms.localhost"],
+    refreshCalendar,
   });
   return { app, updates, findContext };
 }

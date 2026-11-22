@@ -34,7 +34,8 @@ import { firstRunInventoryHorizon } from "./hotelFirstRunCalendar.js";
  * It changes nothing when the calendar is current; when the hotel has no calendar or
  * prepared nights yet (setup isn't done) or its calendar has ended; when a night holds more
  * bookings, blocks or limits than the rooms left; or when the calendar is behind for another
- * reason (a new time zone, a room type without rooms), which still needs setup's calendar step.
+ * reason (a room type without rooms). A new time zone is taken only when the hotel asks
+ * ("Save calendar again", VAY-2582), never by a room change or the hourly repair.
  */
 
 type Queryable = {
@@ -75,10 +76,17 @@ const ROOM_CONFLICTS: ReadonlySet<string> = new Set([
   "room_type_set_conflict",
   "room_units_revision_conflict",
 ]);
+/** VAY-2582: a changed time zone (VAY-2150 reports it as a profile revision conflict). */
+const TIME_ZONE_CONFLICT = "property_profile_revision_conflict";
 
 export async function refreshPmsOperatingCalendarRooms(
   ports: PmsOperatingCalendarRoomRefreshPorts,
   actor: PmsOperatingCalendarRoomRefreshActor,
+  /**
+   * VAY-2582: "Save calendar again" in PMS Settings › Calendar also takes the hotel's new time zone,
+   * as the person asked for it. Room changes and the hourly repair never move a calendar's time zone.
+   */
+  options: Readonly<{ acceptTimeZone?: boolean }> = {},
 ): Promise<PmsOperatingCalendarRoomRefreshResult> {
   const { propertyId } = actor;
   const current = await ports.calendarRead.getCurrentOperatingCalendarConfiguration(propertyId);
@@ -98,14 +106,21 @@ export async function refreshPmsOperatingCalendarRooms(
   if (current.sourceStatus === "current" && coverage.calendarRevision === calendarRevision) {
     return Object.freeze({ outcome: "current" });
   }
-  const year = firstRunInventoryHorizon(requestedAt, configuration.sourceInputs.propertyTimeZone);
+  const savedYear = firstRunInventoryHorizon(
+    requestedAt,
+    configuration.sourceInputs.propertyTimeZone,
+  );
+  let year = savedYear;
   // Opening dates again after the calendar ended is the owner's choice (auto-open or setup).
   if (coverage.through < year.from) {
     return Object.freeze({ outcome: "not_room_change", reason: "calendar_ended" });
   }
 
   if (current.sourceStatus === "stale") {
-    const other = current.sourceConflicts.find(({ code }) => !ROOM_CONFLICTS.has(code));
+    const other = current.sourceConflicts.find(
+      ({ code }) =>
+        !ROOM_CONFLICTS.has(code) && !(options.acceptTimeZone && code === TIME_ZONE_CONFLICT),
+    );
     if (other) return Object.freeze({ outcome: "not_room_change", reason: other.code });
     const roomSet = current.sourceConflicts.find(
       (conflict): conflict is Extract<typeof conflict, { code: "room_type_set_conflict" }> =>
@@ -185,6 +200,11 @@ export async function refreshPmsOperatingCalendarRooms(
     if (!saved.ok) return Object.freeze({ outcome: "failed", step: "save", error: saved.error });
     calendarRevision = saved.response.configuration.calendarRevision;
     savedCalendar = true;
+    // A new time zone starts the nights at today in that time zone.
+    year = firstRunInventoryHorizon(
+      requestedAt,
+      saved.response.configuration.sourceInputs.propertyTimeZone,
+    );
   } else {
     // A calendar saved in setup whose nights were never prepared: only while every night still
     // fits its room type's rooms.
@@ -203,20 +223,24 @@ export async function refreshPmsOperatingCalendarRooms(
     }
   }
 
-  const horizon = {
-    from: year.from,
-    through: coverage.through < year.through ? coverage.through : year.through,
-  };
-  const materialized = await ports.materialization.materializeInventory({
-    organizationId: actor.organizationId,
-    propertyId,
-    configurationSource: createPmsOperatingCalendarSourceRevision(propertyId, calendarRevision),
-    expectedMaterializedRevision: calendarRevision,
-    horizon,
-    // Per attempt, so a failure isn't replayed once its cause is fixed.
-    idempotencyKey: `pms.calendar-room-refresh.inventory.${randomUUID()}`,
-    audit,
-  });
+  const through = coverage.through < year.through ? coverage.through : year.through;
+  const materialize = (from: string) =>
+    ports.materialization.materializeInventory({
+      organizationId: actor.organizationId,
+      propertyId,
+      configurationSource: createPmsOperatingCalendarSourceRevision(propertyId, calendarRevision),
+      expectedMaterializedRevision: calendarRevision,
+      horizon: { from, through },
+      // Per attempt, so a failure isn't replayed once its cause is fixed.
+      idempotencyKey: `pms.calendar-room-refresh.inventory.${randomUUID()}`,
+      audit,
+    });
+  let materialized = await materialize(year.from);
+  // VAY-2582: a time zone moved west starts a date before the old one. A hotel whose nights began
+  // on the old date (set up that day) has none for it, which preparing can't fill in front of
+  // existing nights: its nights start at the old date instead (the new first one opens tomorrow).
+  if (!materialized.ok && year.from < savedYear.from)
+    materialized = await materialize(savedYear.from);
   if (!materialized.ok) {
     return Object.freeze({ outcome: "failed", step: "inventory", error: materialized.error });
   }

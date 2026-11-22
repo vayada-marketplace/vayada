@@ -420,6 +420,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   pmsRoomAssignmentSettings?: PmsRoomAssignmentSettingsPort;
   pmsRoomAssignmentHistory?: PmsRoomAssignmentOptimizationHistoryPort;
   pmsCalendarAutoOpenSettings?: PmsCalendarAutoOpenSettingsPort;
+  /** VAY-2582: PMS Settings › Calendar's "Save calendar again". */
+  pmsOperatingCalendarRefresh?: import("./routes/pmsCalendarAutoOpen.js").PmsCalendarAutoOpenRoutesOptions["refreshCalendar"];
   pmsRoomPublication?: PmsRoomPublicationRoutesOptions;
   replacementPricing?: ReplacementPricingRoutesOptions;
   channexOfferPreview?: ChannexOfferPreviewRoutesOptions;
@@ -981,6 +983,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       settings: options.pmsCalendarAutoOpenSettings,
       propertyAccessRepository: options.auth.propertyAccessRepository,
       allowedOrigins: options.pmsOperationsAllowedOrigins,
+      refreshCalendar: options.pmsOperatingCalendarRefresh,
     });
   }
   if (options.pmsRoomPublication) {

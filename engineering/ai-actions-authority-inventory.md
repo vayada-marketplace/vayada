@@ -528,7 +528,7 @@ Gate shorthand used in the tables:
 | GET    | `/api/finance/properties/:propertyId/financials/exports/:exportId`                       | [`financeFolios.ts:235`](../apps/api/src/routes/financeFolios.ts#L235)               | `pms.finance.read` ([`financeFolios.ts:139`](../apps/api/src/routes/financeFolios.ts#L139))                                      |
 | GET    | `/api/pms/properties/:propertyId/reservations/:guestBookingId/confirmation-email/:jobId` | [`pmsConfirmationEmails.ts:57`](../apps/api/src/routes/pmsConfirmationEmails.ts#L57) | `pms.reservation.update`, owner/operator/front_desk (pmsConfirmationEmails.ts:29-36)                                             |
 | GET    | `/api/pms/properties/:propertyId/messaging/threads/:threadId`                            | [`pmsOperations.ts:2381`](../apps/api/src/routes/pmsOperations.ts#L2381)             | PMS(`pms.inbox.read`) ([`:2387-2391`](../apps/api/src/routes/pmsOperations.ts#L2387))                                            |
-| GET    | `/api/pms/properties/:propertyId/calendar-auto-open`                                     | [`pmsCalendarAutoOpen.ts:51`](../apps/api/src/routes/pmsCalendarAutoOpen.ts#L51)     | `pms.operations.manage`, owner/operator ([`pmsCalendarAutoOpen.ts:178-197`](../apps/api/src/routes/pmsCalendarAutoOpen.ts#L178)) |
+| GET    | `/api/pms/properties/:propertyId/calendar-auto-open`                                     | [`pmsCalendarAutoOpen.ts:109`](../apps/api/src/routes/pmsCalendarAutoOpen.ts#L109)   | `pms.operations.manage`, owner/operator ([`pmsCalendarAutoOpen.ts:236-255`](../apps/api/src/routes/pmsCalendarAutoOpen.ts#L236)) |
 
 #### F20. Owner-only and in-app-only, later and on demand
 
