@@ -10,6 +10,7 @@ import type { LightMyRequestResponse } from "fastify";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { buildApp } from "../../app.js";
+import { memoryAiActionLog } from "../actionLog/memoryActionLog.fixtures.js";
 import { runDelegatedRead } from "../delegatedRead.js";
 import { ACTION_FIXTURES, type ActionFixture } from "./actionFixtures.fixtures.js";
 import { FORBIDDEN, WORLD, worldAuthorization, worldContext } from "./actionTestWorld.fixtures.js";
@@ -18,6 +19,8 @@ import { AI_ACTIONS } from "./registry.js";
 import { runRouteAction } from "./runRouteAction.js";
 
 const apps: ReturnType<typeof buildApp>[] = [];
+/** Every runner call writes its log row (VAY-2508); actionLogging.test.ts checks the rows. */
+const LOGGED = { log: memoryAiActionLog(), client: "safety_tests" };
 afterAll(async () => {
   await Promise.all(apps.map((app) => app.close()));
 });
@@ -124,6 +127,7 @@ describe.each(ACTION_FIXTURES.map((fixture) => [fixture.action, fixture] as cons
         await as(WORLD.OWNER, WORLD.ORG_A),
         action,
         fixture.input(WORLD.P1),
+        LOGGED,
       );
       expect(result).toMatchObject({ ok: true });
       expect(JSON.stringify(result)).not.toContain(FORBIDDEN);
@@ -133,7 +137,7 @@ describe.each(ACTION_FIXTURES.map((fixture) => [fixture.action, fixture] as cons
 
     it.each(action.surfaces)("runs on its %s surface", async (surface) => {
       const context = await worldContext(WORLD.OWNER, WORLD.ORG_A, granted, surface);
-      const result = await runRouteAction(app, context, action, fixture.input(WORLD.P1));
+      const result = await runRouteAction(app, context, action, fixture.input(WORLD.P1), LOGGED);
       expect(result).toMatchObject({ ok: true });
     });
 
@@ -172,26 +176,32 @@ describe.each(ACTION_FIXTURES.map((fixture) => [fixture.action, fixture] as cons
           url: urlFor(action, fixture, WORLD.P1),
         }),
       );
-      const result = await runRouteAction(appWithout, context, action, fixture.input(WORLD.P1));
+      const result = await runRouteAction(
+        appWithout,
+        context,
+        action,
+        fixture.input(WORLD.P1),
+        LOGGED,
+      );
       expect(result).toMatchObject({ ok: false, error: { code: "not_allowed" } });
     });
 
     it("answers an assigned-only member for their property only", async () => {
       const member = await as(WORLD.MEMBER, WORLD.ORG_A);
-      const own = await runRouteAction(app, member, action, fixture.input(WORLD.P1));
+      const own = await runRouteAction(app, member, action, fixture.input(WORLD.P1), LOGGED);
       expect(own).toMatchObject({ ok: true });
       if (!hasProperty) {
         expect(fixture.propertyIdsIn!((own as { data: unknown }).data)).toEqual([WORLD.P1]);
         return;
       }
-      const other = await runRouteAction(app, member, action, fixture.input(WORLD.P2));
+      const other = await runRouteAction(app, member, action, fixture.input(WORLD.P2), LOGGED);
       expect(other).toMatchObject({ ok: false, error: { code: "not_allowed" } });
       expectRouteRefusal(await raw(WORLD.MEMBER, WORLD.ORG_A, WORLD.P2));
     });
 
     it("never answers for another hotel account", async () => {
       const outsider = await as(WORLD.OTHER, WORLD.ORG_B);
-      const result = await runRouteAction(app, outsider, action, fixture.input(WORLD.P1));
+      const result = await runRouteAction(app, outsider, action, fixture.input(WORLD.P1), LOGGED);
       if (!hasProperty) {
         expect(result).toMatchObject({ ok: true });
         expect(fixture.propertyIdsIn!((result as { data: unknown }).data)).toEqual([WORLD.P3]);

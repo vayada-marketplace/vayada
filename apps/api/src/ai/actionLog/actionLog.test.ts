@@ -122,6 +122,23 @@ describe("redactArguments", () => {
     });
   });
 
+  it("never throws on what a model sends: objects that can not become text are [invalid]", () => {
+    const hostile = { toString: 1, valueOf: 1 };
+    const kinds = { id: "id", ids: "ids", on: "date", s: { oneOf: ["a"] } } as const;
+    expect(
+      redactArguments({ id: hostile, ids: [hostile], on: hostile, s: hostile }, kinds),
+    ).toEqual({ id: "[invalid]", ids: "[invalid]", on: "[invalid]", s: "[invalid]" });
+    expect(() =>
+      toAiToolCallRow({
+        ...base,
+        arguments: { id: hostile },
+        argumentKinds: kinds,
+        outcome: "invalid",
+        latencyMs: 1,
+      }),
+    ).not.toThrow();
+  });
+
   it("never keeps guest data, wherever it sits (Flamur 2026-11-20: ids only)", () => {
     const args = {
       ...GUEST,

@@ -26,6 +26,8 @@ export type DelegatedReadRequest = {
   query?: Readonly<Record<string, QueryValue | readonly QueryValue[] | undefined>>;
   /** Path parameters that hold a property id; defaults to DEFAULT_PROPERTY_PARAMS. */
   propertyParams?: readonly string[];
+  /** The request id the route sees, minted by the action runner for its log row (VAY-2508). */
+  requestId?: string;
 };
 
 export type DelegatedReadResult = {
@@ -62,6 +64,7 @@ export async function runDelegatedRead(
     method: "GET",
     routeUrl: request.routeUrl,
     url: path + queryString(request.query),
+    ...(request.requestId ? { requestId: request.requestId } : {}),
   });
   const isJson = /^application\/json\b/i.test(String(response.headers["content-type"] ?? ""));
   let body: unknown = response.body;
