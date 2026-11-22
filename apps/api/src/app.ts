@@ -207,6 +207,10 @@ import {
   type PlatformAdminDashboardRoutesOptions,
 } from "./routes/platform/admin/dashboard/bookingCompatible.js";
 import {
+  registerPlatformAiBudgetRoutes,
+  type PlatformAiBudgetRoutesOptions,
+} from "./routes/platform/admin/aiBudgets.js";
+import {
   registerPlatformPropertyLifecycleRoutes,
   type PlatformPropertyLifecycleRoutesOptions,
 } from "./routes/platform/admin/propertyLifecycle.js";
@@ -488,6 +492,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   platformPropertyLifecycle?: PlatformPropertyLifecycleRoutesOptions;
   hotelPropertyDeletion?: HotelPropertyDeletionRoutesOptions;
   platformPropertySlug?: PlatformPropertySlugRoutesOptions;
+  /** VAY-2504: vayada staff set each hotel account's monthly AI budget. */
+  platformAiBudgets?: PlatformAiBudgetRoutesOptions;
   identityPrivacyAllowedOrigins?: string[];
   bookingWebCheckoutAdapter?: BookingWebCheckoutAdapter;
   bookingWebAttributionSink?: BookingWebAttributionSink;
@@ -1276,6 +1282,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPlatformPropertySlugRoutes, {
       prefix: "/api/platform/admin",
       ...options.platformPropertySlug,
+    });
+  }
+  if (options.platformAiBudgets) {
+    app.register(registerPlatformAiBudgetRoutes, {
+      prefix: "/api/platform/admin",
+      ...options.platformAiBudgets,
     });
   }
   if (options.platformMedia) {

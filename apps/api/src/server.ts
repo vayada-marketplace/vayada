@@ -397,6 +397,8 @@ import {
   createPgAiActivityStore,
 } from "./ai/actionLog/aiActivity.js";
 import { startAiActionLogRetentionWorker } from "./jobs/aiActionLogRetention.js";
+import { createPgAiBudgetAdmin } from "./ai/usage/budgetAdmin.js";
+import { createAiSpendAlert } from "./ai/usage/spendAlert.js";
 import {
   createPgGuestProfileLinkStore,
   startGuestProfileLinkWorker,
@@ -449,6 +451,18 @@ if (!targetDatabaseUrl) {
 const { publicHotelProfileRepository } = createPublicRuntimeRepositories(config);
 // VAY-2508: the AI action log behind GET /api/ai/activity.
 const aiActivityStore = createPgAiActivityStore({ connectionString: targetDatabaseUrl });
+// VAY-2504: vayada staff set each hotel account's monthly AI budget; the spend alert reads the
+// same ledger. A staff page and an hourly check need few connections (the pool runtime may share
+// or cap this pool).
+const aiBudgetPool = new pg.Pool({
+  connectionString: targetDatabaseUrl,
+  connectionTimeoutMillis: 5_000,
+  max: 2,
+});
+const aiBudgetAdmin = createPgAiBudgetAdmin({
+  pool: aiBudgetPool,
+  defaultMonthlyLimitMicroUsd: config.aiDefaultMonthlyBudgetMicroUsd,
+});
 
 const bookingSettingsRepository = createPgTargetBookingSettingsRepository({
   connectionString: targetDatabaseUrl,
@@ -2469,6 +2483,7 @@ const app = buildApp({
       setupRepository: sharedHotelSetupStatusRepository,
     }),
   },
+  platformAiBudgets: { admin: aiBudgetAdmin },
   platformPropertySlug: {
     command: createPropertySlugChangeCommand({
       connectionString: targetDatabaseUrl,
@@ -3225,6 +3240,40 @@ app.addHook("onClose", async () => {
   if (pricingFreshnessStart) clearTimeout(pricingFreshnessStart);
   await activePricingFreshnessCheck;
   await pricingFreshnessPool?.end();
+});
+
+// VAY-2504: one email a month when vayada's AI spend passes AI_SPEND_ALERT_USD (default $100),
+// checked a minute after start and then hourly.
+const aiSpendAlert =
+  config.backgroundWorkersEnabled && config.aiSpendAlertEmail && config.bookingEmailDelivery
+    ? createAiSpendAlert({
+        pool: aiBudgetPool,
+        to: config.aiSpendAlertEmail,
+        thresholdMicroUsd: config.aiSpendAlertThresholdMicroUsd,
+        delivery: createResendBookingEmailDelivery(config.bookingEmailDelivery),
+      })
+    : undefined;
+let activeAiSpendCheck: Promise<void> | undefined;
+const runAiSpendCheck = () => {
+  if (!aiSpendAlert || activeAiSpendCheck) return;
+  activeAiSpendCheck = aiSpendAlert()
+    .then((result) => {
+      if (result === "sent") app.log.info("AI spend alert sent");
+    })
+    .catch((error: unknown) => app.log.warn({ err: error }, "AI spend alert failed"))
+    .finally(() => {
+      activeAiSpendCheck = undefined;
+    });
+};
+const aiSpendTimer = aiSpendAlert ? setInterval(runAiSpendCheck, 60 * 60 * 1000) : undefined;
+aiSpendTimer?.unref();
+const aiSpendStart = aiSpendAlert ? setTimeout(runAiSpendCheck, 60_000) : undefined;
+aiSpendStart?.unref();
+app.addHook("onClose", async () => {
+  if (aiSpendTimer) clearInterval(aiSpendTimer);
+  if (aiSpendStart) clearTimeout(aiSpendStart);
+  await activeAiSpendCheck;
+  await aiBudgetPool.end();
 });
 
 // VAY-2304: the sweep behind the after-commit re-publish. It re-publishes every hotel whose prices
