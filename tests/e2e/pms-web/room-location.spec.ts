@@ -507,6 +507,84 @@ test.describe("pms-web room location", () => {
     expect(backend.locationWrites).toEqual([]);
   });
 
+  test("asks over the popup before a live hotel's address moves it to another country (VAY-2582)", async ({
+    page,
+  }) => {
+    await mockRoomBackend(page);
+    await mockGoogleMaps(page, { places: [] });
+    // A live hotel: the server saves a new country only once the person confirms it.
+    const profileWrites: Record<string, unknown>[] = [];
+    await page.route(`**/api/hotel-setup/properties/${PMS_WEB_PROPERTY_ID}/profile`, (route) => {
+      if (route.request().method() !== "PUT") return route.fulfill({ json: sharedPropertyProfile });
+      const write = route.request().postDataJSON() as Record<string, unknown>;
+      profileWrites.push(write);
+      if (write.confirmLocationChange === true) return route.fallback();
+      return route.fulfill({
+        status: 409,
+        json: {
+          code: "location_change_needs_confirmation",
+          detail:
+            "This changes your live hotel's country from DE to AT. Check that your currency and your channel manager still match the new country. Confirm the change to save it.",
+          changes: { countryCode: { from: "DE", to: "AT" } },
+        },
+      });
+    });
+
+    await page.goto(locationTab);
+    await page.getByRole("button", { name: "Edit property address" }).click();
+    const modal = page.getByRole("dialog", { name: "Property address" });
+    await modal.getByLabel("Street and number").fill("Getreidegasse 9");
+    await modal.getByLabel("Postal code").fill("5020");
+    await modal.getByLabel("City / region").fill("Salzburg");
+    await modal.getByLabel("Country").selectOption("AT");
+    const save = modal.getByRole("button", { name: "Save address" });
+    await save.click();
+
+    // The question shows over the popup (inside its <dialog>, so above the top layer), and answers clicks.
+    const question = page.getByRole("alertdialog", { name: "Change your hotel's country?" });
+    await expect(question).toBeVisible();
+    await expect(question.locator("dl > div")).toHaveText(["CountryGermany→toAustria"]);
+    await expect(question).toContainText(
+      "The time zone stays Europe/Berlin, so your calendar and booking page keep working. Check that your currency and channel manager still match the new country.",
+    );
+    await expect(question.getByRole("button")).toHaveText(["Keep Germany", "Change country"]);
+    await expect(question.getByRole("button", { name: "Keep Germany" })).toBeFocused();
+
+    // Escape answers the question, not the popup: the typed address stays so the person can fix it.
+    await page.keyboard.press("Escape");
+    await expect(question).toHaveCount(0);
+    await expect(modal).toBeVisible();
+    await expect(modal.getByLabel("Street and number")).toHaveValue("Getreidegasse 9");
+    await expect(modal.getByLabel("Country")).toHaveValue("AT");
+    await expect(modal.getByRole("alert")).toHaveCount(0);
+
+    await save.click();
+    await question.getByRole("button", { name: "Keep Germany" }).click();
+    await expect(question).toHaveCount(0);
+    await expect(modal).toBeVisible();
+    expect(profileWrites).toHaveLength(2);
+    expect(profileWrites.map((write) => "confirmLocationChange" in write)).toEqual([false, false]);
+
+    await save.click();
+    await question.getByRole("button", { name: "Change country" }).click();
+    await expect(modal).toHaveCount(0);
+    await expect(page.locator("main").getByText("Property address saved.")).toBeVisible();
+    expect(profileWrites).toHaveLength(3);
+    expect(profileWrites[2]).toMatchObject({
+      expectedProfileRevision: 1,
+      confirmLocationChange: true,
+      patch: {
+        location: {
+          countryCode: "AT",
+          city: "Salzburg",
+          streetAddress: "Getreidegasse 9",
+          postalCode: "5020",
+          timezone: "Europe/Berlin",
+        },
+      },
+    });
+  });
+
   test("places the property's pin from a pasted Google Maps link, the address from Google (VAY-2482)", async ({
     page,
   }, testInfo) => {

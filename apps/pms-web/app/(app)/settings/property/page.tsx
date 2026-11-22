@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { PropertyLocationChanges } from "@vayada/domain-hotels";
 import { SettingsSection } from "@vayada/settings-ui";
 import { bookingsService } from "@/services/bookings";
 import { getPmsPropertyProfile, updatePmsPropertyProfile } from "@/services/api/pmsPropertyClient";
@@ -8,6 +9,10 @@ import { useTranslation } from "@/lib/i18n";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { ArrivalTimesSection } from "@/components/settings/ArrivalTimesSection";
 import { LocalizationSection } from "@/components/settings/LocalizationSection";
+import {
+  LocationChangeConfirmDialog,
+  locationChangeToConfirm,
+} from "@/components/settings/LocationChangeConfirmDialog";
 import { PropertySection } from "@/components/settings/PropertySection";
 import { SettingsFeedback } from "@/components/settings/SettingsFeedback";
 import { SettingsSubPage } from "@/components/settings/SettingsSubPage";
@@ -36,6 +41,8 @@ export default function PropertySettingsPage() {
   const [timezone, setTimezone] = useState("");
   const [country, setCountry] = useState("");
   const [savingProperty, setSavingProperty] = useState(false);
+  // VAY-2582: a live hotel's time zone or country change waits for the person's confirmation.
+  const [locationChange, setLocationChange] = useState<PropertyLocationChanges | null>(null);
   const [propertyProfileLoadStatus, setPropertyProfileLoadStatus] =
     useState<PmsPropertyProfileLoadStatus>("loading");
   const [propertyProfileLoadError, setPropertyProfileLoadError] = useState("");
@@ -81,7 +88,7 @@ export default function PropertySettingsPage() {
     if (canEditLocation) void loadPropertyProfile();
   }, [canEditLocation, loadPropertyProfile, t]);
 
-  const savePropertyDetails = async () => {
+  const savePropertyDetails = async (confirmLocationChange = false) => {
     const validationError = pmsPropertyDetailsSaveError({
       loadStatus: propertyProfileLoadStatus,
       timezone,
@@ -106,12 +113,18 @@ export default function PropertySettingsPage() {
       // address/lat-lon set during onboarding or via an OTA-specific flow is preserved).
       const normalizedTimezone = timezone.trim();
       const normalizedCountry = country.trim().toUpperCase();
-      await updatePmsPropertyProfile({ timezone: normalizedTimezone, country: normalizedCountry });
+      await updatePmsPropertyProfile(
+        { timezone: normalizedTimezone, country: normalizedCountry },
+        { confirmLocationChange },
+      );
       setTimezone(normalizedTimezone);
       setCountry(normalizedCountry);
+      setLocationChange(null);
       setSuccess(t("settings.property.saved"));
     } catch (err) {
-      setError(humanizeApiError(err, t("settings.property.saveError")));
+      const changes = confirmLocationChange ? null : locationChangeToConfirm(err);
+      setLocationChange(changes);
+      if (!changes) setError(humanizeApiError(err, t("settings.property.saveError")));
     } finally {
       setSavingProperty(false);
     }
@@ -137,7 +150,7 @@ export default function PropertySettingsPage() {
             loadStatus={propertyProfileLoadStatus}
             loadError={propertyProfileLoadError}
             onRetry={loadPropertyProfile}
-            onSave={savePropertyDetails}
+            onSave={() => void savePropertyDetails()}
           />
         ) : (
           <SettingsSection
@@ -162,6 +175,16 @@ export default function PropertySettingsPage() {
           onCurrencyChanged={setCurrency}
         />
       </div>
+      {locationChange && (
+        <LocationChangeConfirmDialog
+          changes={locationChange}
+          currentTimeZone={timezone.trim()}
+          confirming={savingProperty}
+          // What the person typed stays, so they can fix it; nothing was saved.
+          onKeep={() => setLocationChange(null)}
+          onConfirm={() => void savePropertyDetails(true)}
+        />
+      )}
     </SettingsSubPage>
   );
 }

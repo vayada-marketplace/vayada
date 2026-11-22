@@ -77,6 +77,8 @@ export type PropertyProfilePatch = {
 export type UpdatePropertyProfileRequest = {
   expectedProfileRevision: number;
   patch: PropertyProfilePatch;
+  /** VAY-2582: the person confirmed that a live hotel's time zone or country changes. */
+  confirmLocationChange?: boolean;
 };
 
 /**
@@ -92,6 +94,40 @@ export const PROPERTY_LOCATION_CHANGE_REFUSALS = Object.freeze([
 
 export function isPropertyLocationChangeRefusal(code: unknown): boolean {
   return (PROPERTY_LOCATION_CHANGE_REFUSALS as readonly unknown[]).includes(code);
+}
+
+/** VAY-2582: what a live hotel's time zone or country change moves, from the saved value to the new one. */
+export type PropertyLocationChanges = {
+  timezone?: { from: string; to: string };
+  countryCode?: { from: string; to: string };
+};
+
+/**
+ * VAY-2582: the changes a `location_change_needs_confirmation` answer asks the person to confirm, or null
+ * for any other answer. Saving again with `confirmLocationChange: true` makes the change.
+ */
+export function parsePropertyLocationChangeConfirmation(
+  value: unknown,
+): PropertyLocationChanges | null {
+  if (!isRecord(value) || value["code"] !== "location_change_needs_confirmation") return null;
+  const changes = value["changes"];
+  if (!isRecord(changes) || !hasOnlyKeys(changes, ["timezone", "countryCode"])) return null;
+  const move = (key: "timezone" | "countryCode") => {
+    const entry = changes[key];
+    if (entry === undefined) return undefined;
+    if (
+      !isRecord(entry) ||
+      !hasOnlyKeys(entry, ["from", "to"]) ||
+      !isNonEmptyString(entry["from"]) ||
+      !isNonEmptyString(entry["to"])
+    )
+      return null;
+    return { from: entry["from"], to: entry["to"] };
+  };
+  const timezone = move("timezone");
+  const countryCode = move("countryCode");
+  if (timezone === null || countryCode === null || (!timezone && !countryCode)) return null;
+  return { ...(timezone ? { timezone } : {}), ...(countryCode ? { countryCode } : {}) };
 }
 
 export type PropertyProfileResponse = {
@@ -235,15 +271,20 @@ function isReadablePropertyProfileLocation(value: unknown): value is PropertyPro
 export function parseUpdatePropertyProfileRequest(
   value: unknown,
 ): UpdatePropertyProfileRequest | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, ["expectedProfileRevision", "patch"])) {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, ["expectedProfileRevision", "patch", "confirmLocationChange"])
+  ) {
     return null;
   }
   const expectedProfileRevision = value["expectedProfileRevision"];
   const patch = value["patch"];
+  const confirmLocationChange = value["confirmLocationChange"];
   if (
     !Number.isSafeInteger(expectedProfileRevision) ||
     (expectedProfileRevision as number) < 1 ||
-    !isPropertyProfilePatch(patch)
+    !isPropertyProfilePatch(patch) ||
+    (confirmLocationChange !== undefined && typeof confirmLocationChange !== "boolean")
   ) {
     return null;
   }

@@ -5,11 +5,16 @@ import { createPortal } from "react-dom";
 import { BuildingOffice2Icon, InformationCircleIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import {
   isPropertyLocationChangeRefusal,
+  type PropertyLocationChanges,
   type PropertyProfileResponse,
 } from "@vayada/domain-hotels";
 import PropertyAddressFields, {
   type PropertyAddress,
 } from "@vayada/product-onboarding/PropertyAddressFields";
+import {
+  LocationChangeConfirmDialog,
+  locationChangeToConfirm,
+} from "@/components/settings/LocationChangeConfirmDialog";
 import { useTranslation } from "@/lib/i18n";
 import { roomLocationSource } from "@/lib/roomLocation";
 import { pmsPropertyPlace, type PmsPropertyPlace } from "@/services/api/pmsPropertyClient";
@@ -69,6 +74,8 @@ export default function PropertyAddressModal({
   // A pasted short link being read, or its address loading: a save now would drop the link or keep the old
   // address under the new pin.
   const [lookingUp, setLookingUp] = useState(false);
+  // VAY-2582: guests can book this hotel, so a new country waits for the person's confirmation.
+  const [locationChange, setLocationChange] = useState<PropertyLocationChanges | null>(null);
 
   useEffect(() => {
     if (dialog.current && !dialog.current.open) dialog.current.showModal?.();
@@ -128,7 +135,7 @@ export default function PropertyAddressModal({
           : null;
   const complete = draft !== null && problem === null;
 
-  async function save() {
+  async function save(confirmLocationChange = false) {
     if (typeof profile !== "object" || !draft || !complete || lookingUp) return;
     setSaving(true);
     setError("");
@@ -155,11 +162,19 @@ export default function PropertyAddressModal({
             ...(newDirections !== undefined ? { arrivalDirections: newDirections } : {}),
           },
         },
+        ...(confirmLocationChange ? { confirmLocationChange: true } : {}),
       });
+      setLocationChange(null);
       // Closed first, so the focus goes back to "Edit property address".
       dialog.current?.close();
       onSaved(pmsPropertyPlace(propertyId, next));
     } catch (failure) {
+      const changes = confirmLocationChange ? null : locationChangeToConfirm(failure);
+      setLocationChange(changes);
+      if (changes) {
+        setSaving(false);
+        return;
+      }
       const status =
         (failure as { status?: number; statusCode?: number })?.status ??
         (failure as { statusCode?: number })?.statusCode;
@@ -194,6 +209,11 @@ export default function PropertyAddressModal({
       aria-labelledby="property-address-title"
       onCancel={(event) => {
         event.preventDefault();
+        // Escape on the country question answers it ("Keep …"); the popup and its address stay.
+        if (locationChange) {
+          if (!saving) setLocationChange(null);
+          return;
+        }
         close();
       }}
       // However it closed (a second Escape can't be held back), the room editor hears it.
@@ -346,6 +366,16 @@ export default function PropertyAddressModal({
           </button>
         </div>
       </div>
+      {locationChange && typeof profile === "object" && (
+        <LocationChangeConfirmDialog
+          changes={locationChange}
+          currentTimeZone={profile.profile.location.timezone}
+          confirming={saving}
+          // The popup stays open with the typed address, so the person can fix the search.
+          onKeep={() => setLocationChange(null)}
+          onConfirm={() => void save(true)}
+        />
+      )}
     </dialog>,
     document.body,
   );
