@@ -1,3 +1,4 @@
+import { defaultMonthlyBudgetFromEnv, usdToMicroUsd } from "./ai/usage/budgetGate.js";
 import { loadAirbnbImportConfig } from "./airbnbImportRuntime.js";
 import { CHANNEX_RESERVED_TEST_IDS } from "./domains/channexOwnershipGate.js";
 import { loadServerConfig } from "@vayada/backend-config";
@@ -294,6 +295,11 @@ export type ApiConfig = {
   pricingPaymentRepublishIntervalMs: number;
   /** VAY-2286: vayada.com contact-form messages are emailed here (Reply-To: the visitor). */
   contactNotificationRecipient?: string;
+  /** VAY-2504: the monthly AI budget of every hotel account staff have not set; 0 = no AI. */
+  aiDefaultMonthlyBudgetMicroUsd: number;
+  /** VAY-2504: one email a month when vayada's total AI spend passes the threshold; unset sends none. */
+  aiSpendAlertEmail?: string;
+  aiSpendAlertThresholdMicroUsd: number;
   providerWebhooks: ProviderWebhookConfig;
   airbnbImport?: ReturnType<typeof loadAirbnbImportConfig>;
   airbnbAlterations?: { propertyIds: readonly string[] };
@@ -800,7 +806,10 @@ function readCalendarAutoOpenSchedulerIntervalEnv(env: NodeJS.ProcessEnv): numbe
 // One recipient; the email goes through the booking email provider and sender.
 function readSingleRecipientEnv(
   env: NodeJS.ProcessEnv,
-  key: "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL" | "CONTACT_NOTIFICATION_RECIPIENT",
+  key:
+    | "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL"
+    | "CONTACT_NOTIFICATION_RECIPIENT"
+    | "AI_SPEND_ALERT_EMAIL",
   emailConfigured: boolean,
 ): string | undefined {
   const value = readOptionalEnv(env, key);
@@ -810,6 +819,15 @@ function readSingleRecipientEnv(
   }
   if (!emailConfigured) throw new Error(`${key} requires RESEND_API_KEY and BOOKING_EMAIL_FROM`);
   return value;
+}
+
+// Flamur, 2026-11-20: an email when vayada's AI spend passes $100 in a month.
+function readAiSpendAlertThreshold(env: NodeJS.ProcessEnv): number {
+  const value = readOptionalEnv(env, "AI_SPEND_ALERT_USD") ?? "100";
+  const microUsd = usdToMicroUsd(value);
+  if (microUsd === null || microUsd === 0)
+    throw new Error("AI_SPEND_ALERT_USD must be dollars above 0, e.g. 100");
+  return microUsd;
 }
 
 // Each run briefly locks every published property in turn, so it never repeats within ten minutes.
@@ -1632,6 +1650,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "CONTACT_NOTIFICATION_RECIPIENT",
       Boolean(bookingEmailDelivery),
     ),
+    aiDefaultMonthlyBudgetMicroUsd: defaultMonthlyBudgetFromEnv(env),
+    aiSpendAlertEmail: readSingleRecipientEnv(
+      env,
+      "AI_SPEND_ALERT_EMAIL",
+      Boolean(bookingEmailDelivery),
+    ),
+    aiSpendAlertThresholdMicroUsd: readAiSpendAlertThreshold(env),
     providerWebhooks: prospectiveConfig.providerWebhooks,
     channexManagement,
     airbnbImport: loadAirbnbImportConfig(env),

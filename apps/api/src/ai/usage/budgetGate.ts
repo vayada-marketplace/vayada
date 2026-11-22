@@ -24,8 +24,15 @@ export type PgAiBudget = AiBudget & {
 export function defaultMonthlyBudgetFromEnv(env: NodeJS.ProcessEnv): number {
   const value = env.AI_DEFAULT_MONTHLY_BUDGET_USD?.trim();
   if (!value) return 0;
-  if (!/^\d{1,6}(\.\d{1,2})?$/.test(value))
+  const microUsd = usdToMicroUsd(value);
+  if (microUsd === null)
     throw new Error("AI_DEFAULT_MONTHLY_BUDGET_USD must be dollars, e.g. 5 or 2.50");
+  return microUsd;
+}
+
+/** "12" or "12.50" dollars (at most 999,999.99) in micro-dollars; null for anything else. */
+export function usdToMicroUsd(value: string): number | null {
+  if (!/^\d{1,6}(\.\d{1,2})?$/.test(value)) return null;
   const [dollars, cents = ""] = value.split(".");
   return Number(dollars) * 1_000_000 + Number(cents.padEnd(2, "0")) * 10_000;
 }
@@ -144,6 +151,7 @@ export function createPgAiBudget(config: {
   };
 }
 
-function monthStart(at: Date): string {
+/** First day of the UTC month, YYYY-MM-DD: the ledger's budget_month. */
+export function monthStart(at: Date): string {
   return `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}-01`;
 }

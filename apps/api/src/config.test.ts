@@ -1435,6 +1435,36 @@ describe("api config", () => {
     );
   });
 
+  it("reads the AI budget default and the monthly AI spend alert (VAY-2504)", () => {
+    expect(loadConfig({})).toMatchObject({
+      aiDefaultMonthlyBudgetMicroUsd: 0,
+      aiSpendAlertThresholdMicroUsd: 100_000_000,
+    });
+    expect(loadConfig({}).aiSpendAlertEmail).toBeUndefined();
+    const email = { RESEND_API_KEY: "test-key", BOOKING_EMAIL_FROM: "sender@example.test" };
+    expect(
+      loadConfig({
+        ...email,
+        AI_DEFAULT_MONTHLY_BUDGET_USD: "2.50",
+        AI_SPEND_ALERT_EMAIL: "owner@example.test",
+        AI_SPEND_ALERT_USD: "250",
+      }),
+    ).toMatchObject({
+      aiDefaultMonthlyBudgetMicroUsd: 2_500_000,
+      aiSpendAlertEmail: "owner@example.test",
+      aiSpendAlertThresholdMicroUsd: 250_000_000,
+    });
+    expect(() => loadConfig({ AI_SPEND_ALERT_EMAIL: "owner@example.test" })).toThrow(
+      "AI_SPEND_ALERT_EMAIL requires RESEND_API_KEY and BOOKING_EMAIL_FROM",
+    );
+    expect(() => loadConfig({ AI_SPEND_ALERT_USD: "0" })).toThrow(
+      "AI_SPEND_ALERT_USD must be dollars above 0",
+    );
+    expect(() => loadConfig({ AI_DEFAULT_MONTHLY_BUDGET_USD: "five" })).toThrow(
+      "AI_DEFAULT_MONTHLY_BUDGET_USD must be dollars",
+    );
+  });
+
   it("re-publishes prices after payment changes every five minutes unless switched off (VAY-2304)", () => {
     expect(loadConfig({})).toMatchObject({
       pricingPaymentRepublishEnabled: true,
