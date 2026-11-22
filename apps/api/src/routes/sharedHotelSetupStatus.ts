@@ -22,6 +22,7 @@ import {
   type PropertyProfile,
   type PropertyInitialLaunchSettings,
   type PropertyProfileContact,
+  type PropertyLocationChanges,
   type PropertyProfileLocation,
   type PropertyProfilePatch,
   type PropertyProfileResponse,
@@ -927,11 +928,8 @@ export type HotelSetupPropertyProfileCommand = {
   fingerprint: string;
   merge(existing: PropertyProfile): PropertyProfileUpdateResult;
 };
-/** VAY-2582: what a live hotel's time zone or country change moves, from the saved value to the new one. */
-export type PropertyLocationChanges = {
-  timezone?: { from: string; to: string };
-  countryCode?: { from: string; to: string };
-};
+/** VAY-2582: the PMS reads these back from the 409 (domain-hotels' parsePropertyLocationChangeConfirmation). */
+export type { PropertyLocationChanges };
 export type HotelSetupPropertyProfileResult =
   | { status: "updated" | "replayed"; profile: SharedPropertyProfile }
   | { status: "conflict"; currentRevision: number }

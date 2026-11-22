@@ -174,6 +174,22 @@ describe("PMS property profile", () => {
       }),
     );
     expect(result).toMatchObject({ country: "AT", timezone: "Europe/Vienna" });
+    expect(mocks.updatePropertyProfile.mock.calls[0][1]).not.toHaveProperty(
+      "confirmLocationChange",
+    );
+  });
+
+  it("sends the person's confirmation of a live hotel's time zone or country change (VAY-2582)", async () => {
+    await updatePmsPropertyProfile(
+      { country: "gb", timezone: "Europe/London" },
+      { confirmLocationChange: true },
+    );
+
+    expect(mocks.updatePropertyProfile).toHaveBeenCalledWith(propertyId, {
+      expectedProfileRevision: 4,
+      patch: { location: { countryCode: "GB", timezone: "Europe/London" } },
+      confirmLocationChange: true,
+    });
   });
 
   it("reads and updates target room-packing settings", async () => {

@@ -218,6 +218,8 @@ export function pmsPropertyPlace(
 
 export async function updatePmsPropertyProfile(
   data: Partial<PmsPropertyProfile>,
+  /** VAY-2582: the person confirmed a live hotel's time zone or country change. */
+  { confirmLocationChange = false }: { confirmLocationChange?: boolean } = {},
 ): Promise<PmsPropertyProfile> {
   const changedFields = Object.entries(data)
     .filter(([, value]) => value !== undefined)
@@ -245,6 +247,7 @@ export async function updatePmsPropertyProfile(
   const updated = await sharedHotelSetupApi.updatePropertyProfile(propertyId, {
     expectedProfileRevision: current.profileRevision,
     patch: { location: locationPatch },
+    ...(confirmLocationChange ? { confirmLocationChange: true } : {}),
   });
 
   return toPmsPropertyProfile(status, updated);
