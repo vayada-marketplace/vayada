@@ -79,6 +79,8 @@ export interface FinancePaymentSettingsPatchResponse {
   contractVersion: string;
   propertyId: string;
   paymentSettings: Record<string, unknown>;
+  /** VAY-2583: the booking-page rates as the saved settings leave them (absent before go-live). */
+  rateCoverage?: RatePaymentCoverage;
   commandMeta: {
     commandId: string;
     idempotencyKey: string;
@@ -94,6 +96,9 @@ export interface FinancePaymentSettingsResponse {
   /** VAY-2570: `stopped`: no new vayada Payment card payments for this hotel (it can still turn
    * card off and change its payout account). */
   vayadaPayment?: { available: boolean; feePercent?: number; stopped?: boolean };
+  /** VAY-2583: the hotel's booking-page rates and which of them guests can pay for now (absent
+   * before its first publication). */
+  rateCoverage?: RatePaymentCoverage;
   contractVersion: string;
   propertyId: string;
   paymentSettings: {
@@ -186,6 +191,40 @@ export interface FinanceStripeProviderAccountReconciliationResponse {
     cardPaymentsStatus: string | null;
     ready: boolean;
   };
+}
+
+/** VAY-2583: a booking-page rate, the ways its own terms accept and those guests can pay with now. */
+export type RatePaymentCoverageRate = {
+  roomName: string;
+  cancellation: "flexible" | "non_refundable";
+  acceptedMethods: string[];
+  payableWith: string[];
+};
+export type RatePaymentCoverage = { rates: RatePaymentCoverageRate[]; payable: number };
+
+/** The rates a refused save named (no_rate_payable), or the coverage's; [] when malformed. */
+export function ratePaymentCoverageRates(value: unknown): RatePaymentCoverageRate[] {
+  if (!Array.isArray(value)) return [];
+  const list = (v: unknown) =>
+    Array.isArray(v) && v.every((m) => typeof m === "string") ? (v as string[]) : null;
+  return value.flatMap((rate: unknown) => {
+    if (!rate || typeof rate !== "object") return [];
+    const r = rate as Record<string, unknown>;
+    const accepted = list(r.acceptedMethods),
+      payable = list(r.payableWith) ?? [];
+    return typeof r.roomName === "string" &&
+      (r.cancellation === "flexible" || r.cancellation === "non_refundable") &&
+      accepted
+      ? [
+          {
+            roomName: r.roomName,
+            cancellation: r.cancellation,
+            acceptedMethods: accepted,
+            payableWith: payable,
+          },
+        ]
+      : [];
+  });
 }
 
 export class FinancePaymentSettingsClientError extends Error {
@@ -495,6 +534,7 @@ function toFinancePaymentSettingsClientError(error: unknown): FinancePaymentSett
       message: unknown;
       detail: unknown;
       details: unknown;
+      rates: unknown;
     }> | null;
     const detail =
       typeof data?.message === "string"
@@ -507,7 +547,8 @@ function toFinancePaymentSettingsClientError(error: unknown): FinancePaymentSett
       code: typeof data?.code === "string" ? data.code : "write_model_unavailable",
       category: typeof data?.category === "string" ? data.category : "write_model",
       detail,
-      details: data?.details,
+      // VAY-2583: a refused save that would leave no rate payable names the rates.
+      details: data?.details ?? data?.rates,
     });
   }
 

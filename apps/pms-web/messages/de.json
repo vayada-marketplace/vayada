@@ -3183,6 +3183,8 @@
   "pricing.rates.method.bankTransfer": "Gast überweist das Geld vor der Anreise",
   "pricing.rates.method.paypal": "Gast zahlt vor der Anreise per PayPal",
   "pricing.rates.notOffered": "Nicht angeboten: nicht erstattbare Aufenthalte werden im Voraus bezahlt",
+  "pricing.rates.allowCard": "Karte für diese Rate erlauben",
+  "pricing.rates.allowCardHint": "Kartenzahlungen sind in Ihrem Hotel bereit, aber diese Rate akzeptiert keine Karte, deshalb können Gäste sie nicht per Karte bezahlen.",
   "pricing.rates.others": "Weitere Buchungsoptionen",
   "pricing.rates.othersHint": "Wähle, wo jede verkauft wird",
   "pricing.rates.channelsOnly": "Nur Kanäle",

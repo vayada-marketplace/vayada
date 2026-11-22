@@ -25,9 +25,12 @@ import {
   savePaymentMethodWindows,
   updateFinancePaymentSettings,
   payAtHotelMethodsFromFinance,
+  ratePaymentCoverageRates,
   type FinancePaymentSettingsResponse,
+  type RatePaymentCoverage,
 } from "@/services/api/financePaymentSettingsClient";
 import { paymentSaveError } from "@/components/settings/paymentSaveError";
+import { describeRateMethods, rateCoverageNote } from "@/components/settings/rateCoverage";
 import { VayadaPayoutAccountPanel } from "@/components/settings/VayadaPayoutAccountPanel";
 import { PaymentMethodsStep } from "@/components/settings/PaymentMethodsStep";
 import {
@@ -393,6 +396,8 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   } | null>(null);
   // VAY-2442: whether the hotel saved a payout account (the panel tells).
   const [vayadaPayoutSaved, setVayadaPayoutSaved] = useState<boolean | null>(null);
+  // VAY-2583: the booking-page rates and which guests can pay for (null: none published yet).
+  const [rateCoverage, setRateCoverage] = useState<RatePaymentCoverage | null>(null);
   // VAY-2442: card readiness said yes for vayada Payment as saved (unknown counts as no).
   const [vayadaCardReady, setVayadaCardReady] = useState(false);
   const [paymentSettingsLoaded, setPaymentSettingsLoaded] = useState(false);
@@ -515,6 +520,11 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     setSettings((prev) => ({ ...prev, ...paymentsFormFields(saved) }));
     setBankDestination(res.bankDestination ?? null);
     setVayadaPayment(res.vayadaPayment ?? null);
+    setRateCoverage(
+      res.rateCoverage
+        ? { ...res.rateCoverage, rates: ratePaymentCoverageRates(res.rateCoverage.rates) }
+        : null,
+    );
     setPaymentCurrency(ps.defaultCurrency);
     setPlainPayAtHotel(isPlainPayAtHotel(ps.acceptedMethods));
     setPaymentSettingsLoaded(true);
@@ -809,6 +819,13 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
               stripeUnconfirmed
               ? null
               : "not_connected";
+  // VAY-2583: no rate guests can pay for (the page lists no rooms), or card on but on no rate.
+  const rateNote = rateCoverageNote(
+    rateCoverage,
+    // As saved: the coverage is the saved settings', and so is the card banner.
+    !!paymentBaseline?.onlineCard,
+    cardNotReadyReason !== null,
+  );
 
   const handleAcceptanceToggle = async () => {
     const hotelId = readBookingHotelId(settings);
@@ -1180,54 +1197,85 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     let part: PaymentsPart = "bank";
     try {
       const propertyLink = await getBookingHotelPropertyLink({ hotelId });
-      const destination = bankChanged
-        ? await saveBankTransferDestination(
-            {
-              get: (path) => apiClient.get(path, omitHotelContext),
-              put: (path, body) => apiClient.put(path, body, omitHotelContext),
-            },
-            {
-              propertyId: propertyLink.propertyId,
-              enabled: settings.bank_transfer ?? false,
-              saved: bankDestination,
-              attempt: bankSaveAttempt.current,
-              details: bankDetails,
-            },
-          )
-        : bankDestination;
-      if (destination !== bankDestination && current()) {
-        saved.push("bank");
-        setBankDestination(destination ?? null);
-        setSettings((previous) => ({
-          ...previous,
-          payout_account_holder: "",
-          payout_account_number: "",
-          payout_iban: "",
-          payout_bank_name: "",
-          payout_swift: "",
-        }));
-      }
-
-      part = "methods";
-      if (paymentMethodsChanged) {
+      // VAY-2583: bank transfer switched off saves the ways to pay first, so Finance judges the
+      // change while the bank details still count; removed first, the page could already list no
+      // rooms before the check runs.
+      const turningBankOff = paymentBaseline.bankTransfer && !(settings.bank_transfer ?? false);
+      const saveBank = async () => {
+        part = "bank";
+        const destination = bankChanged
+          ? await saveBankTransferDestination(
+              {
+                get: (path) => apiClient.get(path, omitHotelContext),
+                put: (path, body) => apiClient.put(path, body, omitHotelContext),
+              },
+              {
+                propertyId: propertyLink.propertyId,
+                enabled: settings.bank_transfer ?? false,
+                saved: bankDestination,
+                attempt: bankSaveAttempt.current,
+                details: bankDetails,
+              },
+            )
+          : bankDestination;
+        if (destination !== bankDestination && current()) {
+          saved.push("bank");
+          setBankDestination(destination ?? null);
+          // Bank transfer counted as saved off only once its details are gone (see saveMethods).
+          if (turningBankOff)
+            setPaymentBaseline((previous) => previous && { ...previous, bankTransfer: false });
+          setSettings((previous) => ({
+            ...previous,
+            payout_account_holder: "",
+            payout_account_number: "",
+            payout_iban: "",
+            payout_bank_name: "",
+            payout_swift: "",
+          }));
+        }
+      };
+      /** False when a reload meanwhile made this save's result stale. */
+      const saveMethods = async () => {
+        part = "methods";
+        if (!paymentMethodsChanged) return true;
         const save = (keepPlainPayAtHotel: boolean) =>
           updateFinancePaymentSettings({
             propertyId: propertyLink.propertyId,
             body: settingsBody(keepPlainPayAtHotel),
           });
         let keptPlain = keepPlain;
+        let response: Awaited<ReturnType<typeof updateFinancePaymentSettings>>;
         try {
-          await save(keptPlain);
+          response = await save(keptPlain);
         } catch (error) {
           // An old row setup never saved needs the choice spelled out: send the Cash + Card shown.
           if (!keptPlain || !needsExplicitPayAtHotelChoice(error)) throw error;
           keptPlain = false;
-          await save(false);
+          response = await save(false);
         }
         saved.push("methods");
-        if (!current()) return null;
-        setPaymentBaseline(paymentsForm);
+        if (!current()) return false;
+        // While its bank details are still to go, bank transfer stays "on" as saved, so Try again
+        // after a failed bank step runs that step again.
+        setPaymentBaseline(turningBankOff ? { ...paymentsForm, bankTransfer: true } : paymentsForm);
         setPlainPayAtHotel(keptPlain);
+        // VAY-2583: the rates as the saved settings leave them.
+        setRateCoverage(
+          response.rateCoverage
+            ? {
+                ...response.rateCoverage,
+                rates: ratePaymentCoverageRates(response.rateCoverage.rates),
+              }
+            : null,
+        );
+        return true;
+      };
+      if (turningBankOff) {
+        if (!(await saveMethods())) return null;
+        await saveBank();
+      } else {
+        await saveBank();
+        if (!(await saveMethods())) return null;
       }
 
       part = "windows";
@@ -1250,13 +1298,17 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     } catch (error) {
       const windowsMessage =
         part === "windows" && windowsToSave ? paymentWindowsSaveError(error, windowsToSave) : null;
-      const { message, retry } = paymentSaveError(error);
+      const { message, retry, rates } = paymentSaveError(error);
       setPaymentsSaveStatus({
         kind: "failed",
         saved,
         failed: part,
         message: windowsMessage ?? message,
-        params: windowsMessage ? { hours: paymentWindows.deadlineHours } : undefined,
+        params: windowsMessage
+          ? { hours: paymentWindows.deadlineHours }
+          : rates
+            ? { rates: describeRateMethods(rates, t) }
+            : undefined,
         retry: !windowsMessage && retry,
       });
       return null;
@@ -2118,6 +2170,16 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
           )}
           {paymentSettingsLoaded && settings.online_card_payment && cardNotReadyReason && (
             <CardNotReadyBanner reason={cardNotReadyReason} providerSectionId="payment-provider" />
+          )}
+          {/* VAY-2583: the booking-page rates guests can't pay for, named with the ways they take. */}
+          {paymentSettingsLoaded && rateNote && (
+            <div
+              role="status"
+              data-testid="rate-coverage-note"
+              className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+            >
+              {t(rateNote.message, { rates: describeRateMethods(rateNote.rates, t) })}
+            </div>
           )}
           {localizationLoadError && localizationRetryCard}
           <PaymentMethodsStep

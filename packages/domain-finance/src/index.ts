@@ -221,6 +221,28 @@ export type FinancePaymentSettingsResponse = {
   /** VAY-2570: `stopped`: the hotel takes no new vayada Payment charges (the stop list); it can
    * still turn card off and fix its payout account. */
   vayadaPayment?: { available: boolean; feePercent?: number; stopped?: boolean };
+  /** VAY-2583: the hotel's booking-page rates and which of them guests can pay for now; absent
+   * before its first publication. */
+  rateCoverage?: FinanceRatePaymentCoverage;
+};
+
+/** VAY-2583: a booking-page rate sells only by the ways its own terms accept that are ready at
+ * the hotel. `payableWith`: those guests can pay with; empty, the rate isn't bookable. */
+export type FinanceRatePaymentCoverage = {
+  rates: readonly {
+    roomName: string;
+    cancellation: "flexible" | "non_refundable";
+    acceptedMethods: readonly string[];
+    payableWith: readonly string[];
+  }[];
+  payable: number;
+};
+
+/** VAY-2583: the coverage as read for a hotel, with its saved payment settings and why Finance has
+ * no way to pay at all (null: it has some). */
+export type FinanceRatePaymentCoverageRead = FinanceRatePaymentCoverage & {
+  settings: { paymentsEnabled: boolean; acceptedMethods: readonly string[] };
+  financeReason: string | null;
 };
 
 export type FinancePaymentSettingsPatchPayload = Partial<
@@ -1052,6 +1074,12 @@ export type FinancePropertyReadRepository = FinancePropertySettingsReadRepositor
     /** VAY-2570: whether the hotel is on the vayada Payment stop list: it may still save its
      * settings and payout account, but not put card on with vayada Payment. */
     readonly vayadaPaymentStopped?: (propertyId: string) => boolean;
+    /** VAY-2583: a live booking page's rates and which guests could pay for, with the payment
+     * settings now or as `proposed` would leave them. Null: not live or nothing published. */
+    readonly ratePaymentCoverage?: (
+      propertyId: string,
+      proposed?: { paymentsEnabled?: boolean; acceptedMethods: readonly string[] },
+    ) => Promise<FinanceRatePaymentCoverageRead | null>;
   };
 
 export function toFinancePaymentSettingsResponse(

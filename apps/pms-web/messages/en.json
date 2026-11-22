@@ -3169,6 +3169,8 @@
   "pricing.rates.method.bankTransfer": "Guest wires the money before arrival",
   "pricing.rates.method.paypal": "Guest pays by PayPal before arrival",
   "pricing.rates.notOffered": "Not offered: non-refundable stays are paid in advance",
+  "pricing.rates.allowCard": "Allow card on this rate",
+  "pricing.rates.allowCardHint": "Card payments are ready at your hotel, but this rate doesn't take card, so guests can't pay it by card.",
   "pricing.rates.others": "Other booking options",
   "pricing.rates.othersHint": "Choose where each one is sold",
   "pricing.rates.channelsOnly": "Channels only",

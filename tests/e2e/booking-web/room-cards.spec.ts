@@ -526,6 +526,36 @@ test("says when the rooms can't be shown, and loads them again", async ({ page }
   await expect(notice).toHaveCount(0);
 });
 
+test("tells guests to contact the hotel when no rate can be paid, instead of trying again (VAY-2583)", async ({
+  page,
+}) => {
+  await mockBookingApis(page);
+  await mockRooms(page);
+  // The catalog: rooms exist, but guests can pay for none of their rates with a way the hotel
+  // takes now (Aether: card on, every rate taking only pay at the hotel, pay at hotel off).
+  await page.route("**/pricing-offers", (route) =>
+    route.fulfill({
+      json: { version: "public-pricing-offers.v1", rooms: [], unavailable: "no_payment_method" },
+    }),
+  );
+  await page.goto(STAY);
+  const notice = page.getByTestId("rooms-no-way-to-pay");
+  await expect(notice).toContainText("Online booking isn't available right now");
+  await expect(notice).toContainText("Please contact the hotel directly to book your stay.");
+  // The hotel's own contacts, and no "try again" (nothing would change).
+  await expect(notice.getByRole("link", { name: "+41 44 000 00 00" })).toHaveAttribute(
+    "href",
+    "tel:+41440000000",
+  );
+  await expect(notice.getByRole("link", { name: "stay@alpenrose.test" })).toHaveAttribute(
+    "href",
+    "mailto:stay@alpenrose.test",
+  );
+  await expect(notice.getByRole("button", { name: "Try again" })).toHaveCount(0);
+  await expect(page.getByTestId("rooms-unavailable")).toHaveCount(0);
+  await expect(page.getByText("We can't show our rooms right now.")).toHaveCount(0);
+});
+
 test("shows a room's details with its choices, as the old page did", async ({ page }, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo);
   await mockBookingApis(page);
