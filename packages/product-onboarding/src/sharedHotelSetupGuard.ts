@@ -89,7 +89,7 @@ export async function resolveSharedHotelSetupGuard(
       propertyId: input.propertyId,
     });
   } catch (error) {
-    if (!input.propertyId || !isMissingPropertyResourceLinkError(error)) throw error;
+    if (!input.propertyId || !isUnopenablePropertyError(error)) throw error;
     input.onInvalidPropertyId?.();
     if (input.fallbackOnInvalidPropertyId === false) throw error;
     status = await api.getStatus({
@@ -126,7 +126,11 @@ function hasExplicitPropertyMismatch(
   );
 }
 
-function isMissingPropertyResourceLinkError(error: unknown): boolean {
+/**
+ * The login can't open the requested property: it was deleted (VAY-2493), or the login lost access
+ * to it (VAY-2585).
+ */
+function isUnopenablePropertyError(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
   const candidate = error as { status?: unknown; statusCode?: unknown; data?: unknown };
   const status = Number(candidate.status ?? candidate.statusCode);
@@ -134,7 +138,10 @@ function isMissingPropertyResourceLinkError(error: unknown): boolean {
     typeof candidate.data === "object" && candidate.data !== null
       ? (candidate.data as { code?: unknown })
       : null;
-  return status === 403 && data?.code === "missing_property_resource_link";
+  return (
+    status === 403 &&
+    (data?.code === "missing_property_resource_link" || data?.code === "property_access_denied")
+  );
 }
 
 export function buildSharedHotelSetupRedirectPath(input: {

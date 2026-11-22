@@ -236,6 +236,47 @@ describe("resolveSharedHotelSetupGuard", () => {
     expect(getStatus).toHaveBeenCalledTimes(2);
     expect(onInvalidPropertyId).toHaveBeenCalledOnce();
   });
+
+  it("forgets a property the login lost access to like a deleted one (VAY-2585)", async () => {
+    const getStatus = vi
+      .fn()
+      .mockRejectedValueOnce({ status: 403, data: { code: "property_access_denied" } })
+      .mockResolvedValueOnce(propertySelectionStatus(["property-1", "property-2"]));
+    const onInvalidPropertyId = vi.fn();
+
+    await expect(
+      resolveSharedHotelSetupGuard(
+        { getStatus },
+        {
+          entryProduct: "booking",
+          returnProduct: "booking",
+          returnTo: "/dashboard",
+          propertyId: "property-removed",
+          onInvalidPropertyId,
+        },
+      ),
+    ).resolves.toMatchObject({ action: "redirect_to_setup", redirectPath: "/choose-property" });
+    expect(getStatus).toHaveBeenNthCalledWith(2, { entryProduct: "booking", propertyId: null });
+    expect(onInvalidPropertyId).toHaveBeenCalledOnce();
+  });
+
+  it("still fails when the login can't open the property it was explicitly sent to", async () => {
+    const denied = { status: 403, data: { code: "property_access_denied" } };
+    const getStatus = vi.fn().mockRejectedValueOnce(denied);
+
+    await expect(
+      resolveSharedHotelSetupGuard(
+        { getStatus },
+        {
+          entryProduct: "pms",
+          returnTo: "/dashboard",
+          propertyId: "property-from-setup-exit",
+          fallbackOnInvalidPropertyId: false,
+        },
+      ),
+    ).rejects.toBe(denied);
+    expect(getStatus).toHaveBeenCalledOnce();
+  });
 });
 
 /** What the API answers when no property is chosen: setup, whether the login has none or several. */
