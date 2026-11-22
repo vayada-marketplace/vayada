@@ -16,7 +16,11 @@ const timeZonePoints = [
   "needs your channel manager to use the same time zone, or its sync stops",
 ];
 
-async function render(changes: PropertyLocationChanges, confirming = false) {
+async function render(
+  changes: PropertyLocationChanges,
+  confirming = false,
+  currentTimeZone = "Asia/Colombo",
+) {
   const onKeep = vi.fn();
   const onConfirm = vi.fn();
   let view!: ReactTestRenderer;
@@ -24,7 +28,7 @@ async function render(changes: PropertyLocationChanges, confirming = false) {
     view = create(
       createElement(LocationChangeConfirmDialog, {
         changes,
-        currentTimeZone: "Asia/Colombo",
+        currentTimeZone,
         confirming,
         onKeep,
         onConfirm,
@@ -74,6 +78,14 @@ describe("live hotel location change question (VAY-2582)", () => {
     expect(shown.points).toEqual([]);
     expect(shown.buttons).toEqual(["Keep Sri Lanka", "Change country"]);
     shown.view.unmount();
+
+    // A hotel without a saved time zone has none that "stays": only the country check.
+    const noZone = await render({ countryCode: { from: "LK", to: "GB" } }, false, "");
+    expect(noZone.text).not.toContain("The time zone stays");
+    expect(noZone.text).toContain(
+      "Check that your currency and channel manager still match the new country.",
+    );
+    noZone.view.unmount();
   });
 
   it("asks once for both, the time zone's consequences and the country check together", async () => {

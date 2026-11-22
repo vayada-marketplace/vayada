@@ -569,8 +569,9 @@ test.describe("pms-web room location", () => {
     await question.getByRole("button", { name: "Change country" }).click();
     await expect(modal).toHaveCount(0);
     await expect(page.locator("main").getByText("Property address saved.")).toBeVisible();
-    expect(profileWrites).toHaveLength(3);
-    expect(profileWrites[2]).toMatchObject({
+    // Two answered questions, the third save asked again, then the confirmed one.
+    expect(profileWrites).toHaveLength(4);
+    expect(profileWrites[3]).toMatchObject({
       expectedProfileRevision: 1,
       confirmLocationChange: true,
       patch: {

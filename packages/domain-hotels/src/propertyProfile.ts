@@ -111,16 +111,12 @@ export function parsePropertyLocationChangeConfirmation(
 ): PropertyLocationChanges | null {
   if (!isRecord(value) || value["code"] !== "location_change_needs_confirmation") return null;
   const changes = value["changes"];
-  if (!isRecord(changes) || !hasOnlyKeys(changes, ["timezone", "countryCode"])) return null;
+  // A response: fields a newer server adds are ignored, so the question still shows.
+  if (!isRecord(changes)) return null;
   const move = (key: "timezone" | "countryCode") => {
     const entry = changes[key];
     if (entry === undefined) return undefined;
-    if (
-      !isRecord(entry) ||
-      !hasOnlyKeys(entry, ["from", "to"]) ||
-      !isNonEmptyString(entry["from"]) ||
-      !isNonEmptyString(entry["to"])
-    )
+    if (!isRecord(entry) || !isNonEmptyString(entry["from"]) || !isNonEmptyString(entry["to"]))
       return null;
     return { from: entry["from"], to: entry["to"] };
   };

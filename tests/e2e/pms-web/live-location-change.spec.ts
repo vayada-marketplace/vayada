@@ -16,7 +16,8 @@ type ProfileWrite = {
   patch: { location: { timezone?: string; countryCode?: string } };
   confirmLocationChange?: boolean;
 };
-type Answer = "live" | "not live" | "channex";
+// "live, then conflict": someone else saved while the question was open, so the confirmed save fails too.
+type Answer = "live" | "live, then conflict" | "not live" | "channex";
 
 async function mockHotelProfile(page: Page, answer: Answer) {
   await mockPmsWebAuthenticatedSession(page);
@@ -46,7 +47,17 @@ async function mockHotelProfile(page: Page, answer: Answer) {
             channexTimeZone: location.timezone,
           },
         });
-      if (answer === "live" && !write.confirmLocationChange && (timezone || countryCode))
+      if (answer === "live, then conflict" && write.confirmLocationChange)
+        return route.fulfill({
+          status: 409,
+          json: {
+            code: "profile_revision_conflict",
+            detail:
+              "The property profile changed while it was being updated. Reload and try again.",
+            currentRevision: 2,
+          },
+        });
+      if (answer !== "not live" && !write.confirmLocationChange && (timezone || countryCode))
         return route.fulfill({
           status: 409,
           json: {
@@ -111,9 +122,10 @@ test.describe("pms-web live hotel location change (VAY-2582)", () => {
     // The server saved nothing, and the page says nothing went wrong.
     await expect(page.locator('main div[role="alert"]')).toHaveCount(0);
 
-    // Keep: nothing more is sent, and what the person typed stays so they can fix it.
+    // Keep: nothing more is sent, and what the person typed stays so they can fix it, focused.
     await keep.click();
     await expect(question).toHaveCount(0);
+    await expect(page.getByLabel("Timezone*")).toBeFocused();
     await expect(page.getByLabel("Timezone*")).toHaveValue("Asia/Colombo");
     await expect(page.getByLabel("Country (ISO code)*")).toHaveValue("LK");
     await expect(page.locator("main")).not.toContainText("Property details saved");
@@ -157,9 +169,11 @@ test.describe("pms-web live hotel location change (VAY-2582)", () => {
       "Keep Europe/Berlin",
       "Change time zone",
     ]);
+    await expect(question.getByRole("button", { name: "Keep Europe/Berlin" })).toBeFocused();
 
     await page.keyboard.press("Escape");
     await expect(question).toHaveCount(0);
+    await expect(page.getByLabel("Timezone*")).toHaveValue("Europe/London");
     expect(backend.writes).toHaveLength(1);
     await expect(page.locator("main")).not.toContainText("Property details saved");
 
@@ -171,6 +185,24 @@ test.describe("pms-web live hotel location change (VAY-2582)", () => {
       undefined,
       true,
     ]);
+  });
+
+  test("a confirmed save that fails closes the question, says why and keeps what was typed", async ({
+    page,
+  }) => {
+    const backend = await mockHotelProfile(page, "live, then conflict");
+    await page.getByLabel("Timezone*").selectOption("Europe/London");
+    await save(page);
+    const question = page.getByRole("alertdialog", { name: "Change your hotel's time zone?" });
+    await question.getByRole("button", { name: "Change time zone" }).click();
+
+    await expect(question).toHaveCount(0);
+    await expect(page.locator('main div[role="alert"]')).toHaveText(
+      "The property profile changed while it was being updated. Reload and try again.",
+    );
+    await expect(page.getByLabel("Timezone*")).toHaveValue("Europe/London");
+    await expect(page.locator("main")).not.toContainText("Property details saved");
+    expect(backend.writes.map((write) => write.confirmLocationChange)).toEqual([undefined, true]);
   });
 
   test("a Channex-connected hotel gets the server's message about Channex's time zone, no question", async ({

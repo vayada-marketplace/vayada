@@ -39,6 +39,8 @@ export default function PropertySettingsPage() {
   // Only the fields Channex enforces (timezone + country); other address fields are filled later
   // by each OTA's own validation flow when needed.
   const [timezone, setTimezone] = useState("");
+  // The saved one: the country-only question says it stays.
+  const [savedTimezone, setSavedTimezone] = useState("");
   const [country, setCountry] = useState("");
   const [savingProperty, setSavingProperty] = useState(false);
   // VAY-2582: a live hotel's time zone or country change waits for the person's confirmation.
@@ -58,6 +60,7 @@ export default function PropertySettingsPage() {
     try {
       const profile = await getPmsPropertyProfile();
       setTimezone(profile.timezone ?? "");
+      setSavedTimezone(profile.timezone ?? "");
       setCountry(profile.country ?? "");
       setPropertyProfileLoadStatus("ready");
     } catch (loadError) {
@@ -118,6 +121,7 @@ export default function PropertySettingsPage() {
         { confirmLocationChange },
       );
       setTimezone(normalizedTimezone);
+      setSavedTimezone(normalizedTimezone);
       setCountry(normalizedCountry);
       setLocationChange(null);
       setSuccess(t("settings.property.saved"));
@@ -178,8 +182,9 @@ export default function PropertySettingsPage() {
       {locationChange && (
         <LocationChangeConfirmDialog
           changes={locationChange}
-          currentTimeZone={timezone.trim()}
+          currentTimeZone={timezone.trim() === savedTimezone ? savedTimezone : ""}
           confirming={savingProperty}
+          returnFocusId={locationChange.timezone ? "pms-property-timezone" : "pms-property-country"}
           // What the person typed stays, so they can fix it; nothing was saved.
           onKeep={() => setLocationChange(null)}
           onConfirm={() => void savePropertyDetails(true)}

@@ -258,6 +258,12 @@ describe("location change refusals (VAY-2582)", () => {
     expect(
       parsePropertyLocationChangeConfirmation(answer({ countryCode: { from: "LK", to: "GB" } })),
     ).toEqual({ countryCode: { from: "LK", to: "GB" } });
+    // Fields a newer server adds don't hide the question.
+    expect(
+      parsePropertyLocationChangeConfirmation(
+        answer({ countryCode: { from: "LK", to: "GB", label: "Sri Lanka" }, city: { from: "a" } }),
+      ),
+    ).toEqual({ countryCode: { from: "LK", to: "GB" } });
     // Any other answer, or one that names no change, asks nothing.
     for (const value of [
       answer({}),

@@ -39,14 +39,17 @@ export function LocationChangeConfirmDialog({
   confirming,
   onKeep,
   onConfirm,
+  returnFocusId,
 }: {
   changes: PropertyLocationChanges;
-  /** The hotel's time zone, named when only the country changes (it stays). */
+  /** The hotel's saved time zone, named when only the country changes (it stays); "" when it has none. */
   currentTimeZone: string;
   /** The confirmed save is running. */
   confirming: boolean;
   onKeep: () => void;
   onConfirm: () => void;
+  /** The field to focus afterwards; else whatever had the focus, if it still can take it. */
+  returnFocusId?: string;
 }) {
   const { t, locale } = useTranslation();
   const titleId = useId();
@@ -56,13 +59,19 @@ export function LocationChangeConfirmDialog({
   const { timezone, countryCode } = changes;
   const both = Boolean(timezone && countryCode);
 
-  // Focus starts on "Keep …", the choice that changes nothing, and goes back where it was afterwards.
+  // Focus starts on "Keep …", the choice that changes nothing, and goes back afterwards: to the field to
+  // fix, or where it was (a Save button disabled during the save may have dropped it to the body).
   useEffect(() => {
     if (typeof document === "undefined") return;
     const previous = document.activeElement as HTMLElement | null;
     keepButton.current?.focus();
-    return () => previous?.focus?.();
-  }, []);
+    return () => {
+      const target =
+        (returnFocusId ? document.getElementById(returnFocusId) : null) ??
+        (previous && previous !== document.body && previous.isConnected ? previous : null);
+      target?.focus?.();
+    };
+  }, [returnFocusId]);
 
   const keep = () => {
     if (!confirming) onKeep();
@@ -111,12 +120,14 @@ export function LocationChangeConfirmDialog({
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
+        // A click on the text keeps the focus here, so Escape and Tab still reach the question.
+        tabIndex={-1}
         onKeyDown={(event) => {
           // Inside the address popup's <dialog>, Escape must close this question, not the popup.
           if (event.key === "Escape") event.preventDefault();
           trapFocus(event, panel.current, keep);
         }}
-        className="relative flex max-h-[90dvh] w-full max-w-lg min-w-0 flex-col overflow-hidden rounded-xl bg-white text-left text-gray-900 shadow-xl"
+        className="relative flex max-h-[90dvh] w-full max-w-lg min-w-0 flex-col overflow-hidden rounded-xl bg-white text-left text-gray-900 shadow-xl outline-none [overflow-wrap:anywhere]"
       >
         <div className="min-h-0 overflow-y-auto">
           <div className="flex items-start gap-3.5 px-6 pt-6">
@@ -186,10 +197,11 @@ export function LocationChangeConfirmDialog({
 
             {countryCode ? (
               <p className="text-[14px] leading-5 text-gray-600">
-                {timezone
+                {/* With the time zone moving too, or none saved yet, nothing "stays". */}
+                {timezone || !currentTimeZone.trim()
                   ? t("settings.property.locationConfirm.countryCheck")
                   : t("settings.property.locationConfirm.countryKeepsTimeZone", {
-                      timeZone: formatTimezoneLabel(currentTimeZone),
+                      timeZone: formatTimezoneLabel(currentTimeZone.trim()),
                     })}
               </p>
             ) : null}
@@ -202,7 +214,7 @@ export function LocationChangeConfirmDialog({
             type="button"
             onClick={keep}
             disabled={confirming}
-            className="h-10 rounded-lg border border-gray-300 bg-white px-4 text-[14px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            className="min-h-10 rounded-lg border border-gray-300 bg-white px-4 py-2 text-[14px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           >
             {keepLabel}
           </button>
@@ -210,7 +222,7 @@ export function LocationChangeConfirmDialog({
             type="button"
             onClick={onConfirm}
             disabled={confirming}
-            className="h-10 rounded-lg bg-primary-600 px-4 text-[14px] font-medium text-white hover:bg-primary-700 disabled:opacity-50"
+            className="min-h-10 rounded-lg bg-primary-600 px-4 py-2 text-[14px] font-medium text-white hover:bg-primary-700 disabled:opacity-50"
           >
             {confirming ? t("common.saving") : changeLabel}
           </button>
