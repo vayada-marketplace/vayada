@@ -54,16 +54,16 @@ for (const width of [1440, 390]) {
   });
 }
 
-test("tells search engines and link previews what the page is, and keeps the site unindexed", async ({
+test("tells search engines and link previews what the page is, and lets them index the site", async ({
   page,
 }) => {
   await page.goto("/");
   await expect(page).toHaveTitle("Animals Ahangama · A place to land");
   const meta = (selector: string) => page.locator(selector).getAttribute("content");
   expect(await meta('meta[name="description"]')).toContain("Ahangama, Sri Lanka");
-  expect(await meta('meta[name="robots"]')).toBe("noindex, nofollow");
-  // Also as a response header on every file, which keeps the photos out of image search too; and
-  // build files are kept for good (the host folder's _headers, applied as Cloudflare Pages will).
+  expect(await meta('meta[name="robots"]')).toBe("index, follow");
+  // No noindex header on any file either, so the photos can show in image search; and build files
+  // are kept for good (the host folder's _headers, applied as Cloudflare Pages will).
   const headers = await page.evaluate(async () => {
     const [home, photo] = await Promise.all([
       fetch("/"),
@@ -76,8 +76,8 @@ test("tells search engines and link previews what the page is, and keeps the sit
     };
   });
   expect(headers).toEqual({
-    page: "noindex",
-    photo: "noindex",
+    page: null,
+    photo: null,
     photoCache: "public, max-age=31536000, immutable",
   });
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(

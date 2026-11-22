@@ -8,8 +8,8 @@ export const animalsAhangama: HotelSite = {
   name: "Animals Ahangama",
   locale: "en",
   url: "https://animals-ahangama.site.vayada.com",
-  // Kept from search engines until the go-live call (VAY-2465).
-  indexable: false,
+  // Open to search engines since the go-live (Flamur, 2026-11-21, VAY-2465).
+  indexable: true,
   // The hotel's live booking page, renamed from test-only-animals-ahangama (VAY-2465); the old
   // address redirects here.
   bookingUrl: "https://animals-ahangama.next-booking.vayada.com",
