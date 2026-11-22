@@ -53,7 +53,8 @@
     "./timezones": "./src/timezones.ts",
     "./GoLiveChecklistCard": "./src/GoLiveChecklistCard.tsx",
     "./hotelSetupChecklistApi": "./src/hotelSetupChecklistApi.ts",
-    "./CountryPhoneField": "./src/CountryPhoneField.tsx"
+    "./CountryPhoneField": "./src/CountryPhoneField.tsx",
+    "./LocationChangeConfirmDialog": "./src/LocationChangeConfirmDialog.tsx"
   },
   "dependencies": {
     "@vayada/domain-booking": "*",

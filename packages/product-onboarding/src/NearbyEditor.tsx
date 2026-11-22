@@ -1,5 +1,6 @@
 "use client";
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
+import { LocationChangeConfirmDialog } from "./LocationChangeConfirmDialog";
 import type { NearbyApi } from "./nearbyApi";
 import type { SharedHotelSetupApi } from "./sharedHotelSetupApi";
 import NearbyLocationForm, {
@@ -23,7 +24,7 @@ export default function NearbyEditor({
   apiKey,
   intro,
   addressTranslate,
-  translate = englishNearbyPlaces,
+  translate,
   locale = "en",
   guestMap,
 }: {
@@ -42,8 +43,12 @@ export default function NearbyEditor({
   /** The "Show nearby places" switch and the rooms with their own location (VAY-2326). */
   guestMap?: NearbyGuestMap;
 }) {
-  const t = translate;
+  const t = translate ?? englishNearbyPlaces;
   const editor = useNearbyEditor(propertyId, api, profileApi);
+  // "Keep …" on the live hotel question gives the focus back to the field it is about (VAY-2586).
+  const fieldIds = useId();
+  const timezoneId = `${fieldIds}-timezone`;
+  const countryId = `${fieldIds}-country`;
   const [formOpen, setFormOpen] = useState(false);
   const unsaved = editor.locationDirty || editor.placesDirty || formOpen;
   useNearbyNavigationGuard(unsaved, t("nearbyPlaces.leaveConfirm"));
@@ -94,6 +99,12 @@ export default function NearbyEditor({
           </button>
         </div>
       )}
+      {/* A live hotel's refused time zone or country: the server says what to do; reloading wouldn't help. */}
+      {editor.serverError && (
+        <p role="alert" className="rounded-xl bg-red-50 p-4 text-sm text-red-800">
+          {editor.serverError}
+        </p>
+      )}
       {editor.notice && (
         <p role="status" className="rounded-xl bg-green-50 p-4 text-sm text-green-800">
           {t(editor.notice)}
@@ -116,6 +127,8 @@ export default function NearbyEditor({
             disabled={editor.busy}
             translate={addressTranslate}
             locale={locale}
+            timezoneId={timezoneId}
+            countryId={countryId}
           />
           <button className={primary} disabled={editor.busy || !editor.locationDirty} type="submit">
             {editor.busy
@@ -150,6 +163,24 @@ export default function NearbyEditor({
           onFormOpen={setFormOpen}
         />
       </div>
+      {editor.locationChange && (
+        <LocationChangeConfirmDialog
+          changes={editor.locationChange}
+          // Only a time zone left as saved "stays"; a first one typed now moves nothing on the server.
+          currentTimeZone={
+            location.timezone.trim() === profile.profile.location.timezone
+              ? profile.profile.location.timezone
+              : ""
+          }
+          confirming={editor.busy}
+          returnFocusId={editor.locationChange.timezone ? timezoneId : countryId}
+          onKeep={editor.keepLocation}
+          onConfirm={() => void editor.saveLocation(true)}
+          // Booking Admin's catalogs hold these keys; English without a catalog.
+          translate={translate}
+          locale={locale}
+        />
+      )}
     </div>
   );
 }

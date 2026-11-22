@@ -167,10 +167,19 @@ async function setup(
     nearbyEnabled,
     saveStatus: 200,
     switchStatus: 200,
+    profilePuts: [] as Record<string, unknown>[],
+    // VAY-2586: what the API answers a location save instead of saving it (a live hotel's refusals).
+    refuseProfile: undefined as
+      | ((body: Record<string, unknown>) => { status: number; json: unknown } | undefined)
+      | undefined,
   };
   await page.route(`**${BOOKING_ADMIN_PROPERTY_PROFILE_PATH}`, async (route) => {
     if (route.request().method() === "PUT") {
-      profile.profile.location = route.request().postDataJSON().patch.location;
+      const body = route.request().postDataJSON();
+      state.profilePuts.push(body);
+      const refused = state.refuseProfile?.(body);
+      if (refused) return route.fulfill(refused);
+      profile.profile.location = body.patch.location;
       profile.profileRevision += 1;
       state.curation.profileRevision = profile.profileRevision;
     }
@@ -773,4 +782,194 @@ test("a hung map loader reaches its readable fallback, and the list still works"
     .focus();
   await page.keyboard.press("ArrowUp");
   expect(await names(page)).toEqual(["Viktualienmarkt", "Isartor S-Bahn", "Eisbach wave"]);
+});
+
+// VAY-2586: a live hotel (bookable on its page or through Channex) asks before its time zone or country moves,
+// with the PMS's question (VAY-2582). Saved: Europe/Berlin, Germany.
+type SetupState = Awaited<ReturnType<typeof setup>>;
+function liveHotel(state: SetupState) {
+  state.refuseProfile = (body) => {
+    if (body.confirmLocationChange === true) return undefined;
+    const { timezone, countryCode } = (body.patch as { location: Record<string, string> }).location;
+    const changes = {
+      ...(timezone !== "Europe/Berlin"
+        ? { timezone: { from: "Europe/Berlin", to: timezone } }
+        : {}),
+      ...(countryCode !== "DE" ? { countryCode: { from: "DE", to: countryCode } } : {}),
+    };
+    return Object.keys(changes).length
+      ? {
+          status: 409,
+          json: {
+            code: "location_change_needs_confirmation",
+            detail: "Guests can book this hotel. Confirm the change to save it.",
+            changes,
+          },
+        }
+      : undefined;
+  };
+}
+const timeZoneField = (page: Page) => page.getByRole("textbox", { name: "Time zone", exact: true });
+// A <select> in its <label> is named with its chosen option too.
+const countryField = (page: Page) => page.getByRole("combobox", { name: /^Country/ });
+const saveLocation = (page: Page) =>
+  page.getByRole("button", { name: "Save location", exact: true }).click();
+const conflict = "Someone changed this property's settings";
+
+test("a live hotel's new time zone asks first: Keep saves nothing, Change saves it (VAY-2586)", async ({
+  page,
+}) => {
+  const state = await setup(page);
+  liveHotel(state);
+  await page.goto("/settings/location");
+  await timeZoneField(page).fill("Europe/London");
+  await saveLocation(page);
+
+  const question = page.getByRole("alertdialog", { name: "Change your hotel's time zone?" });
+  await expect(question).toBeVisible();
+  await expect(question).toContainText("Guests can book your hotel now.");
+  await expect(question).toContainText("Time zoneEurope/Berlin→toEurope/London");
+  await expect(question).toContainText(
+    "pauses your booking page until you save your calendar again in PMS → Settings → Calendar",
+  );
+  await expect(page.getByText(conflict)).toHaveCount(0);
+  const keep = question.getByRole("button", { name: "Keep Europe/Berlin", exact: true });
+  await expect(keep).toBeFocused();
+
+  // Keep: nothing more is sent, and the typed time zone stays, with the focus on it.
+  await keep.click();
+  await expect(question).toHaveCount(0);
+  await expect(timeZoneField(page)).toHaveValue("Europe/London");
+  await expect(timeZoneField(page)).toBeFocused();
+  expect(state.profilePuts).toHaveLength(1);
+  expect(state.profilePuts[0]).not.toHaveProperty("confirmLocationChange");
+
+  // Change: saved again with the confirmation.
+  await saveLocation(page);
+  await question.getByRole("button", { name: "Change time zone", exact: true }).click();
+  await expect(page.getByText(/^Location saved/)).toBeVisible();
+  await expect(question).toHaveCount(0);
+  expect(state.profilePuts).toHaveLength(3);
+  expect(state.profilePuts[2]).toMatchObject({
+    confirmLocationChange: true,
+    patch: { location: { timezone: "Europe/London" } },
+  });
+  await expect(timeZoneField(page)).toHaveValue("Europe/London");
+});
+
+test("a live hotel's new country asks first and says the time zone stays; Escape keeps it (VAY-2586)", async ({
+  page,
+}) => {
+  const state = await setup(page);
+  liveHotel(state);
+  await page.goto("/settings/location");
+  await countryField(page).selectOption("GB");
+  await saveLocation(page);
+
+  const question = page.getByRole("alertdialog", { name: "Change your hotel's country?" });
+  await expect(question).toContainText("CountryGermany→toUnited Kingdom");
+  await expect(question).toContainText(
+    "The time zone stays Europe/Berlin, so your calendar and booking page keep working. Check that your currency and channel manager still match the new country.",
+  );
+  await expect(question.getByRole("button")).toHaveText(["Keep Germany", "Change country"]);
+
+  await page.keyboard.press("Escape");
+  await expect(question).toHaveCount(0);
+  await expect(countryField(page)).toHaveValue("GB");
+  await expect(countryField(page)).toBeFocused();
+  expect(state.profilePuts).toHaveLength(1);
+
+  await saveLocation(page);
+  await question.getByRole("button", { name: "Change country", exact: true }).click();
+  await expect(page.getByText(/^Location saved/)).toBeVisible();
+  expect(state.profilePuts.at(-1)).toMatchObject({
+    confirmLocationChange: true,
+    patch: { location: { countryCode: "GB" } },
+  });
+});
+
+test("a Channex time zone mismatch or outage shows the API's own words and keeps the edits (VAY-2586)", async ({
+  page,
+}) => {
+  const state = await setup(page);
+  const mismatch =
+    "This hotel is connected to Channex, which uses the time zone Europe/Berlin. Your hotel's time zone must be the same. Keep Europe/Berlin, or change it in Channex first.";
+  const unavailable =
+    "We couldn't check your channel manager's time zone, so nothing was saved. Try again in a minute.";
+  state.refuseProfile = () => ({
+    status: 409,
+    json: {
+      code: "channex_time_zone_mismatch",
+      detail: mismatch,
+      channexTimeZone: "Europe/Berlin",
+    },
+  });
+  await page.goto("/settings/location");
+  await timeZoneField(page).fill("Europe/London");
+  await saveLocation(page);
+  await expect(page.getByRole("alert").filter({ hasText: mismatch })).toBeVisible();
+  await expect(page.getByText(conflict)).toHaveCount(0);
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+
+  state.refuseProfile = () => ({
+    status: 503,
+    json: { code: "channex_time_zone_unavailable", detail: unavailable },
+  });
+  await saveLocation(page);
+  await expect(page.getByRole("alert").filter({ hasText: unavailable })).toBeVisible();
+  await expect(page.getByText(mismatch)).toHaveCount(0);
+  await expect(page.getByText("Changes could not be saved.")).toHaveCount(0);
+  await expect(timeZoneField(page)).toHaveValue("Europe/London");
+});
+
+test("a live hotel's street-only change saves at once, without the question (VAY-2586)", async ({
+  page,
+}) => {
+  const state = await setup(page);
+  liveHotel(state);
+  await page.goto("/settings/location");
+  await page
+    .getByRole("textbox", { name: "Street and number", exact: true })
+    .fill("Alpenstrasse 14");
+  await saveLocation(page);
+  await expect(page.getByText(/^Location saved/)).toBeVisible();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  expect(state.profilePuts).toHaveLength(1);
+  expect(state.profilePuts[0]).not.toHaveProperty("confirmLocationChange");
+  expect(state.profilePuts[0]).toMatchObject({
+    patch: { location: { streetAddress: "Alpenstrasse 14", timezone: "Europe/Berlin" } },
+  });
+});
+
+test("a hotel guests can't book yet saves a new time zone and country at once (VAY-2586)", async ({
+  page,
+}) => {
+  const state = await setup(page);
+  await page.goto("/settings/location");
+  await timeZoneField(page).fill("Europe/London");
+  await countryField(page).selectOption("GB");
+  await saveLocation(page);
+  await expect(page.getByText(/^Location saved/)).toBeVisible();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  expect(state.profilePuts).toHaveLength(1);
+  expect(state.profilePuts[0]).not.toHaveProperty("confirmLocationChange");
+  expect(state.profilePuts[0]).toMatchObject({
+    patch: { location: { timezone: "Europe/London", countryCode: "GB" } },
+  });
+});
+
+test("the live hotel question speaks the admin's language (VAY-2586)", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("admin_language", "de"));
+  const state = await setup(page);
+  liveHotel(state);
+  await page.goto("/settings/location");
+  await page.getByRole("textbox", { name: "Zeitzone", exact: true }).fill("Europe/London");
+  await page.getByRole("button", { name: "Lage speichern", exact: true }).click();
+  const question = page.getByRole("alertdialog", { name: "Zeitzone Ihres Hotels ändern?" });
+  await expect(question).toContainText("Gäste können Ihr Hotel jetzt buchen.");
+  await expect(question).toContainText("im PMS unter Einstellungen → Kalender erneut speichern");
+  await expect(question.getByRole("button")).toHaveText([
+    "Europe/Berlin behalten",
+    "Zeitzone ändern",
+  ]);
 });
