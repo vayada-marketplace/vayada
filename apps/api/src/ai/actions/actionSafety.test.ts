@@ -248,17 +248,19 @@ describe("the app's default delegation gate", () => {
 
   it("refuses a mounted write route even to an owner's change delegation (VAY-2522)", async () => {
     const fixture = ACTION_FIXTURES.find((f) => f.action === "rooms_list@1")!;
-    const permissions: PermissionKey[] = ["pms.calendar.manage", "pms.operations.manage"];
+    const permissions: PermissionKey[] = ["pms.inbox.read", "pms.inbox.reply"];
     const app = buildApp({
       logger: false,
       ...fixture.appOptions(),
       auth: worldAuthorization(permissions).auth,
     });
     apps.push(app);
-    const routeUrl = "/api/pms/properties/:propertyId/room-blocks";
-    const url = routeUrl.replace(":propertyId", WORLD.P1);
-    // Mounted: without a user it answers 401, not 404.
-    expect((await app.inject({ method: "POST", url, payload: {} })).statusCode).toBe(401);
+    // Marking an inbox thread read: a write route that is always mounted, and not an action.
+    const routeUrl = "/api/pms/properties/:propertyId/messaging/threads/:threadId/read";
+    const url = routeUrl
+      .replace(":propertyId", WORLD.P1)
+      .replace(":threadId", "44444444-4444-4444-8444-444444444444");
+    expect((await app.inject({ method: "POST", url, payload: {} })).statusCode).not.toBe(404);
     const context = await resolveDelegatedChangeContext(
       worldIdentity,
       {
@@ -277,7 +279,7 @@ describe("the app's default delegation gate", () => {
       method: "POST",
       routeUrl,
       url,
-      body: { roomTypeId: "type-01", from: "2026-12-01", to: "2026-12-03" },
+      body: {},
       idempotencyKey: "op_change_gate:1",
     });
     expect(response.statusCode).toBe(403);

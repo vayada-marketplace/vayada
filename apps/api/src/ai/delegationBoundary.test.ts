@@ -8,22 +8,27 @@ import { describe, expect, it } from "vitest";
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 const DELEGATION_API =
-  /\b(injectAsDelegate|resolveDelegatedContext|resolveDelegatedChangeContext|narrowDelegatedContext|runDelegatedRead)\b|ai\/delegatedRead/;
+  /\b(injectAsDelegate|resolveDelegatedContext|resolveDelegatedChangeContext|narrowDelegatedContext|runDelegatedRead)\b|ai\/(delegatedRead|executor)/;
 /** A "change" delegation may also write (VAY-2522): only the one executor of AI changes mints one. */
 const CHANGE_API = /\bresolveDelegatedChangeContext\b/;
 const EXECUTOR_DIR = "apps/api/src/ai/executor/";
+/** Handing the change resolver on under another name: a named re-export or a star re-export. */
+const RE_EXPORT =
+  /export\s*\{[^}]*\bresolveDelegatedChangeContext\b|export\s*\*\s*(as\s+\w+\s*)?from\s*["']@vayada\/backend-auth/;
+const SKIPPED_DIRS = new Set(["node_modules", "dist", "build", "coverage", "out"]);
 
+/** Every source file in the repository, tests excluded (they may build any context). */
 async function sourceFiles(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
   const files = await Promise.all(
     entries.map(async (entry) => {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) {
-        return entry.name === "node_modules" || entry.name === "dist" || entry.name.startsWith(".")
-          ? []
-          : sourceFiles(path);
+        return SKIPPED_DIRS.has(entry.name) || entry.name.startsWith(".") ? [] : sourceFiles(path);
       }
-      return /\.(ts|tsx|mts)$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [path] : [];
+      return /\.[cm]?[jt]sx?$/.test(entry.name) && !/\.test\.[cm]?[jt]sx?$/.test(entry.name)
+        ? [path]
+        : [];
     }),
   );
   return files.flat();
@@ -31,8 +36,7 @@ async function sourceFiles(dir: string): Promise<string[]> {
 
 /** Source files outside the allowed folders that mention the API. */
 async function usersOf(api: RegExp, allowed: readonly string[]): Promise<string[]> {
-  const roots = [join(repoRoot, "apps"), join(repoRoot, "packages")];
-  const files = (await Promise.all(roots.map(sourceFiles))).flat();
+  const files = await sourceFiles(repoRoot);
   expect(files.length).toBeGreaterThan(500);
   const users: string[] = [];
   for (const file of files) {
@@ -52,5 +56,9 @@ describe("delegation boundary (VAY-2506)", () => {
 
   it("lets only the executor of AI changes mint a change delegation (VAY-2522)", async () => {
     expect(await usersOf(CHANGE_API, [EXECUTOR_DIR, "packages/backend-auth/src/"])).toEqual([]);
+  });
+
+  it("never hands the change resolver on under another name (VAY-2522)", async () => {
+    expect(await usersOf(RE_EXPORT, ["packages/backend-auth/src/"])).toEqual([]);
   });
 });

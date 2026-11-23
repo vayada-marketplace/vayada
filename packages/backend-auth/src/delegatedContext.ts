@@ -94,10 +94,11 @@ export function resolveDelegatedChangeContext(
 
 async function resolveDelegated(
   repo: IdentityRepository,
-  input: DelegatedContextInput,
+  given: DelegatedContextInput,
   options: DelegatedContextOptions,
   access: RequestDelegation["access"],
 ): Promise<RequestContext> {
+  const input = snapshotInput(given);
   assertDelegatedInput(input);
   if (!repo.findUserById || !repo.findOrganizationById) {
     throw new Error("The identity repository cannot resolve delegated contexts.");
@@ -179,12 +180,13 @@ async function resolveDelegated(
       source: "agent",
       receivedAt: (options.now?.() ?? new Date()).toISOString(),
     },
-    delegation: { ...input.delegation, access },
   };
 
   const authorization = await options.authorizationResolver(base);
   const resolved: RequestContext = {
     ...base,
+    // Set after the resolver ran, so nothing it does can touch the access (VAY-2522 review).
+    delegation: { ...input.delegation, access },
     membership: {
       ...base.membership,
       permissions: [...authorization.permissions],
@@ -305,15 +307,44 @@ function keepsEntitlement(entitlement: ProductEntitlement, allowed: ReadonlySet<
   );
 }
 
+/**
+ * A plain copy that reads every field once and keeps only the known delegation fields, so a getter
+ * or Proxy can't change what was checked (VAY-2522 review M1).
+ */
+function snapshotInput(input: DelegatedContextInput): DelegatedContextInput {
+  const { userId, organizationId, delegation, propertyIds, locale, currency } = input;
+  if (typeof delegation !== "object" || delegation === null) {
+    throw new DelegationRefusedError("a delegation is required");
+  }
+  // The access comes from which resolver was called, never from the input (VAY-2522).
+  if ("access" in delegation) throw new DelegationRefusedError("the caller may not set access");
+  const { channel, connectionId, conversationId, toolCallId } = delegation;
+  if (propertyIds !== undefined && !Array.isArray(propertyIds)) {
+    throw new DelegationRefusedError("malformed property id");
+  }
+  return {
+    userId,
+    organizationId,
+    delegation: {
+      channel,
+      ...(connectionId !== undefined ? { connectionId } : {}),
+      ...(conversationId !== undefined ? { conversationId } : {}),
+      toolCallId,
+    },
+    ...(propertyIds !== undefined ? { propertyIds: [...propertyIds] } : {}),
+    ...(locale !== undefined ? { locale } : {}),
+    ...(currency !== undefined ? { currency } : {}),
+  };
+}
+
 function assertDelegatedInput(input: DelegatedContextInput): void {
   if (!UUID.test(input.userId)) throw new DelegationRefusedError("malformed user id");
   if (!UUID.test(input.organizationId)) {
     throw new DelegationRefusedError("malformed organization id");
   }
   const { delegation } = input;
-  // The access comes from which resolver was called, never from the input (VAY-2522).
-  if ("access" in delegation) throw new DelegationRefusedError("the caller may not set access");
-  if (!TOOL_CALL_ID.test(delegation.toolCallId)) {
+  // A RegExp test turns undefined into the string "undefined", which the pattern accepts.
+  if (typeof delegation.toolCallId !== "string" || !TOOL_CALL_ID.test(delegation.toolCallId)) {
     throw new DelegationRefusedError("malformed tool-call id");
   }
   const origin =

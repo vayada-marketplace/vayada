@@ -530,9 +530,11 @@ The action calls the existing route in-process with Fastify `app.inject()` insid
   returns `"change"`, and only the one executor of AI changes (`apps/api/src/ai/executor/`,
   VAY-2524) may call it (a boundary test enforces this). `injectAsDelegate` and the auth hook refuse
   POST, PUT, PATCH and DELETE on a read delegation. A change sends exactly one `Idempotency-Key`
-  (8-128 characters of `A-Za-z0-9._:-`) and a JSON body of at most 64 KiB; a read sends neither. The
-  route gate still allows only the routes of registered actions, so no write route is reachable
-  until a change action is registered.
+  (8-128 characters of `A-Za-z0-9._:-`) and, if any, a plain JSON object or array of at most 64 KiB;
+  a read sends neither. Only routes that read the header use that key: a route that takes its key
+  from the body, or has none, is made retry-safe by its action (VAY-2524, VAY-2523). The route gate
+  still allows only the routes of registered actions, so no write route is reachable until a change
+  action is registered.
 
 ### 5.3 What delegation never passes
 

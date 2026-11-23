@@ -556,7 +556,7 @@ describe("write delegation (VAY-2522)", () => {
 
   it.each([
     ["no key", null],
-    ["a key too short", "abc"],
+    ["a key too short", "op_2522"],
     ["a key too long", "k".repeat(129)],
     ["a key with spaces", "op 2522 0001"],
     ["a key with a line break", "op_2522\r\nx-evil: 1"],
@@ -580,17 +580,74 @@ describe("write delegation (VAY-2522)", () => {
     expect((await read({})).json()).toMatchObject({ access: "change" });
   });
 
-  it("refuses a body that is not JSON or is too large", async () => {
+  it("takes Idempotency-Keys of 8 to 128 characters", async () => {
+    const instance = await buildTestApp();
+    for (const key of ["op_25221", "k".repeat(128)]) {
+      expect((await write(instance, { idempotencyKey: key })).json().idempotencyKey).toBe(key);
+    }
+  });
+
+  it("takes only a plain JSON object or array as the body", async () => {
     const instance = await buildTestApp();
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
-    await expect(write(instance, { body: cyclic })).rejects.toThrow(/not JSON/);
-    await expect(write(instance, { body: { n: BigInt(1) } })).rejects.toThrow(/not JSON/);
-    await expect(write(instance, { body: () => 1 })).rejects.toThrow(/not JSON/);
-    const big = { text: "x".repeat(DELEGATED_BODY_MAX_BYTES) };
-    await expect(write(instance, { body: big })).rejects.toThrow(/too large/);
-    const fits = { text: "x".repeat(DELEGATED_BODY_MAX_BYTES - 20) };
-    expect((await write(instance, { body: fits })).statusCode).toBe(200);
+    for (const body of [
+      cyclic,
+      { n: BigInt(1) },
+      () => 1,
+      null,
+      "text",
+      42,
+      new Map([["a", 1]]),
+      new Date(0),
+    ]) {
+      await expect(write(instance, { body })).rejects.toThrow(/JSON object or array/);
+    }
+    expect((await write(instance, { body: [{ id: 1 }] })).json().body).toEqual([{ id: 1 }]);
+  });
+
+  it("counts the body's UTF-8 bytes, up to exactly the limit", async () => {
+    const instance = await buildTestApp();
+    // {"text":"…"} adds 11 bytes around the text.
+    const ascii = (n: number) => ({ text: "x".repeat(n) });
+    expect((await write(instance, { body: ascii(DELEGATED_BODY_MAX_BYTES - 11) })).statusCode).toBe(
+      200,
+    );
+    await expect(write(instance, { body: ascii(DELEGATED_BODY_MAX_BYTES - 10) })).rejects.toThrow(
+      /too large/,
+    );
+    // Fewer characters than the limit, but two bytes each.
+    const accents = { text: "é".repeat(Math.ceil((DELEGATED_BODY_MAX_BYTES - 10) / 2)) };
+    expect(JSON.stringify(accents).length).toBeLessThan(DELEGATED_BODY_MAX_BYTES);
+    await expect(write(instance, { body: accents })).rejects.toThrow(/too large/);
+  });
+
+  it("reads its input once: a getter can't swap what was checked for what is sent", async () => {
+    const instance = await buildTestApp();
+    const readContext = await mint("u_1");
+    const otherChange = await mint("u_other", { access: "change" });
+    const reads = { context: 0, method: 0, idempotencyKey: 0 };
+    const input = {
+      routeUrl: "/api/test/echo",
+      url: "/api/test/echo",
+      get context() {
+        return reads.context++ === 0 ? otherChange : readContext;
+      },
+      get method() {
+        return reads.method++ === 0 ? ("POST" as const) : ("GET" as const);
+      },
+      get idempotencyKey() {
+        return reads.idempotencyKey++ === 0 ? KEY : "bad key";
+      },
+    };
+    const res = await injectAsDelegate(instance, input);
+    expect(res.json()).toMatchObject({
+      userId: uid("u_other"),
+      access: "change",
+      method: "POST",
+      idempotencyKey: KEY,
+    });
+    expect(reads).toEqual({ context: 1, method: 1, idempotencyKey: 1 });
   });
 
   it("holds the same route rules as a read: declared route, method, gate", async () => {

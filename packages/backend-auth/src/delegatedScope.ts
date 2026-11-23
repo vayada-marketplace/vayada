@@ -55,11 +55,12 @@ export type DelegatedInject = {
   routeUrl: string;
   /** Concrete URL to inject, e.g. "/api/pms/properties/<uuid>/rooms?from=2026-11-20". */
   url: string;
-  /** Writes only: the JSON body. */
+  /** Writes only: the JSON body, a plain object or array. */
   body?: unknown;
   /**
-   * Writes only, and required for them: sent as the request's one Idempotency-Key header, so a
-   * retry of the same change never runs twice (VAY-2524 sends operation id + step).
+   * Writes only, and required for them: sent as the request's one Idempotency-Key header (VAY-2524
+   * sends operation id + step). Only routes that read that header use it; a route that takes its
+   * key from the body, or has none, is made retry-safe by its action (VAY-2524, VAY-2523).
    */
   idempotencyKey?: string;
   /**
@@ -87,68 +88,59 @@ export async function injectAsDelegate(
   input: DelegatedInject,
 ): Promise<LightMyRequestResponse> {
   if (storage.getStore()) throw new DelegationRefusedError("nested delegated request");
-  if (!METHODS.has(input.method)) throw new DelegationRefusedError("unsupported method");
-  if (!isMintedDelegatedContext(input.context) || !isDelegatedContext(input.context)) {
+  // Every field is read exactly once: a getter or Proxy input can never swap what was checked for
+  // what is sent (VAY-2522 review M1).
+  const { context: checked, method, routeUrl, url, body, idempotencyKey, requestId } = input;
+  if (typeof method !== "string" || !METHODS.has(method)) {
+    throw new DelegationRefusedError("unsupported method");
+  }
+  if (!isMintedDelegatedContext(checked) || !isDelegatedContext(checked)) {
     throw new DelegationRefusedError("not a context resolveDelegatedContext returned");
   }
   const headers: Record<string, string> = {};
   let payload: string | undefined;
-  if (input.method === "GET") {
-    if (input.body !== undefined || input.idempotencyKey !== undefined) {
+  if (method === "GET") {
+    if (body !== undefined || idempotencyKey !== undefined) {
       throw new DelegationRefusedError("a read sends no body and no Idempotency-Key");
     }
   } else {
-    if (input.context.delegation?.access !== "change") {
+    if (checked.delegation?.access !== "change") {
       throw new DelegationRefusedError("this delegation may only read");
     }
-    if (typeof input.idempotencyKey !== "string" || !IDEMPOTENCY_KEY.test(input.idempotencyKey)) {
+    if (typeof idempotencyKey !== "string" || !IDEMPOTENCY_KEY.test(idempotencyKey)) {
       throw new DelegationRefusedError("a change needs a valid Idempotency-Key");
     }
-    headers["idempotency-key"] = input.idempotencyKey;
-    if (input.body !== undefined) {
-      try {
-        payload = JSON.stringify(input.body);
-      } catch {
-        payload = undefined; // cycles and BigInts
-      }
-      if (typeof payload !== "string") throw new DelegationRefusedError("the body is not JSON");
-      if (Buffer.byteLength(payload) > DELEGATED_BODY_MAX_BYTES) {
-        throw new DelegationRefusedError("the body is too large");
-      }
+    headers["idempotency-key"] = idempotencyKey;
+    if (body !== undefined) {
+      payload = jsonBody(body);
       headers["content-type"] = "application/json";
     }
   }
-  const age = Date.now() - Date.parse(input.context.audit.receivedAt);
+  const age = Date.now() - Date.parse(checked.audit.receivedAt);
   if (!(age >= 0 && age <= DELEGATED_CONTEXT_MAX_AGE_MS)) {
     throw new DelegationRefusedError("the delegated context expired; resolve it per tool call");
   }
-  if (!input.url.startsWith("/") || input.url.startsWith("//")) {
+  if (typeof url !== "string" || !url.startsWith("/") || url.startsWith("//")) {
     throw new DelegationRefusedError("the URL must be a path on this server");
   }
-  if (input.requestId !== undefined && !REQUEST_ID.test(input.requestId)) {
+  if (requestId !== undefined && !REQUEST_ID.test(requestId)) {
     throw new DelegationRefusedError("a request id must be a UUID");
   }
   // Boot outside the scope, so no boot hook or timer ever holds it (review L3).
   await app.ready();
   // Each request gets its own copy with its own request id: the route may change its copy, and
   // tool-call ids are not unique enough to be request ids (review M2).
-  const context: RequestContext = structuredClone(input.context);
-  context.audit.requestId = input.requestId ?? randomUUID();
+  const context: RequestContext = structuredClone(checked);
+  context.audit.requestId = requestId ?? randomUUID();
   const nonce = randomBytes(24);
-  const scope: DelegatedScope = {
-    context,
-    method: input.method,
-    routeUrl: input.routeUrl,
-    nonce,
-    state: "armed",
-  };
+  const scope: DelegatedScope = { context, method, routeUrl, nonce, state: "armed" };
   try {
     return await new Promise<LightMyRequestResponse>((resolve, reject) => {
       storage.run(scope, () => {
         app.inject(
           {
-            method: input.method,
-            url: input.url,
+            method,
+            url,
             headers: { ...headers, [NONCE_HEADER]: nonce.toString("base64url") },
             ...(payload === undefined ? {} : { payload }),
           },
@@ -162,6 +154,26 @@ export async function injectAsDelegate(
     // sockets) sees a closed scope and is refused.
     scope.state = "closed";
   }
+}
+
+/** A change's body: a plain JSON object or array, at most DELEGATED_BODY_MAX_BYTES (UTF-8). */
+function jsonBody(body: unknown): string {
+  const plain =
+    Array.isArray(body) ||
+    (typeof body === "object" && body !== null && Object.getPrototypeOf(body) === Object.prototype);
+  let text: string | undefined;
+  try {
+    text = plain ? JSON.stringify(body) : undefined;
+  } catch {
+    text = undefined; // cycles and BigInts
+  }
+  if (typeof text !== "string") {
+    throw new DelegationRefusedError("the body must be a JSON object or array");
+  }
+  if (Buffer.byteLength(text) > DELEGATED_BODY_MAX_BYTES) {
+    throw new DelegationRefusedError("the body is too large");
+  }
+  return text;
 }
 
 /**
@@ -195,7 +207,9 @@ export function takeDelegatedContext(
       `route mismatch (${request.method} ${routeUrl ?? "<no route>"})`,
     );
   }
-  // injectAsDelegate refuses this already; the hook checks again so no other path can (VAY-2522).
+  // injectAsDelegate checks both already; the hook checks again so no other path can (VAY-2522).
+  if (!isDelegatedContext(scope.context))
+    throw new DelegationRefusedError("not a delegated context");
   if (request.method !== "GET" && scope.context.delegation?.access !== "change") {
     throw new DelegationRefusedError("this delegation may only read");
   }

@@ -415,6 +415,40 @@ describe("resolveDelegatedContext (VAY-2506)", () => {
     ).rejects.toThrow(/may not set access/);
   });
 
+  it("reads its input once: a getter can't add access or change the call after the checks", async () => {
+    let reads = 0;
+    const given = {
+      ...input(),
+      get delegation() {
+        reads += 1;
+        return reads === 1
+          ? { channel: "in_app" as const, conversationId: CONVERSATION, toolCallId: "call_1" }
+          : ({
+              channel: "mcp",
+              connectionId: CONVERSATION,
+              toolCallId: "x",
+              access: "change",
+            } as never);
+      },
+    };
+    const context = await resolveDelegatedContext(repository(), given, { authorizationResolver });
+    expect(reads).toBe(1);
+    expect(context.delegation).toEqual({
+      channel: "in_app",
+      conversationId: CONVERSATION,
+      toolCallId: "call_1",
+      access: "read",
+    });
+  });
+
+  it.each([
+    ["no delegation", { delegation: undefined }],
+    ["a delegation that is not an object", { delegation: "in_app" }],
+    ["a missing tool-call id", { delegation: { channel: "in_app", conversationId: CONVERSATION } }],
+  ])("refuses %s", async (_label, overrides) => {
+    await expect(resolve(overrides as never)).rejects.toThrow(DelegationRefusedError);
+  });
+
   it("needs the by-id lookups", async () => {
     await expect(resolve({}, { byIdLookups: false })).rejects.toThrow(/cannot resolve/);
   });
