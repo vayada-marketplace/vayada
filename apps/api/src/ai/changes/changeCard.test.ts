@@ -7,6 +7,7 @@ import {
   CARD_WRITERS,
   CardTargetMissingError,
   cardSha256,
+  changeArgumentProblem,
   dateTimeText,
   listText,
   nightsText,
@@ -49,8 +50,16 @@ function reader(overrides: Partial<CardReader> = {}): CardReader {
         status: "active",
       };
     },
+    async linkedRoomTypeIds() {
+      return [];
+    },
     async thread() {
-      return { guestName: "Anna Keller" };
+      return {
+        guestName: "Anna Keller",
+        channel: "ota" as const,
+        providerChannel: "Airbnb",
+        lastMessageAt: "2026-12-09T08:00:00.000Z",
+      };
     },
     async booking() {
       return {
@@ -126,6 +135,29 @@ describe("the Yes/No card (VAY-2524)", () => {
         { label: "Nights", value: "Sat 12 Dec" },
       ],
     });
+    // A room named twice is blocked once (the route removes the repeat), in any letter case.
+    expect(
+      await write("room_block_create@1", {
+        ...args,
+        roomTypeId: DELUXE.toUpperCase(),
+        roomIds: [R12, R12.toUpperCase()],
+      }),
+    ).toMatchObject({ question: "Block room 12 for 3 nights?", yesLabel: "Yes, block room 12" });
+    // Room types that share rooms with this one are named.
+    expect(
+      await write("room_block_create@1", args, reader({ linkedRoomTypeIds: async () => [SUITE] })),
+    ).toMatchObject({
+      effects: [
+        "Guests can't book room 12 on these nights.",
+        "Linked room types share these rooms, so their availability changes too: Garden Suite.",
+        "If channels are connected, they get the new availability.",
+      ],
+    });
+    // A last night before the first is refused when the AI asks, never shown.
+    expect(changeArgumentProblem("room_block_create@1", { ...args, endsOn: "2026-12-11" })).toBe(
+      "endsOn: must not be before startsOn",
+    );
+    expect(changeArgumentProblem("room_block_create@1", args)).toBeNull();
     // A room that is gone, or not of that room type: the change is no longer what was asked.
     await expect(
       write("room_block_create@1", { ...args, roomIds: ["ffffffff-0000-4000-8000-000000000099"] }),
@@ -175,6 +207,14 @@ describe("the Yes/No card (VAY-2524)", () => {
     await expect(
       write("room_block_release@1", args, reader({ roomBlock: async () => null })),
     ).rejects.toThrow(CardTargetMissingError);
+    // However long the block, the card counts every night and names the real last one.
+    const long = reader({
+      roomBlock: async () => ({ ...typeBlock, startsOn: "2026-01-01", endsOn: "2027-12-31" }),
+    });
+    expect(await write("room_block_release@1", args, long)).toMatchObject({
+      question: "Release the block on 2 rooms of Garden Suite for 730 nights?",
+      details: [expect.anything(), { label: "Nights", value: "Thu 1 Jan to Fri 31 Dec 2027" }],
+    });
   });
 
   it("sets a room's state, saying what it is now", async () => {
@@ -214,7 +254,11 @@ describe("the Yes/No card (VAY-2524)", () => {
       question: "Mark the conversation with Anna Keller as done?",
       doneTitle: "Marked the conversation with Anna Keller as done",
       yesLabel: "Yes, mark it done",
-      details: [{ label: "Guest", value: "Anna Keller" }],
+      details: [
+        { label: "Guest", value: "Anna Keller" },
+        { label: "Channel", value: "Airbnb" },
+        { label: "Last message", value: "Wed 9 Dec, 08:00 UTC" },
+      ],
       effects: [
         "It leaves the list of conversations that need an answer.",
         "The guest is not told.",
@@ -226,14 +270,25 @@ describe("the Yes/No card (VAY-2524)", () => {
       question: "Set the conversation with Anna Keller aside until Mon 14 Dec, 09:00 UTC?",
       details: [
         { label: "Guest", value: "Anna Keller" },
+        { label: "Channel", value: "Airbnb" },
+        { label: "Last message", value: "Wed 9 Dec, 08:00 UTC" },
         { label: "Until", value: "Mon 14 Dec, 09:00 UTC" },
       ],
     });
-    expect(
-      await write("thread_reopen@1", args, reader({ thread: async () => ({ guestName: null }) })),
-    ).toMatchObject({
+    const unnamed = reader({
+      thread: async () => ({
+        guestName: null,
+        channel: "email",
+        providerChannel: null,
+        lastMessageAt: null,
+      }),
+    });
+    expect(await write("thread_reopen@1", args, unnamed)).toMatchObject({
       question: "Open a guest conversation again?",
-      details: [{ label: "Guest", value: "Name not known" }],
+      details: [
+        { label: "Guest", value: "Name not known" },
+        { label: "Channel", value: "Email" },
+      ],
     });
     await expect(
       write("thread_mark_done@1", args, reader({ thread: async () => null })),
@@ -252,6 +307,18 @@ describe("the Yes/No card (VAY-2524)", () => {
       ],
       effects: ["Only your team sees the note; the guest never does."],
     });
+    const sameDay = reader({
+      booking: async () => ({
+        guestName: "",
+        reference: "VAY-1043",
+        checkIn: "2026-12-12",
+        checkOut: "2026-12-12",
+      }),
+    });
+    expect(await write("booking_note_add@1", args, sameDay)).toMatchObject({
+      question: "Add a private note to booking VAY-1043?",
+      details: [{ label: "Booking", value: "VAY-1043 · from Sat 12 Dec" }, expect.anything()],
+    });
   });
 
   it("binds a Yes to the card's exact text, its operation and its preview", async () => {
@@ -260,7 +327,14 @@ describe("the Yes/No card (VAY-2524)", () => {
     const renamed = await write(
       "thread_mark_done@1",
       args,
-      reader({ thread: async () => ({ guestName: "Anna Keller-Brandt" }) }),
+      reader({
+        thread: async () => ({
+          guestName: "Anna Keller-Brandt",
+          channel: "ota",
+          providerChannel: "Airbnb",
+          lastMessageAt: "2026-12-09T08:00:00.000Z",
+        }),
+      }),
     );
     const op = { id: "11111111-0000-4000-8000-000000000001", previewSha256: null };
     expect(cardSha256(op, card)).toBe(cardSha256(op, await write("thread_mark_done@1", args)));

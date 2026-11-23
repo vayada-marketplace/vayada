@@ -296,15 +296,17 @@ export async function registerPendingActionRoutes(
       return {
         operation: current,
         card: await cardOrNull(current, authorization),
-        refusal:
-          current.status === "closed" && current.closeReason === "expired"
-            ? { statusCode: 409, code: "expired", message: "This question expired." }
-            : { statusCode: 409, code: "already_answered", message: "This was answered already." },
+        refusal: answeredRefusal(current),
       };
     }
+    // The refusal says what really happened: another tab may have answered it meanwhile.
     const closed = async (reason: AiOperationCloseReason, refusal: Refusal): Promise<Settled> => {
       const current = await close(operation, reason);
-      return { operation: current, card: await cardOrNull(current, authorization), refusal };
+      return {
+        operation: current,
+        card: await cardOrNull(current, authorization),
+        refusal: closedAs(current, reason) ? refusal : answeredRefusal(current),
+      };
     };
     const action = findAction(`${operation.action}@${operation.actionVersion}`);
     if (!action) {
@@ -371,6 +373,23 @@ export async function registerPendingActionRoutes(
     }
   }
 
+  const closedAs = (operation: AiOperation, reason: AiOperationCloseReason) =>
+    operation.status === "closed" && operation.closeReason === reason;
+  /** The refusal for a change that no longer waits: expired, or answered (maybe running). */
+  const answeredRefusal = (operation: AiOperation): Refusal =>
+    closedAs(operation, "expired")
+      ? { statusCode: 409, code: "expired", message: "This question expired." }
+      : { statusCode: 409, code: "already_answered", message: "This was answered already." };
+  /** Anything unexpected: no detail leaves (store or executor errors name tables and states). */
+  const unavailable = (request: FastifyRequest, reply: FastifyReply, error: unknown) => {
+    request.log.error({ err: error }, "AI change answer failed");
+    return sendError(reply, {
+      statusCode: 503,
+      code: "unavailable",
+      message: "vayada can't do this right now. Try again.",
+    });
+  };
+
   const viewOf = (settled: Settled) =>
     pendingActionView(settled.operation, settled.card, now(), {
       notAllowed: settled.refusal?.code === "not_allowed",
@@ -379,9 +398,13 @@ export async function registerPendingActionRoutes(
   app.get<{ Params: Params }>("/pending-actions/:id", async (request, reply) => {
     const loaded = await load(request, reply);
     if (!loaded) return reply;
-    const settled = await settle(loaded.context, loaded.operation, authorizationOf(request));
-    if (settled.refusal?.statusCode === 503) return sendError(reply, settled.refusal);
-    return viewOf(settled);
+    try {
+      const settled = await settle(loaded.context, loaded.operation, authorizationOf(request));
+      if (settled.refusal?.statusCode === 503) return sendError(reply, settled.refusal);
+      return viewOf(settled);
+    } catch (error) {
+      return unavailable(request, reply, error);
+    }
   });
 
   app.post<{ Params: Params; Body: unknown }>(
@@ -400,48 +423,59 @@ export async function registerPendingActionRoutes(
       ) {
         return invalid('Send { answer: "yes", cardSha256 } or { answer: "no" }.');
       }
-      const authorization = authorizationOf(request);
-      const { operation } = loaded;
-
-      if (body.answer === "no") {
-        // Only the No that closed it counts: a second click finds it answered, as a second Yes does.
-        const declined = await options.store.closePending(operation.id, "declined", now());
-        const current = declined ?? (await options.store.find(operation.id)) ?? operation;
-        const view = pendingActionView(current, await cardOrNull(current, authorization), now());
-        if (declined?.closeReason === "declined") return view;
-        return sendError(
-          reply,
-          view.state === "expired"
-            ? { statusCode: 409, code: "expired", message: "This question expired." }
-            : { statusCode: 409, code: "already_answered", message: "This was answered already." },
-          view,
-        );
-      }
-      if (body.answer !== "yes") return invalid('answer must be "yes" or "no".');
-      if (typeof body.cardSha256 !== "string" || !SHA256.test(body.cardSha256)) {
+      const given = body.answer === "yes" || body.answer === "no" ? body.answer : null;
+      if (!given) return invalid('answer must be "yes" or "no".');
+      if (
+        given === "yes" &&
+        (typeof body.cardSha256 !== "string" || !SHA256.test(body.cardSha256))
+      ) {
         return invalid("A yes needs the cardSha256 of the card shown.");
       }
+      const answer = async (
+        context: RequestContext,
+        operation: AiOperation,
+        given: "yes" | "no",
+        shownSha256: unknown,
+      ) => {
+        const authorization = authorizationOf(request);
 
-      const settled = await settle(loaded.context, operation, authorization);
-      if (settled.refusal) return sendError(reply, settled.refusal, viewOf(settled));
-      // A card that reads differently now (a renamed room, another preview) is not what the person
-      // said yes to.
-      if (cardSha256(operation, settled.card!) !== body.cardSha256) {
-        const current = await close(operation, "changed");
-        return sendError(
-          reply,
-          {
-            statusCode: 409,
-            code: "changed",
-            message: "This changed since you saw it. Nothing was changed.",
-          },
-          pendingActionView(current, settled.card, now()),
-        );
+        if (given === "no") {
+          // Only the No that closed it counts: a second click finds it answered, as a second Yes does.
+          const declined = await options.store.closePending(operation.id, "declined", now());
+          const current = declined ?? (await options.store.find(operation.id)) ?? operation;
+          const view = pendingActionView(current, await cardOrNull(current, authorization), now());
+          if (declined?.closeReason === "declined") return view;
+          return sendError(reply, answeredRefusal(current), view);
+        }
+
+        const settled = await settle(context, operation, authorization);
+        if (settled.refusal) return sendError(reply, settled.refusal, viewOf(settled));
+        // A card that reads differently now (a renamed room, another preview) is not what the person
+        // said yes to.
+        if (cardSha256(operation, settled.card!) !== shownSha256) {
+          const current = await close(operation, "changed");
+          return sendError(
+            reply,
+            closedAs(current, "changed")
+              ? {
+                  statusCode: 409,
+                  code: "changed",
+                  message: "This changed since you saw it. Nothing was changed.",
+                }
+              : answeredRefusal(current),
+            pendingActionView(current, settled.card, now()),
+          );
+        }
+        // One winner runs it; a second tab or a double click gets the same run. The card stays the
+        // one the person said yes to.
+        const after = (await options.startAndRun(operation.id)) ?? operation;
+        return pendingActionView(after, settled.card, now());
+      };
+      try {
+        return await answer(loaded.context, loaded.operation, given, body.cardSha256);
+      } catch (error) {
+        return unavailable(request, reply, error);
       }
-      // One winner runs it; a second tab or a double click gets the same run. The card stays the
-      // one the person said yes to.
-      const after = (await options.startAndRun(operation.id)) ?? operation;
-      return pendingActionView(after, settled.card, now());
     },
   );
 }

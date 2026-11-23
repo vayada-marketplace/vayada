@@ -163,6 +163,16 @@ export function createPgAiBudgetAdmin(config: {
             [change.organizationId, limit, change.audit.actorUserId, change.audit.requestedAt],
           );
         }
+        // VAY-2524: switching AI off for the account closes its changes waiting for an answer, as
+        // expired ones are closed (a change the person already said yes to runs to its end).
+        if ((limit ?? config.defaultMonthlyLimitMicroUsd) === 0) {
+          await client.query(
+            `UPDATE platform.ai_operations
+                SET status = 'closed', close_reason = 'ai_switched_off', finished_at = now()
+              WHERE organization_id = $1::uuid AND status = 'pending'`,
+            [change.organizationId],
+          );
+        }
         const from = before.rows[0] ? Number(before.rows[0].limit) : null;
         await client.query(
           `INSERT INTO platform.product_audit_events (

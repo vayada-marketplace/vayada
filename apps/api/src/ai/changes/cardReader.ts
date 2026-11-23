@@ -32,8 +32,16 @@ const roomBlocks = z.object({
     }),
   ),
 });
+const linkedGroups = z.object({
+  items: z.array(z.object({ memberRoomTypeIds: z.array(z.string()) })),
+});
 const thread = z.object({
-  thread: z.object({ guest: z.object({ displayName: z.string().nullable() }) }),
+  thread: z.object({
+    channel: z.enum(["ota", "email"]),
+    providerChannel: z.string().nullable(),
+    guest: z.object({ displayName: z.string().nullable() }),
+    lastMessage: z.object({ at: z.string().nullable() }),
+  }),
 });
 const booking = z.object({
   item: z.object({
@@ -83,7 +91,18 @@ export function createCardReader(app: FastifyInstance, authorization: string): C
     },
     async roomBlock(propertyId, blockId) {
       const { items } = await list(`${property(propertyId)}/room-blocks`, roomBlocks);
-      return items.find((item) => item.blockId === blockId) ?? null;
+      return items.find((item) => item.blockId.toLowerCase() === blockId.toLowerCase()) ?? null;
+    },
+    async linkedRoomTypeIds(propertyId, roomTypeId) {
+      const { items } = await list(`${property(propertyId)}/linked-inventory-groups`, linkedGroups);
+      const id = roomTypeId.toLowerCase();
+      const linked = new Set<string>();
+      for (const group of items) {
+        const members = group.memberRoomTypeIds.map((member) => member.toLowerCase());
+        if (members.includes(id))
+          for (const member of members) if (member !== id) linked.add(member);
+      }
+      return [...linked];
     },
     async thread(propertyId, threadId) {
       const value = await get(
@@ -91,7 +110,14 @@ export function createCardReader(app: FastifyInstance, authorization: string): C
         `${property(propertyId)}/messaging/threads/${encodeURIComponent(threadId)}?messageLimit=1`,
         thread,
       );
-      return value && { guestName: value.thread.guest.displayName };
+      return (
+        value && {
+          guestName: value.thread.guest.displayName,
+          channel: value.thread.channel,
+          providerChannel: value.thread.providerChannel,
+          lastMessageAt: value.thread.lastMessage.at,
+        }
+      );
     },
     async booking(propertyId, guestBookingId) {
       const value = await get(

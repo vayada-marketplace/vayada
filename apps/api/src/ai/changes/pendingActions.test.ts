@@ -94,6 +94,7 @@ const readerOf = (overrides: Partial<CardReader> = {}): CardReader => ({
   rooms: async () => [{ roomId: R12, roomTypeId: DELUXE, roomNumber: "12", status: "available" }],
   roomTypeNames: async () => new Map([[DELUXE, "Deluxe Double"]]),
   roomBlock: async () => null,
+  linkedRoomTypeIds: async () => [],
   thread: async () => null,
   booking: async () => null,
   ...overrides,
@@ -126,6 +127,9 @@ async function setUp(
     channelActive?: boolean;
     reader?: CardReader;
     afterRun?: (row: AiOperation) => AiOperation;
+    /** Instead of aiOn: may also change rows, as another tab would meanwhile. */
+    aiEnabled?: (rows: Map<string, AiOperation>) => Promise<boolean>;
+    startFails?: boolean;
   } = {},
 ) {
   const { store, rows } = memoryStore(...operations);
@@ -143,6 +147,7 @@ async function setUp(
     store,
     async startAndRun(id) {
       starts.push(id);
+      if (options.startFails) throw new Error("AI operation store query failed (57P01)");
       const row = rows.get(id);
       if (!row || row.status !== "pending") return row ?? null;
       const ran = (options.afterRun ?? ((r) => ({ ...r, status: "done" as const })))({
@@ -153,7 +158,7 @@ async function setUp(
       rows.set(id, ran);
       return ran;
     },
-    aiEnabled: async () => options.aiOn ?? true,
+    aiEnabled: async () => (options.aiEnabled ? options.aiEnabled(rows) : (options.aiOn ?? true)),
     channelActive: async () => options.channelActive ?? true,
     allowedOrigins: [ORIGIN],
     reader: () => options.reader ?? readerOf(),
@@ -395,6 +400,39 @@ describe("answering AI changes (VAY-2524)", () => {
     expect(rows.get(op.id)).toMatchObject({ status: "closed", closeReason: "declined" });
     expect((await answer(op.id, { answer: "no" })).statusCode).toBe(409);
     expect(starts).toEqual([]);
+  });
+
+  it("says a question was answered when another tab answered it meanwhile, not why it closes", async () => {
+    const op = operation();
+    const { answer, rows, starts } = await setUp([op], {
+      // AI goes off while another tab's Yes starts the change.
+      aiEnabled: async (current) => {
+        current.set(op.id, { ...op, status: "running", startedAt: LATER, leaseOwner: "other" });
+        return false;
+      },
+    });
+    const yes = await answer(op.id, { answer: "yes", cardSha256: "a".repeat(64) });
+    expect(yes.statusCode).toBe(409);
+    expect(yes.json()).toMatchObject({
+      code: "already_answered",
+      pendingAction: { state: "running" },
+    });
+    expect(rows.get(op.id)!.status).toBe("running");
+    expect(starts).toEqual([]);
+  });
+
+  it("answers a failure inside with a plain 'try again', never its detail", async () => {
+    const op = operation();
+    const { get, answer } = await setUp([op], { startFails: true });
+    const { cardSha256: sha } = (await get(op.id)).json<PendingActionView>();
+    const yes = await answer(op.id, { answer: "yes", cardSha256: sha });
+    expect(yes.statusCode).toBe(503);
+    expect(yes.json()).toEqual({
+      statusCode: 503,
+      code: "unavailable",
+      category: "dependency",
+      message: "vayada can't do this right now. Try again.",
+    });
   });
 
   it("tells each way a change ended", () => {

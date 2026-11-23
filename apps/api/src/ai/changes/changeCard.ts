@@ -24,10 +24,18 @@ export type CardReader = {
   roomTypeNames(propertyId: string): Promise<ReadonlyMap<string, string>>;
   /** Null when the block is gone. */
   roomBlock(propertyId: string, blockId: string): Promise<CardRoomBlock | null>;
+  /** Other room types that share rooms with this one (linked inventory). */
+  linkedRoomTypeIds(propertyId: string, roomTypeId: string): Promise<readonly string[]>;
   /** Null when the conversation is gone. */
-  thread(propertyId: string, threadId: string): Promise<{ guestName: string | null } | null>;
+  thread(propertyId: string, threadId: string): Promise<CardThread | null>;
   /** Null when the booking is gone. */
   booking(propertyId: string, guestBookingId: string): Promise<CardBooking | null>;
+};
+export type CardThread = {
+  guestName: string | null;
+  channel: "ota" | "email";
+  providerChannel: string | null;
+  lastMessageAt: string | null;
 };
 export type CardRoom = { roomId: string; roomTypeId: string; roomNumber: string; status: string };
 export type CardRoomBlock = {
@@ -86,6 +94,14 @@ const ROOM_STATES: Readonly<Record<string, string>> = {
 };
 const CHANNELS = "If channels are connected, they get the new availability.";
 const GUEST_NOT_TOLD = "The guest is not told.";
+const PROVIDERS: Readonly<Record<string, string>> = {
+  airbnb: "Airbnb",
+  booking: "Booking.com",
+  booking_com: "Booking.com",
+  "booking.com": "Booking.com",
+  bookingcom: "Booking.com",
+  expedia: "Expedia",
+};
 
 const str = (value: unknown): string => (typeof value === "string" ? value : "");
 const dayOf = (date: string) => new Date(`${date}T00:00:00Z`);
@@ -100,15 +116,14 @@ export function listText(items: readonly string[], max = 5): string {
   return `${shown.slice(0, -1).join(", ")} and ${shown[shown.length - 1]}`;
 }
 
-function nightsOf(startsOn: string, endsOn: string): Date[] {
-  const start = dayOf(startsOn).getTime();
-  const end = dayOf(endsOn).getTime();
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+/** The first and last night and how many, however long the range. */
+function nightSpan(startsOn: string, endsOn: string): { first: Date; last: Date; count: number } {
+  const first = dayOf(startsOn);
+  const last = dayOf(endsOn);
+  if (Number.isNaN(first.getTime()) || Number.isNaN(last.getTime()) || last < first) {
     throw new CardTargetMissingError();
   }
-  const nights: Date[] = [];
-  for (let at = start; at <= end && nights.length <= 366; at += DAY_MS) nights.push(new Date(at));
-  return nights;
+  return { first, last, count: Math.round((last.getTime() - first.getTime()) / DAY_MS) + 1 };
 }
 
 function dayText(day: Date, now: Date, withMonth: boolean): string {
@@ -120,10 +135,9 @@ function dayText(day: Date, now: Date, withMonth: boolean): string {
 
 /** "Sat 12, Sun 13 and Mon 14 Dec"; more than a week: "Sat 12 Dec to Fri 1 Jan 2027". */
 export function nightsText(startsOn: string, endsOn: string, now: Date): string {
-  const nights = nightsOf(startsOn, endsOn);
-  if (nights.length > 7) {
-    return `${dayText(nights[0]!, now, true)} to ${dayText(nights[nights.length - 1]!, now, true)}`;
-  }
+  const { first, last, count } = nightSpan(startsOn, endsOn);
+  if (count > 7) return `${dayText(first, now, true)} to ${dayText(last, now, true)}`;
+  const nights = Array.from({ length: count }, (_, n) => new Date(first.getTime() + n * DAY_MS));
   // The month (and year) after the last night of each month.
   return listText(
     nights.map((night, index) => {
@@ -142,36 +156,61 @@ export function dateTimeText(iso: string, now: Date): string {
   return `${dayText(at, now, true)}, ${time} UTC`;
 }
 
-/** The rooms of one room type a change names, in the order asked; any missing one is a change. */
+/** Ids as the database compares them: UUIDs in any case are one record. */
+const sameId = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+/** A room type's name, by id in any case. */
+async function typeNameOf(input: CardInput, roomTypeId: string): Promise<string> {
+  for (const [id, name] of await input.reader.roomTypeNames(input.propertyId)) {
+    if (sameId(id, roomTypeId)) return name;
+  }
+  throw new CardTargetMissingError();
+}
+
+/**
+ * The rooms of one room type a change names, in the order asked and each once (the route blocks a
+ * room once however often it is named); any missing one is a change.
+ */
 async function roomsOfType(
   input: CardInput,
   roomTypeId: string,
   roomIds: readonly string[],
 ): Promise<{ numbers: string[]; typeName: string; rooms: CardRoom[] }> {
-  const [rooms, typeNames] = await Promise.all([
+  const [rooms, typeName] = await Promise.all([
     input.reader.rooms(input.propertyId),
-    input.reader.roomTypeNames(input.propertyId),
+    typeNameOf(input, roomTypeId),
   ]);
-  const typeName = typeNames.get(roomTypeId);
-  if (!typeName) throw new CardTargetMissingError();
-  const found = roomIds.map((roomId) => {
-    const room = rooms.find((candidate) => candidate.roomId === roomId);
-    if (!room || room.roomTypeId !== roomTypeId) throw new CardTargetMissingError();
-    return room;
-  });
+  const found: CardRoom[] = [];
+  for (const roomId of roomIds) {
+    const room = rooms.find((candidate) => sameId(candidate.roomId, roomId));
+    if (!room || !sameId(room.roomTypeId, roomTypeId)) throw new CardTargetMissingError();
+    if (!found.includes(room)) found.push(room);
+  }
+  if (found.length === 0) throw new CardTargetMissingError();
   return { numbers: found.map((room) => room.roomNumber), typeName, rooms: found };
 }
 
 const roomsText = (numbers: readonly string[]) =>
   numbers.length === 1 ? `room ${numbers[0]}` : `rooms ${listText(numbers)}`;
 
+/** Room types that share rooms with this one see the change too (linked inventory). */
+async function linkedEffect(input: CardInput, roomTypeId: string): Promise<string[]> {
+  const linked = await input.reader.linkedRoomTypeIds(input.propertyId, roomTypeId);
+  if (linked.length === 0) return [];
+  const names = await Promise.all(linked.map((id) => typeNameOf(input, id)));
+  return [
+    `Linked room types share these rooms, so their availability changes too: ${listText(names)}.`,
+  ];
+}
+
 const roomBlockCreate: CardWriter = async (input) => {
   const roomIds = Array.isArray(input.arguments.roomIds) ? input.arguments.roomIds.map(str) : [];
   const startsOn = str(input.arguments.startsOn);
   const endsOn = str(input.arguments.endsOn);
-  const { numbers, typeName } = await roomsOfType(input, str(input.arguments.roomTypeId), roomIds);
+  const roomTypeId = str(input.arguments.roomTypeId);
+  const { numbers, typeName } = await roomsOfType(input, roomTypeId, roomIds);
   const rooms = roomsText(numbers);
-  const nights = plural(nightsOf(startsOn, endsOn).length, "night");
+  const nights = plural(nightSpan(startsOn, endsOn).count, "night");
   const reason = str(input.arguments.reason).trim();
   return {
     question: `Block ${rooms} for ${nights}?`,
@@ -185,7 +224,11 @@ const roomBlockCreate: CardWriter = async (input) => {
       { label: "Nights", value: nightsText(startsOn, endsOn, input.now) },
       ...(reason ? [{ label: "Reason", value: reason }] : []),
     ],
-    effects: [`Guests can't book ${rooms} on these nights.`, CHANNELS],
+    effects: [
+      `Guests can't book ${rooms} on these nights.`,
+      ...(await linkedEffect(input, roomTypeId)),
+      CHANNELS,
+    ],
   };
 };
 
@@ -200,12 +243,10 @@ const roomBlockRelease: CardWriter = async (input) => {
     rooms = roomsText(numbers);
     roomsValue = `${numbers[0]} · ${typeName}`;
   } else {
-    const typeName = (await input.reader.roomTypeNames(input.propertyId)).get(block.roomTypeId);
-    if (!typeName) throw new CardTargetMissingError();
-    rooms = `${plural(block.blockedCount, "room")} of ${typeName}`;
+    rooms = `${plural(block.blockedCount, "room")} of ${await typeNameOf(input, block.roomTypeId)}`;
     roomsValue = rooms;
   }
-  const nights = plural(nightsOf(block.startsOn, block.endsOn).length, "night");
+  const nights = plural(nightSpan(block.startsOn, block.endsOn).count, "night");
   return {
     question: `Release the block on ${rooms} for ${nights}?`,
     doneTitle: `Released the block on ${rooms} for ${nights}`,
@@ -214,7 +255,11 @@ const roomBlockRelease: CardWriter = async (input) => {
       { label: block.roomId ? "Room" : "Rooms", value: roomsValue },
       { label: "Nights", value: nightsText(block.startsOn, block.endsOn, input.now) },
     ],
-    effects: [`Guests can book ${rooms} on these nights again.`, CHANNELS],
+    effects: [
+      `Guests can book ${rooms} on these nights again.`,
+      ...(await linkedEffect(input, block.roomTypeId)),
+      CHANNELS,
+    ],
   };
 };
 
@@ -262,9 +307,21 @@ function threadWriter(
       ? `the conversation with ${thread.guestName}`
       : "a guest conversation";
     const { effect, details = [], ...text } = write(who, input);
+    // Which conversation: a guest can write on two channels, and names can be missing.
+    const channel =
+      thread.channel === "email"
+        ? "Email"
+        : (PROVIDERS[thread.providerChannel?.trim().toLowerCase() ?? ""] ?? "Booking channel");
     return {
       ...text,
-      details: [{ label: "Guest", value: thread.guestName ?? "Name not known" }, ...details],
+      details: [
+        { label: "Guest", value: thread.guestName ?? "Name not known" },
+        { label: "Channel", value: channel },
+        ...(thread.lastMessageAt
+          ? [{ label: "Last message", value: dateTimeText(thread.lastMessageAt, input.now) }]
+          : []),
+        ...details,
+      ],
       effects: [effect, GUEST_NOT_TOLD],
     };
   };
@@ -301,7 +358,10 @@ const bookingNoteAdd: CardWriter = async (input) => {
   const whose = booking.guestName.trim()
     ? `${booking.guestName.trim()}'s booking`
     : `booking ${booking.reference}`;
-  const lastNight = new Date(dayOf(booking.checkOut).getTime() - DAY_MS).toISOString().slice(0, 10);
+  const checkIn = dayOf(booking.checkIn);
+  const nights = Math.round((dayOf(booking.checkOut).getTime() - checkIn.getTime()) / DAY_MS);
+  if (Number.isNaN(nights)) throw new CardTargetMissingError();
+  const stay = `${nights >= 1 ? `${plural(nights, "night")} from` : "from"} ${dayText(checkIn, input.now, true)}`;
   return {
     question: `Add a private note to ${whose}?`,
     doneTitle: `Added a private note to ${whose}`,
@@ -309,7 +369,7 @@ const bookingNoteAdd: CardWriter = async (input) => {
     details: [
       {
         label: "Booking",
-        value: `${booking.reference} · ${plural(nightsOf(booking.checkIn, lastNight).length, "night")} from ${dayText(dayOf(booking.checkIn), input.now, true)}`,
+        value: `${booking.reference} · ${stay}`,
       },
       { label: "Note", value: str(input.arguments.body).trim() },
     ],
@@ -327,6 +387,20 @@ export const CARD_WRITERS: Readonly<Record<string, CardWriter>> = {
   "thread_reopen@1": threadReopen,
   "booking_note_add@1": bookingNoteAdd,
 };
+
+/**
+ * What a card could never show, checked when the AI asks (proposeChange), so it is refused as
+ * invalid input instead of later as "changed". Paths only, never values.
+ */
+export function changeArgumentProblem(
+  actionKey: string,
+  args: Readonly<Record<string, unknown>>,
+): string | null {
+  if (actionKey === "room_block_create@1" && str(args.endsOn) < str(args.startsOn)) {
+    return "endsOn: must not be before startsOn";
+  }
+  return null;
+}
 
 /**
  * The card of a change as it reads now. Throws CardTargetMissingError when a record it names is

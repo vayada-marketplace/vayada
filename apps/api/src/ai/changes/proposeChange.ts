@@ -12,6 +12,7 @@ import { argumentKindsOf } from "../actionLog/argumentKinds.js";
 import type { ChangeAction } from "../actions/defineChangeAction.js";
 import { findChangeAction, surfaceOf } from "../actions/registry.js";
 import type { AiOperationStatus, AiOperationStore } from "../executor/operationStore.js";
+import { changeArgumentProblem } from "./changeCard.js";
 import { mayMakeChange } from "./pendingActions.js";
 
 export type ProposeChangeRequest = {
@@ -25,6 +26,12 @@ export type ProposeChangeRequest = {
   /** Provider tool-call id or MCP JSON-RPC id: logged, never the identity. */
   externalCallId?: string | null;
   model?: string | null;
+  /**
+   * The route's own preview the Yes binds to (its digest is part of the card's), and how long it
+   * holds if less than 15 minutes. From vayada's preview read, never from the model.
+   */
+  previewSha256?: string;
+  expiresInMs?: number;
 };
 
 export type ProposeChangeError = "unknown_action" | "invalid_input" | "not_allowed";
@@ -122,6 +129,9 @@ export function createAiChangeProposer(deps: {
         .map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`);
       return refuse("invalid_input", issues.join("; ") || "The input is not valid.");
     }
+    // What its card could never show (e.g. a last night before the first).
+    const problem = changeArgumentProblem(action.key, parsed.data);
+    if (problem) return refuse("invalid_input", problem);
     if (
       !propertyId ||
       !delegatedPropertyIds(context).includes(propertyId) ||
@@ -130,21 +140,31 @@ export function createAiChangeProposer(deps: {
       return refuse("not_allowed", "You can't make this change on this property.");
     }
 
-    const { operation, created } = await deps.store.propose(
-      {
-        organizationId: context.selectedOrganization.organizationId,
-        propertyId,
-        userId: context.actor.internalUserId,
-        surface,
-        connectionId: context.delegation.connectionId,
-        conversationId: context.delegation.conversationId,
-        requestScope: request.requestScope,
-        client: request.client,
-        action,
-        arguments: parsed.data,
-      },
-      now(),
-    );
+    let proposed: Awaited<ReturnType<typeof deps.store.propose>>;
+    try {
+      proposed = await deps.store.propose(
+        {
+          organizationId: context.selectedOrganization.organizationId,
+          propertyId,
+          userId: context.actor.internalUserId,
+          surface,
+          connectionId: context.delegation.connectionId,
+          conversationId: context.delegation.conversationId,
+          requestScope: request.requestScope,
+          client: request.client,
+          action,
+          arguments: parsed.data,
+          previewSha256: request.previewSha256,
+          expiresInMs: request.expiresInMs,
+        },
+        now(),
+      );
+    } catch (error) {
+      // Its row too: the ask failed, and nothing was stored.
+      await log("failed", "store_failed", null);
+      throw error;
+    }
+    const { operation, created } = proposed;
     await log("ok", null, operation.id);
     return {
       ok: true,

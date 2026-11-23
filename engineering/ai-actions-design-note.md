@@ -548,6 +548,12 @@ ask me again"). A second click, another tab or a resumed turn joins the same run
   the card's digest unchanged (else closed `changed`). Then the one executor runs it; a double
   click or a second tab joins the run. A person's edit meanwhile is refused by the route's own
   revision check and shows as "changed".
+- Switching AI off for an account (staff set its budget to 0) closes its waiting changes at once
+  (`ai_switched_off`); a change the person already said yes to runs to its end.
+- The card names what makes one change differ from another: the rooms (each once), the nights
+  (counted, however long), linked room types that share the rooms, the conversation's channel and
+  last message. An ask the card could never show (a last night before the first) is refused as
+  invalid input when the AI asks.
 - Card states: `needs_answer`, `running`, `done`, `declined`, `expired`, `changed`, `not_allowed`,
   `stopped` (AI off or connection gone), `failed` (nothing changed) and `unsure` (gave up, outcome
   unknown).

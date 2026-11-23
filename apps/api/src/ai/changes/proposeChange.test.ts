@@ -28,10 +28,11 @@ const args = (propertyId: string = P1) => ({
   reason: "  shower repair ",
 });
 
-function setUp(offered: readonly ChangeAction[] = [inApp]) {
+function setUp(offered: readonly ChangeAction[] = [inApp], storeFails = false) {
   const proposed: ProposedChange[] = [];
   const store: Pick<AiOperationStore, "propose"> = {
     async propose(change) {
+      if (storeFails) throw new Error("AI operation store query failed (57P01)");
       proposed.push(change);
       return {
         operation: {
@@ -184,6 +185,47 @@ describe("an AI asking for a change (VAY-2524)", () => {
       ["denied", P1],
     ]);
     expect(proposed).toEqual([]);
+  });
+
+  it("refuses nights in the wrong order as invalid input, never as a card that changed", async () => {
+    const { propose, proposed } = setUp();
+    expect(
+      await propose(await worldContext(OWNER, ORG_A, CALENDAR), {
+        action: "room_block_create@1",
+        arguments: { ...args(), endsOn: "2026-12-11" },
+        client: "vayada:pms",
+      }),
+    ).toEqual({
+      ok: false,
+      error: { code: "invalid_input", message: "endsOn: must not be before startsOn" },
+    });
+    expect(proposed).toEqual([]);
+  });
+
+  it("passes vayada's own preview digest and its shorter expiry to the stored change", async () => {
+    const { propose, proposed } = setUp();
+    await propose(await worldContext(OWNER, ORG_A, CALENDAR), {
+      action: "room_block_create@1",
+      arguments: args(),
+      client: "vayada:pms",
+      previewSha256: "b".repeat(64),
+      expiresInMs: 600_000,
+    });
+    expect(proposed[0]).toMatchObject({ previewSha256: "b".repeat(64), expiresInMs: 600_000 });
+  });
+
+  it("logs an ask the store could not keep, then throws", async () => {
+    const { propose, log } = setUp([inApp], true);
+    await expect(
+      propose(await worldContext(OWNER, ORG_A, CALENDAR), {
+        action: "room_block_create@1",
+        arguments: args(),
+        client: "vayada:pms",
+      }),
+    ).rejects.toThrow("AI operation store query failed");
+    expect(log.rows).toEqual([
+      expect.objectContaining({ outcome: "failed", errorCode: "store_failed", operationId: null }),
+    ]);
   });
 
   it("needs the tool call's own delegated context", async () => {
