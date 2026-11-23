@@ -261,9 +261,9 @@ test("retries unavailable catalogue without inventing a room option", async ({
   await expect(page.getByRole("button", { name: "Continue", exact: true })).toHaveCount(0);
 });
 
-test("keeps the charged currency first when the guest views prices in another currency", async ({
+test("shows checkout in the guest's currency with cents, and the charged amount once at the end (VAY-2588)", async ({
   page,
-}) => {
+}, testInfo) => {
   await mockBookingApis(page, {
     headerSettings: {
       showContactButton: true,
@@ -330,15 +330,30 @@ test("keeps the charged currency first when the guest views prices in another cu
   );
   await continueToPayment(page, { method: "pay_at_property" });
 
-  await expect(orderTotal(page)).toHaveText("€315 (≈ US$347)");
-  await expect(page.getByRole("complementary", { name: "Your stay" })).toContainText(
-    /At the hotel\s*€315 \(≈ US\$347\)/,
+  // €315 at 1.1 is US$346.50: the guest's currency, exact, with its cents.
+  const summary = page.getByRole("complementary", { name: "Your stay" });
+  await expect(orderTotal(page)).toHaveText("US$346.50");
+  await expect(summary).toContainText(/1 night\s*US\$346\.50/);
+  await expect(summary).toContainText("Taxes & feesIncluded");
+  await expect(summary).toContainText(/At the hotel\s*US\$346\.50/);
+  // The charged currency once, at the end of the summary; the sentences name no amount.
+  await expect(page.getByTestId("charged-currency")).toHaveText(
+    "The hotel charges in Euro: €315. The US$346.50 shown uses today’s exchange rate.",
   );
-  await expect(page.getByTestId("approximate-amounts-note")).toContainText(
-    "We charge in EUR. Amounts marked ≈ are approximate conversions.",
-  );
-  await expect(page.getByRole("link", { name: "Rates By Exchange Rate API" })).toHaveAttribute(
-    "href",
-    "https://www.exchangerate-api.com",
-  );
+  await expect(page.getByText("You pay at the hotel when you arrive.")).toBeVisible();
+  const body = await page.locator("body").innerText();
+  expect(body.split("€315").length - 1).toBe(1);
+  expect(body).not.toContain("≈");
+  await expect(page.getByTestId("approximate-amounts-note")).toHaveCount(0);
+  const credit = page.getByRole("link", { name: "Rates By Exchange Rate API" });
+  await expect(credit).toHaveAttribute("href", "https://www.exchangerate-api.com");
+  await page.screenshot({ path: testInfo.outputPath("checkout-usd-1280.png"), fullPage: true });
+
+  // In the hotel's own currency there's nothing to convert: no info line, no credit.
+  const nav = page.locator("nav");
+  await nav.getByRole("button", { name: "USD", exact: true }).click();
+  await nav.getByRole("button", { name: "€ Euro" }).click();
+  await expect(orderTotal(page)).toHaveText("€315");
+  await expect(page.getByTestId("charged-currency")).toHaveCount(0);
+  await expect(credit).toHaveCount(0);
 });

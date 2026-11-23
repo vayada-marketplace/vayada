@@ -78,6 +78,27 @@ it("shows a price in the guest's currency only: converted in whole units, its ow
   unmount();
 });
 
+it("shows checkout amounts exactly in the guest's currency, with its cents (VAY-2588)", async () => {
+  get.mockResolvedValue(rates);
+  const { currency, unmount } = await renderCurrency();
+  // The hotel's own currency: as charged.
+  expect(currency().displayExact(610.25, "EUR")).toBe("€610.25");
+  expect(currency().displayExact(600, "EUR")).toBe("€600");
+  expect(currency().converts("EUR")).toBe(false);
+  act(() => currency().setSelectedCurrency("USD"));
+  // 671.275 and 660: the guest's currency with its cents, never "≈".
+  expect(currency().displayExact(610.25, "EUR")).toBe("US$671.28");
+  expect(currency().displayExact(600, "EUR")).toBe("US$660.00");
+  expect(currency().converts("EUR")).toBe(true);
+  // Without a rate, an amount stays in its own currency, unconverted.
+  expect(currency().displayExact(12.5, "GBP")).toBe("£12.50");
+  expect(currency().converts("GBP")).toBe(false);
+  act(() => currency().setSelectedCurrency("JPY"));
+  // The yen has no cents.
+  expect(currency().displayExact(10.25, "EUR")).toBe("JP¥1,640");
+  unmount();
+});
+
 it("converts another booking currency through the hotel currency, never a zero amount", async () => {
   get.mockResolvedValue(rates);
   const { currency, unmount } = await renderCurrency();

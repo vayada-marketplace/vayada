@@ -70,7 +70,8 @@ it("is the one summary: room, dates with the hotel's times, total and how to pay
     "Tue 27 Oct",
     "by 11:00",
     "1 night",
-    "Includes taxes & fees",
+    // VAY-2588 (Timo's board): taxes and fees are a row of the summary.
+    "Taxes & feesIncluded",
     "Pay at the hotel or by bank transfer",
     "Price held for you for 14:52 min",
   ])
@@ -282,10 +283,10 @@ it("is one row on phones when slim, and opens the lines, payment box and policy 
   expect(aside.firstElementChild!.className).toContain("w-10");
   expect(toggle.className).toContain("max-lg:hidden");
   expect(text()).toContain("Taxes & feesIncluded");
-  const includes = Array.from(aside.querySelectorAll("p")).find(
-    (p) => p.textContent === "Includes taxes & fees",
-  )!;
-  expect(includes.className).toContain("max-lg:hidden");
+  // VAY-2588: the row says it at every width; no second line under the total.
+  expect(
+    Array.from(aside.querySelectorAll("p")).some((p) => p.textContent === "Includes taxes & fees"),
+  ).toBe(false);
   expect(text()).toMatch(/At the hotelUS\$175Cancellation policy.*Continue to review/);
   expect(total.className).toContain("max-lg:text-lg");
   // It takes focus.
