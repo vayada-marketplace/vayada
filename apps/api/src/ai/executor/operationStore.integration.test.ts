@@ -409,9 +409,10 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
     expect(await store.recordStep(operation.id, token, step(1, 409))).toBe(true);
     const recorded = await store.find(operation.id);
     expect(recorded?.stepCursor).toBe(2);
+    // Kept in step order, the replay's record in place of the first.
     expect(recorded?.steps.map((entry) => [entry.step, entry.statusCode])).toEqual([
-      [2, 200],
       [1, 409],
+      [2, 200],
     ]);
     await expect(store.recordStep(operation.id, token, step(21))).rejects.toThrow(
       AiOperationStoreError,
