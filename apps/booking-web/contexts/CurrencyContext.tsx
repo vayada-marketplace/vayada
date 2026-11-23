@@ -216,7 +216,11 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     [selectedCurrency, baseCurrency, rates],
   );
   const chargedPrice = useCallback((amount: number, currency: string): string => {
-    const digits = Number.isInteger(amount) ? 0 : 2;
+    // Cents only when it has them, as many as the currency has (KWD 52.425).
+    const digits = Number.isInteger(amount)
+      ? 0
+      : (new Intl.NumberFormat("en-GB", { style: "currency", currency }).resolvedOptions()
+          .maximumFractionDigits ?? 2);
     return new Intl.NumberFormat("en-GB", {
       style: "currency",
       currency,

@@ -405,3 +405,21 @@ it("keeps the full bar without slim (Review) and shows no Close or policy", () =
     document.querySelector('[data-testid="stay-total"]')!.previousElementSibling!.className,
   ).not.toContain("sr-only");
 });
+
+it("names what the hotel charges once, at the end, shown before paying at every width (VAY-2588)", () => {
+  const charged = { currency: "Indonesian Rupiah", amount: "IDR 950,000", shown: "US$52.42" };
+  const line = () => document.querySelector('[data-testid="charged-currency"]');
+  // Review & pay: always shown, phones included.
+  render({ charged, action: createElement("button", null, "Confirm") });
+  expect(line()!.textContent).toBe(
+    "The hotel charges in Indonesian Rupiah: IDR 950,000. The US$52.42 shown uses today’s exchange rate.",
+  );
+  expect(line()!.querySelector("strong")!.textContent).toBe("IDR 950,000");
+  expect(line()!.className).not.toContain("max-lg:hidden");
+  // The slim steps keep it in the phone's sheet, with the rest of the price.
+  render({ charged, slim: true, action: createElement("button", null, "Go") });
+  expect(line()!.className).toContain("max-lg:hidden");
+  // In the hotel's own currency there is nothing to name.
+  render({ charged: null });
+  expect(line()).toBeNull();
+});

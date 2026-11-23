@@ -9,11 +9,18 @@ import { useTranslations } from "next-intl";
 
 /** `rateCredit`: the page shows prices converted with the exchange-rate provider's rates, whose
  * terms ask for its credit link on such pages (VAY-2588; it used to sit above the room list). */
-export default function BookingFooter({ rateCredit = false }: { rateCredit?: boolean }) {
+export default function BookingFooter({
+  rateCredit = false,
+  amountsCurrency,
+}: {
+  rateCredit?: boolean;
+  /** The shown prices' own currency; the page's base (the hotel's) when not given. */
+  amountsCurrency?: string;
+}) {
   const { hotel } = useHotel();
-  const { attribution, selectedCurrency, baseCurrency } = useCurrency();
+  const { attribution, baseCurrency, converts } = useCurrency();
   const credit =
-    rateCredit && attribution && selectedCurrency !== baseCurrency ? attribution : null;
+    rateCredit && attribution && converts(amountsCurrency ?? baseCurrency) ? attribution : null;
   const t = useTranslations("common");
   const tm = useTranslations("myBooking");
   const ta = useTranslations("analyticsConsent");

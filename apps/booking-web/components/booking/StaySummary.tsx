@@ -9,10 +9,8 @@ import {
   type PublicBookingQuote,
   type PublicQuoteGuestDisclosure,
 } from "@vayada/domain-booking/replacement-pricing";
-import { useCurrency } from "@/contexts/CurrencyContext";
 import { serverNow } from "@/lib/serverClock";
 import { resolveLocale } from "@/lib/utils";
-import { quoteMoneyAmount } from "@/services/api/replacementOffers";
 
 /** One booked room as the guest knows it: its name, plain choice name, photo and guests. */
 export type SummaryRoom = {
@@ -115,6 +113,7 @@ export default function StaySummary({
   payLabel,
   policy,
   brief = false,
+  charged,
 }: {
   quote?: PublicBookingQuote;
   /** The stay's dates while there is no price. */
@@ -154,6 +153,9 @@ export default function StaySummary({
   policy?: ReactNode;
   /** The step shows the stay in a small card (StayBrief): the phone's sheet is the price only. */
   brief?: boolean;
+  /** VAY-2588 (Timo's board): shown in the guest's currency, the price names what the hotel
+   * charges once, at the summary's end: the currency's name, the charged amount and the shown one. */
+  charged?: { currency: string; amount: string; shown: string } | null;
 }) {
   const t = useTranslations("reviewPay");
   const tRooms = useTranslations("extrasRooms");
@@ -164,19 +166,6 @@ export default function StaySummary({
   const timeLeft = useTimeLeft(quote?.expiresAt);
   const currency = quote?.currency ?? "";
   const money = (minor: bigint | string) => formatMoney(String(minor), currency);
-  // VAY-2588 (Timo's board): shown in the guest's currency, the price names the charged amount
-  // once, at the summary's end.
-  const { converts, chargedPrice } = useCurrency();
-  const charged =
-    quote && converts(currency)
-      ? {
-          currency:
-            new Intl.DisplayNames([resolveLocale(locale)], { type: "currency" }).of(currency) ??
-            currency,
-          amount: chargedPrice(quoteMoneyAmount(quote.totalMinor, currency), currency),
-          shown: money(quote.totalMinor),
-        }
-      : null;
   const day = (date: string) =>
     /^\d{4}-\d{2}-\d{2}$/.test(date)
       ? new Date(`${date}T00:00:00Z`).toLocaleDateString(resolveLocale(locale), {
@@ -574,10 +563,11 @@ export default function StaySummary({
             {ranOut ? t("stay.expired") : t("stay.hold", { time: timeLeft! })}
           </p>
         )}
-        {charged && (
+        {/* Before paying it shows at every width; the slim steps' sheet keeps it for "Details". */}
+        {quote && charged && (
           <p
             data-testid="charged-currency"
-            className={`${hidden} flex items-start gap-2 border-t border-gray-200 pt-3 text-xs leading-5 text-gray-500`}
+            className={`${slim ? hidden : ""} flex items-start gap-2 border-t border-gray-200 pt-3 text-xs leading-5 text-gray-500`}
           >
             {icon("M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z", "mt-0.5")}
             <span>

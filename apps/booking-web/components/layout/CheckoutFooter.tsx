@@ -10,7 +10,7 @@ import { openAnalyticsChoices } from "@/services/api/analyticsConsent";
 /** VAY-2495 (Timo's boards): the phone checkout's slim footer on "Your details": the hotel's name,
  * Contact (its phone, WhatsApp and email open below it), Find my booking and Privacy choices, and
  * "Powered by vayada", white on the brand colour. Wide screens keep the full footer. */
-export default function CheckoutFooter() {
+export default function CheckoutFooter({ amountsCurrency }: { amountsCurrency?: string }) {
   const { hotel } = useHotel();
   const t = useTranslations("common");
   const tNav = useTranslations("nav");
@@ -19,8 +19,8 @@ export default function CheckoutFooter() {
   const [findBookingOpen, setFindBookingOpen] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
   // VAY-2588: checkout shows converted prices, so the rates' provider is credited here too.
-  const { attribution, selectedCurrency, baseCurrency } = useCurrency();
-  const credit = attribution && selectedCurrency !== baseCurrency ? attribution : null;
+  const { attribution, baseCurrency, converts } = useCurrency();
+  const credit = attribution && converts(amountsCurrency ?? baseCurrency) ? attribution : null;
   const contactId = useId();
   const { phone, whatsapp, email } = hotel.contact;
   // The stay's own contacts, as the full footer shows them, linked as the Contact menu links them

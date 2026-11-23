@@ -450,11 +450,22 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     slug,
     noWayToPay || guestProblems ? null : request,
   );
-  const { displayExact } = useCurrency();
+  const { displayExact, converts, chargedPrice } = useCurrency();
   // VAY-2588: checkout's amounts in the guest's currency only, exactly ("US$346.50"); the
   // summary's last line names the charged amount once.
   const money = (minor: string, currency: string) =>
     displayExact(quoteMoneyAmount(minor, currency), currency);
+  const chargedFor = (price?: PublicBookingQuote) =>
+    price && converts(price.currency)
+      ? {
+          currency:
+            new Intl.DisplayNames([resolveLocale(locale)], { type: "currency" }).of(
+              price.currency,
+            ) ?? price.currency,
+          amount: chargedPrice(quoteMoneyAmount(price.totalMinor, price.currency), price.currency),
+          shown: money(price.totalMinor, price.currency),
+        }
+      : null;
   // An updated price for the same choices that differs from the one the guest saw says so.
   const requestIdentity = JSON.stringify(request);
   const shownQuote = useRef<{
@@ -1304,6 +1315,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     <BookShell
       steps={steps}
       current={step}
+      // The rates' credit follows the price's currency (an agency's stay can differ from its page's).
+      amountsCurrency={(quote ?? summaryQuote)?.currency}
       back={
         !settled || step === "rooms"
           ? undefined
@@ -1382,6 +1395,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
               {quote && (
                 <StaySummary
                   quote={quote}
+                  charged={chargedFor(quote)}
                   rooms={summaryRooms}
                   guests={guestsLine}
                   rules={knownRules}
@@ -1400,6 +1414,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 {...summary}
                 {...slimBar}
                 quote={quote ?? undefined}
+                charged={chargedFor(quote ?? undefined)}
                 onRemoveRoom={fromPicks && summaryRooms.length > 1 ? removeRoomFromExtras : null}
                 action={extrasAction}
                 hint={extrasHint}
@@ -1491,6 +1506,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                   // The stay is in the small card above: the phone's sheet is the price.
                   brief
                   quote={quote ?? undefined}
+                  charged={chargedFor(quote ?? undefined)}
                   action={
                     // Pressable while fields are missing, so it can mark them; with everything
                     // filled in it waits for the price, which step 3 needs.
@@ -1537,6 +1553,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
               <StaySummary
                 {...summary}
                 quote={summaryQuote}
+                charged={chargedFor(summaryQuote)}
                 expired={!!error}
                 locked={attemptOpen}
                 action={

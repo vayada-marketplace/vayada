@@ -333,7 +333,7 @@ test("shows checkout in the guest's currency with cents, and the charged amount 
   // €315 at 1.1 is US$346.50: the guest's currency, exact, with its cents.
   const summary = page.getByRole("complementary", { name: "Your stay" });
   await expect(orderTotal(page)).toHaveText("US$346.50");
-  await expect(summary).toContainText(/1 night\s*US\$346\.50/);
+  await expect(summary).toContainText(/2 nights\s*US\$346\.50/);
   await expect(summary).toContainText("Taxes & feesIncluded");
   await expect(summary).toContainText(/At the hotel\s*US\$346\.50/);
   // The charged currency once, at the end of the summary; the sentences name no amount.

@@ -906,7 +906,7 @@
       "priceDetails": "Preisdetails",
       "taxes": "Steuern und Gebühren",
       "included": "Inklusive",
-      "chargedIn": "Das Hotel berechnet in {currency}: <b>{amount}</b>. Die angezeigten {shown} beruhen auf dem heutigen Wechselkurs."
+      "chargedIn": "Das Hotel rechnet in der Währung {currency} ab: <b>{amount}</b>. Die angezeigten {shown} beruhen auf dem heutigen Wechselkurs."
     },
     "checkingPrice": "Preis wird geprüft …",
     "busyConfirm": "Buchung wird bestätigt …",
