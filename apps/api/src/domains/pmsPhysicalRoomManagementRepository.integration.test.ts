@@ -330,6 +330,14 @@ describe.skipIf(!url)("physical-room management PostgreSQL", () => {
       changes: { status: "maintenance" },
       narrowing,
     });
+    const keys = async () =>
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM platform.idempotency_keys WHERE property_id=$1",
+          [propertyId],
+        )
+      ).rows[0].count;
+    const keysBefore = await keys();
     for (const narrowing of [
       { access: "read", propertyIds: [propertyId] },
       { access: "change", propertyIds: [randomUUID()] },
@@ -340,6 +348,7 @@ describe.skipIf(!url)("physical-room management PostgreSQL", () => {
         error: { code: "setup_scope_unavailable" },
       });
     }
+    expect(await keys()).toBe(keysBefore);
     const roomStatus = async () =>
       (await admin.query("SELECT status FROM pms.rooms WHERE id=$1", [roomUnitId])).rows[0].status;
     expect(await roomStatus()).toBe("available");

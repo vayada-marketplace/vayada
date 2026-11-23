@@ -541,8 +541,10 @@ The action calls the existing route in-process with Fastify `app.inject()` insid
   the command, and the check refuses a `"read"` narrowing or a property it does not list
   (`narrowingAllowsChange`). Threaded so far, for the first change batch: the inbox triage scope
   lock (thread done / follow-up / reopen) and `lockAuthorizedPmsPhysicalRoomScope` (room status via
-  physical-room management). The operational-label and reconcile commands share that lock but pass
-  `null` until their action is built; each later batch threads its own sites
+  physical-room management). Room status also brings the calendar along afterwards, through three
+  more checks on the same property; that follow-up runs only where the narrowing allows a change.
+  The room-label and room-count routes share the room lock but refuse AI requests until their
+  commands carry the narrowing. Each later batch threads its own sites
   ([inventory E](ai-actions-authority-inventory.md#e-in-transaction-permission-re-reads)).
 
 ### 5.3 What delegation never passes

@@ -598,15 +598,18 @@ describe("authorityNarrowing (VAY-2522)", () => {
     ["no property list", { access: "change" }],
     // A string would match any substring of itself.
     ["a string for the list", { access: "change", propertyIds: P1 }],
-    ["an object that prints the id", { access: "change", propertyIds: [{ toString: () => P1 }] }],
+    [
+      "an object that prints the id",
+      { access: "change", propertyIds: [{ toString: (): string => P1 }] },
+    ],
   ])("refuses a malformed narrowing: %s", (_name, narrowing) => {
     expect(narrowingAllowsChange(narrowing as unknown as AuthorityNarrowing, P1)).toBe(false);
   });
 
   it("refuses a property id that is not a string", () => {
     const narrowing: AuthorityNarrowing = { access: "change", propertyIds: [P1] };
-    expect(narrowingAllowsChange(narrowing, { toString: () => P1 } as unknown as string)).toBe(
-      false,
-    );
+    expect(
+      narrowingAllowsChange(narrowing, { toString: (): string => P1 } as unknown as string),
+    ).toBe(false);
   });
 });

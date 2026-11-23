@@ -456,6 +456,47 @@ describe("room commands bring the calendar along (VAY-2469)", () => {
     expect(calls.map(([name]) => name)).toEqual(["crowded", "preview", "save", "materialize"]);
   });
 
+  it("follows an AI room change only on a property its limits allow (VAY-2522)", async () => {
+    // The refresh checks the user's rights without the AI's limits, so it must not run where they
+    // refuse, not even after the refused command.
+    const refused = { ok: false as const, error: { code: "setup_scope_unavailable" } };
+    for (const narrowing of [
+      { access: "read", propertyIds: [propertyId] },
+      { access: "change", propertyIds: [organizationId] },
+      { access: "change", propertyIds: [] },
+    ] as const) {
+      const { ports, calls } = fake();
+      const query = vi.spyOn(ports.pool, "query");
+      expect(
+        await followRoomChangesInCalendar(
+          async () => refused,
+          ports,
+          vi.fn(),
+        )({
+          ...command,
+          narrowing,
+        }),
+      ).toBe(refused);
+      expect(calls).toEqual([]);
+      expect(query).not.toHaveBeenCalled();
+    }
+    const allowed = fake();
+    await followRoomChangesInCalendar(
+      async () => ({ ok: true }),
+      allowed.ports,
+      vi.fn(),
+    )({
+      ...command,
+      narrowing: { access: "change", propertyIds: [propertyId] },
+    });
+    expect(allowed.calls.map(([name]) => name)).toEqual([
+      "crowded",
+      "preview",
+      "save",
+      "materialize",
+    ]);
+  });
+
   it("logs a calendar that can't follow, and still answers with the room change", async () => {
     const log = vi.fn();
     const refused = fake({ preview: { ok: false, error: { code: "setup_scope_unavailable" } } });

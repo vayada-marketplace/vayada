@@ -90,7 +90,8 @@ async function executeReconcile(
   const fingerprint = sha256(serializeReconcilePhysicalRoomUnitsFingerprint(command));
   try {
     await client.query("BEGIN");
-    // Not an AI change yet: it gets a narrowing when its action is built (VAY-2522).
+    // A person's request: the route refuses AI requests until this command carries their limits
+    // (VAY-2522).
     if (
       !(await lockAuthorizedPmsPhysicalRoomScope(
         client,

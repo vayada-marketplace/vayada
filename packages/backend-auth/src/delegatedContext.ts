@@ -298,7 +298,7 @@ export function authorityNarrowing(context: RequestContext): AuthorityNarrowing 
  * refused, including a narrowing that is missing or malformed.
  */
 export function narrowingAllowsChange(
-  narrowing: AuthorityNarrowing | null,
+  narrowing: AuthorityNarrowing | null | undefined,
   propertyId: string,
 ): boolean {
   if (narrowing === null) return true;
