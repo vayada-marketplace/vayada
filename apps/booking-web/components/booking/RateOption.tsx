@@ -11,7 +11,7 @@ export default function RateOption({
   title,
   terms,
   totalLabel,
-  subLabel,
+  subParts,
   discountPercent,
   unavailable,
   loading,
@@ -27,8 +27,9 @@ export default function RateOption({
   terms: string;
   /** The stay's price in the guest's currency (VAY-2588); null while prices load. */
   totalLabel: string | null;
-  /** The line under it: "2 nights · incl. taxes & fees" (Room Details: "incl. taxes & fees"). */
-  subLabel: string;
+  /** Under it, "2 nights · incl. taxes & fees" (Room Details: "incl. taxes & fees"); on phones
+   * one part a line, so the rate's name keeps its room. */
+  subParts: readonly string[];
   /** The `-X% OFF` badge next to a non-refundable choice. */
   discountPercent?: number;
   /** No price for this stay: shown, but can't be picked. */
@@ -118,7 +119,14 @@ export default function RateOption({
               <p className="text-base md:text-lg font-bold text-gray-900 whitespace-nowrap">
                 {totalLabel}
               </p>
-              <p className="text-xs text-gray-500 whitespace-nowrap">{subLabel}</p>
+              <p className="ml-auto text-xs text-gray-500 max-md:flex max-md:max-w-[7rem] max-md:flex-col max-md:items-end md:whitespace-nowrap">
+                {subParts.map((part, index) => (
+                  <span key={part}>
+                    {index > 0 && <span className="max-md:hidden"> · </span>}
+                    {part}
+                  </span>
+                ))}
+              </p>
             </>
           )}
         </div>

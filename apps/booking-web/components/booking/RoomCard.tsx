@@ -272,10 +272,10 @@ export default function RoomCard({
               terms={choice.text.terms}
               // VAY-2588: the stay's price in the guest's currency only, rounded when converted.
               totalLabel={total === null ? null : displayPrice(total, choice.priced!.currency)}
-              subLabel={
+              subParts={
                 inDetails
-                  ? t("taxesIncluded")
-                  : t("staysTaxesIncluded", { nights: tc("nights", { count: nights }) })
+                  ? [t("taxesIncluded")]
+                  : [tc("nights", { count: nights }), t("taxesIncluded")]
               }
               discountPercent={discount(choice)}
               unavailable={
