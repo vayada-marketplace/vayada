@@ -3,6 +3,9 @@ import { uiFontFamily } from "@vayada/fonts/ui";
 import "./globals.css";
 import { Providers } from "./providers";
 
+// VAY-2516: pages render per request, so each one carries its request's CSP nonce (proxy.ts).
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "vayada Booking Engine - Admin",
   description: "Hotel admin dashboard for vayada Booking Engine",

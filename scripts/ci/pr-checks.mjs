@@ -61,6 +61,8 @@ export const FRONTEND_ONLY_PACKAGES = {
   "locale-ui": ["pms_web_e2e", "booking_web_e2e"],
   // booking-admin, booking-web, landing, pms-web, vayada-admin
   fonts: BROWSER_E2E_JOBS,
+  // booking-admin, pms-web; its tests run in the frontend job
+  "web-security": ["pms_web_e2e", "booking_admin_e2e"],
   // no app; its tests are in test:unit-suites
   "pms-vayada-adapter": ["api_unit"],
 };
