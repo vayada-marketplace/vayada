@@ -351,6 +351,11 @@ import {
   createCustomDomainDns,
 } from "./domains/bookingCustomDomainVerification.js";
 import {
+  addVerifiedDomainsToMapsKey,
+  createGoogleMapsKeyWebsites,
+  startMapsKeyWebsitesSync,
+} from "./domains/googleMapsKeyWebsites.js";
+import {
   createTargetFinancePropertySettingsRepository,
   createTargetFinancePublicHotelPropertyResolver,
   createXenditBankValidator,
@@ -531,13 +536,34 @@ const routePmsInventoryPublicOfferProjector = pmsInventoryPublicOfferProjector
 const bookingCustomDomainRepository = createTargetBookingCustomDomainRepository({
   connectionString: targetDatabaseUrl,
 });
-const bookingCustomDomainVerifier = config.bookingCustomDomainCloudflare
+// VAY-2589: hotels' booking domains go onto the browser Maps key's website list, or Google refuses
+// the map there. A domain that verifies goes on at once; the hourly pass further down adds the rest.
+const mapsKeyWebsites = config.googleMapsKeyEditor
+  ? createGoogleMapsKeyWebsites(config.googleMapsKeyEditor)
+  : undefined;
+const cloudflareCustomDomainVerifier = config.bookingCustomDomainCloudflare
   ? createBookingCustomDomainVerifier({
       cloudflare: createCloudflareCustomHostnames(config.bookingCustomDomainCloudflare),
       dns: createCustomDomainDns(),
       routes: config.bookingCustomDomainRoutes,
     })
   : undefined;
+const bookingCustomDomainVerifier =
+  cloudflareCustomDomainVerifier && mapsKeyWebsites
+    ? addVerifiedDomainsToMapsKey(cloudflareCustomDomainVerifier, mapsKeyWebsites, (outcome) => {
+        if ("error" in outcome) {
+          app.log.warn(
+            { err: outcome.error, domain: outcome.host },
+            "Adding a verified domain to the Maps key's website list failed",
+          );
+        } else if (outcome.added) {
+          app.log.info(
+            { domain: outcome.host },
+            "Added a verified domain to the Maps key's website list",
+          );
+        }
+      })
+    : cloudflareCustomDomainVerifier;
 
 const bookingAddonItemsRepository = createPgTargetBookingAddonItemsRepository({
   connectionString: targetDatabaseUrl,
@@ -3299,6 +3325,28 @@ app.addHook("onClose", async () => {
   if (aiSpendStart) clearTimeout(aiSpendStart);
   await activeAiSpendCheck;
   await aiBudgetPool.end();
+});
+
+// VAY-2589: the booking page's hotel domains (BOOKING_CUSTOM_DOMAIN_ROUTES) on the Maps key's website
+// list, a minute after start and then hourly; a no-op read once they are all there.
+const stopMapsKeyWebsitesSync = mapsKeyWebsites
+  ? startMapsKeyWebsitesSync({
+      websites: mapsKeyWebsites,
+      hosts: () => [...config.bookingCustomDomainRoutes.keys()],
+      report: (outcome) => {
+        if ("error" in outcome) {
+          app.log.warn({ err: outcome.error }, "Maps key website list check failed");
+        } else if (outcome.added.length > 0) {
+          app.log.info(
+            { domains: outcome.added },
+            "Added hotel domains to the Maps key's website list",
+          );
+        }
+      },
+    })
+  : undefined;
+app.addHook("onClose", async () => {
+  await stopMapsKeyWebsitesSync?.();
 });
 
 // VAY-2304: the sweep behind the after-commit re-publish. It re-publishes every hotel whose prices
