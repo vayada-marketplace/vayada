@@ -4882,65 +4882,80 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
     }
   }, 60_000);
 
-  it("lets the hotel decline an unpaid PayPal booking: rooms released, guest told", async () => {
-    const fixture = await setupFixture(manualQuote("paypal", "instant"), undefined, true);
-    const hostPool = new pg.Pool({ connectionString: url, max: 2 });
-    const released: unknown[] = [];
-    const actions = createBookingHostActions({
-      pool: hostPool,
-      guards: targetBookingHostActionGuards,
-      inventory: {
-        reserve: async () => null,
-        async release({ reservation }) {
-          released.push(reservation);
+  // VAY-2099: in either acceptance mode a PayPal booking waits for its payment, so front desk
+  // (requestsOnly) can't decline it.
+  it.each(["instant", "request"] as const)(
+    "lets the hotel decline an unpaid PayPal booking (%s mode): rooms released, guest told",
+    async (mode) => {
+      const fixture = await setupFixture(manualQuote("paypal", mode), undefined, true);
+      const hostPool = new pg.Pool({ connectionString: url, max: 2 });
+      const released: unknown[] = [];
+      const actions = createBookingHostActions({
+        pool: hostPool,
+        guards: targetBookingHostActionGuards,
+        inventory: {
+          reserve: async () => null,
+          async release({ reservation }) {
+            released.push(reservation);
+          },
         },
-      },
-    });
-    const actorUserId = randomUUID();
-    try {
-      mockOwners(fixture);
-      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
-        new Date().toISOString(),
-      );
-      await finance(fixture, "paypal", { paypalEmail: "pay@writer.example.test" });
-      const pending = await writePricingAcceptance(fixture.pool, fixture.input, undefined, false, {
-        paypal: true,
       });
-      await fixture.observer.query(
-        "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
-        [actorUserId, `${actorUserId}@example.test`],
-      );
-      const scope = { propertyId: fixture.propertyId, bookingId: pending.bookingId, actorUserId };
-      // VAY-2099: declining a booking that waits for its payment stays with staff who can cancel.
-      await expect(
-        actions.preview(scope, { action: "reject", reason: "No payment" }, { requestsOnly: true }),
-      ).rejects.toMatchObject({ statusCode: 403 });
-      const preview = await actions.preview(scope, { action: "reject", reason: "No payment" });
-      await expect(
-        actions.apply(scope, preview.previewId, "front-desk", { requestsOnly: true }),
-      ).rejects.toMatchObject({ statusCode: 403 });
-      await expect(actions.apply(scope, preview.previewId, "decline")).resolves.toEqual({
-        bookingId: pending.bookingId,
-        lifecycleStatus: "declined",
-      });
-      expect(released).toHaveLength(1);
-      const jobs = (
-        await fixture.observer.query("SELECT job_type FROM platform.jobs WHERE property_id=$1", [
-          fixture.propertyId,
-        ])
-      ).rows.map((row) => row.job_type);
-      expect(jobs).toContain("email.booking-rejected");
-      expect(jobs.filter((job) => job.startsWith("pms."))).toEqual([]);
-      // A retry of the guest's booking is now a conflict, not a confirmation.
-      await expect(
-        writePricingAcceptance(fixture.pool, fixture.input, undefined, false, { paypal: true }),
-      ).rejects.toMatchObject({ code: "conflict" });
-    } finally {
-      await actions.close();
-      await hostPool.end().catch(() => undefined);
-      await fixture.close();
-    }
-  });
+      const actorUserId = randomUUID();
+      try {
+        mockOwners(fixture);
+        vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+          new Date().toISOString(),
+        );
+        await finance(fixture, "paypal", { paypalEmail: "pay@writer.example.test" });
+        const pending = await writePricingAcceptance(
+          fixture.pool,
+          fixture.input,
+          undefined,
+          false,
+          {
+            paypal: true,
+          },
+        );
+        await fixture.observer.query(
+          "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
+          [actorUserId, `${actorUserId}@example.test`],
+        );
+        const scope = { propertyId: fixture.propertyId, bookingId: pending.bookingId, actorUserId };
+        // VAY-2099: declining a booking that waits for its payment stays with staff who can cancel.
+        await expect(
+          actions.preview(
+            scope,
+            { action: "reject", reason: "No payment" },
+            { requestsOnly: true },
+          ),
+        ).rejects.toMatchObject({ statusCode: 403 });
+        const preview = await actions.preview(scope, { action: "reject", reason: "No payment" });
+        await expect(
+          actions.apply(scope, preview.previewId, "front-desk", { requestsOnly: true }),
+        ).rejects.toMatchObject({ statusCode: 403 });
+        await expect(actions.apply(scope, preview.previewId, "decline")).resolves.toEqual({
+          bookingId: pending.bookingId,
+          lifecycleStatus: "declined",
+        });
+        expect(released).toHaveLength(1);
+        const jobs = (
+          await fixture.observer.query("SELECT job_type FROM platform.jobs WHERE property_id=$1", [
+            fixture.propertyId,
+          ])
+        ).rows.map((row) => row.job_type);
+        expect(jobs).toContain("email.booking-rejected");
+        expect(jobs.filter((job) => job.startsWith("pms."))).toEqual([]);
+        // A retry of the guest's booking is now a conflict, not a confirmation.
+        await expect(
+          writePricingAcceptance(fixture.pool, fixture.input, undefined, false, { paypal: true }),
+        ).rejects.toMatchObject({ code: "conflict" });
+      } finally {
+        await actions.close();
+        await hostPool.end().catch(() => undefined);
+        await fixture.close();
+      }
+    },
+  );
 });
 
 async function setupFixture(
