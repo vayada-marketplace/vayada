@@ -110,7 +110,7 @@ it.each([
     propertyAccessRepository: {
       findMembershipPropertyScope: async () => ({
         mode: "all",
-        roleKey: "front_desk",
+        roleKey: "operator",
         accessOrigin: "agency",
         assignedPropertyIds: [],
       }),
