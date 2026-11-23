@@ -1,5 +1,6 @@
 import pg from "pg";
 
+import { purgeExpiredConversations } from "../assistant/conversationStore.js";
 import type { AiActionGroup, AiActionOutcome, AiRecordRef, AiSurface } from "./actionLog.js";
 
 /**
@@ -7,7 +8,8 @@ import type { AiActionGroup, AiActionOutcome, AiRecordRef, AiSurface } from "./a
  * The log keeps rows two years (design note §7.3). The same worker also empties Inbox assist
  * results whose own 30-day retention passed: `pms.purge_expired_message_assistance_results`
  * (0146) is operator-only and nothing ran it, so the API does the same UPDATE as plain DML,
- * clamped to the database clock like that function.
+ * clamped to the database clock like that function. And it deletes the in-app assistant's
+ * conversations 30 days after their last activity (VAY-2518).
  */
 export const AI_ACTION_LOG_RETENTION = "2 years";
 
@@ -50,8 +52,14 @@ export type AiActivityStore = {
 };
 
 export type AiActionLogRetentionStore = {
-  /** Deletes up to `limit` expired log rows and empties up to `limit` expired assist results. */
-  purgeExpiredBatch(now: Date, limit: number): Promise<{ logRows: number; assistResults: number }>;
+  /**
+   * Deletes up to `limit` expired log rows and assistant conversations each, and empties up to
+   * `limit` expired assist results.
+   */
+  purgeExpiredBatch(
+    now: Date,
+    limit: number,
+  ): Promise<{ logRows: number; assistResults: number; conversations: number }>;
   close(): Promise<void>;
 };
 
@@ -151,7 +159,8 @@ export function createPgAiActionLogRetentionStore(config: {
          SELECT count(*)::int AS n FROM purged`,
         [now.toISOString(), limit],
       );
-      return { logRows: log.rows[0]?.n ?? 0, assistResults: assist.rows[0]?.n ?? 0 };
+      const conversations = await purgeExpiredConversations(db, now, limit);
+      return { logRows: log.rows[0]?.n ?? 0, assistResults: assist.rows[0]?.n ?? 0, conversations };
     },
     close: () => db.end(),
   };

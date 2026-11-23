@@ -5,11 +5,12 @@ import { startAiActionLogRetentionWorker } from "./aiActionLogRetention.js";
 const logger = () => ({ info: vi.fn(), error: vi.fn() });
 
 describe("AI action log retention worker", () => {
-  it("drains full batches of either kind, then stops", async () => {
+  it("drains full batches of any kind, then stops", async () => {
     const batches = [
-      { logRows: 2, assistResults: 0 },
-      { logRows: 0, assistResults: 2 },
-      { logRows: 1, assistResults: 0 },
+      { logRows: 2, assistResults: 0, conversations: 0 },
+      { logRows: 0, assistResults: 2, conversations: 0 },
+      { logRows: 0, assistResults: 0, conversations: 2 },
+      { logRows: 1, assistResults: 0, conversations: 1 },
     ];
     const purgeExpiredBatch = vi.fn(async () => batches.shift()!);
     const log = logger();
@@ -21,9 +22,12 @@ describe("AI action log retention worker", () => {
       logger: log,
     });
     await worker.runNow();
-    expect(purgeExpiredBatch).toHaveBeenCalledTimes(3);
+    expect(purgeExpiredBatch).toHaveBeenCalledTimes(4);
     expect(purgeExpiredBatch).toHaveBeenCalledWith(new Date("2028-12-01T00:00:00.000Z"), 2);
-    expect(log.info).toHaveBeenCalledWith({ logRows: 3, assistResults: 2 }, expect.any(String));
+    expect(log.info).toHaveBeenCalledWith(
+      { logRows: 3, assistResults: 2, conversations: 3 },
+      expect.any(String),
+    );
     await worker.close();
   });
 
