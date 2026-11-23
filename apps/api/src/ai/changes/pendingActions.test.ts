@@ -2,7 +2,12 @@
 // the test world's people: only the person the AI asked, in a vayada app, with the rights now.
 import { randomUUID } from "node:crypto";
 
-import { backendAuthPlugin, createFakeVerifier, type PermissionKey } from "@vayada/backend-auth";
+import {
+  backendAuthPlugin,
+  createFakeVerifier,
+  type PermissionKey,
+  type VerifiedSession,
+} from "@vayada/backend-auth";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -106,17 +111,14 @@ const session = (workosUserId: string, workosOrgId: string, sessionId: string | 
   sessionId,
   expiresAt: Math.floor(Date.now() / 1000) + 3600,
 });
-const TOKENS = new Map([
+const TOKENS = new Map<string, VerifiedSession>([
   ["owner", session(`wos_${OWNER}`, "org_wos_a", "session_owner")],
   ["owner-machine", session(`wos_${OWNER}`, "org_wos_a", null)],
   ["member", session(`wos_${MEMBER}`, "org_wos_a", "session_member")],
   // Staff signed in as the owner through WorkOS impersonation (the token's `act` claim).
   [
     "owner-impersonated",
-    {
-      ...session(`wos_${OWNER}`, "org_wos_a", "session_impersonated"),
-      impersonated: true as const,
-    },
+    { ...session(`wos_${OWNER}`, "org_wos_a", "session_impersonated"), impersonated: true },
   ],
 ]);
 const CALENDAR: PermissionKey[] = ["pms.calendar.manage", "pms.calendar.read"];
