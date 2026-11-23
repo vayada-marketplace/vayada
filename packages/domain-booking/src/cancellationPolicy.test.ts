@@ -469,7 +469,7 @@ it("says a stay booked after free cancellation's last day was never refundable (
     "17500",
     { request: false, card: false, bankTransfer: true },
   );
-  expect(transfer.badge).toEqual({ kind: "notRefundableOncePaid" });
+  expect(transfer.badge).toEqual({ kind: "lateBookingOncePaid" });
   expect(transfer.rows[0]).toMatchObject({ when: { kind: "beforeTransfer" }, now: true });
   expect(transfer.note).toEqual({ kind: "paidLateBooking", date: "2026-10-23", days: 3 });
   // Step 3 books today; the deadline day itself still counts.
