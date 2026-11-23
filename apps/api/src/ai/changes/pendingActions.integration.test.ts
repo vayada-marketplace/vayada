@@ -193,7 +193,7 @@ describe.skipIf(!url)("the Yes/No to AI changes on PostgreSQL (VAY-2524)", () =>
     await app?.close();
     await store.end();
     await triage.close();
-    await inboxRead.close?.();
+    // The app closed the inbox read port it was given.
     await admin.query("BEGIN");
     await admin.query("SET LOCAL session_replication_role = replica");
     await admin.query(`DELETE FROM platform.ai_operations WHERE organization_id = $1`, [org]);

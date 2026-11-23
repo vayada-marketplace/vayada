@@ -404,9 +404,11 @@ export async function registerPendingActionRoutes(
       const { operation } = loaded;
 
       if (body.answer === "no") {
-        const current = await close(operation, "declined");
+        // Only the No that closed it counts: a second click finds it answered, as a second Yes does.
+        const declined = await options.store.closePending(operation.id, "declined", now());
+        const current = declined ?? (await options.store.find(operation.id)) ?? operation;
         const view = pendingActionView(current, await cardOrNull(current, authorization), now());
-        if (current.status === "closed" && current.closeReason === "declined") return view;
+        if (declined?.closeReason === "declined") return view;
         return sendError(
           reply,
           view.state === "expired"

@@ -19,7 +19,7 @@ const NOW = new Date("2026-12-09T09:40:00Z");
 const CALENDAR = ["pms.calendar.manage", "pms.calendar.read"] as const;
 
 const inApp = { ...roomBlockCreate, surfaces: ["in_app"] } as ChangeAction;
-const args = (propertyId = P1) => ({
+const args = (propertyId: string = P1) => ({
   propertyId,
   roomTypeId: DELUXE,
   roomIds: [R12],
