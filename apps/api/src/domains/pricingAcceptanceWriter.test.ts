@@ -42,6 +42,8 @@ const current = {
     acceptanceMode: "instant",
     paymentMethod: "pay_at_property",
     stay: { checkIn: "2026-11-01" },
+    // A code's zero line, as every quote carries one: nothing to redeem (VAY-2566).
+    evidence: { lines: [{ kind: "discount", selectionId: null, amountMinor: "0" }] },
   },
 };
 const finance = { scope: current.scope };
