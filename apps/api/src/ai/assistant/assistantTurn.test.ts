@@ -163,9 +163,13 @@ describe("assistant turn (VAY-2518)", () => {
       answer("You have Deluxe."),
     ]);
     expect(end).toMatchObject({ status: "done" });
+    // With the turn's id: a change tool asks within this turn (VAY-2524 requestScope).
     expect(tool.run).toHaveBeenCalledWith(
       { propertyId: "p1" },
-      expect.objectContaining({ toolCallId: "toolu_1" }),
+      expect.objectContaining({
+        toolCallId: "toolu_1",
+        turnId: "22222222-2222-4222-8222-222222222222",
+      }),
     );
     expect(events.filter((event) => event.type === "tool")).toEqual([
       { type: "tool", toolCallId: "toolu_1", name: "rooms_list", status: "running" },

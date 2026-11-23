@@ -16,6 +16,7 @@ import { listActionsFor, toolDefinition } from "../actions/registry.js";
 import { runRouteAction } from "../actions/runRouteAction.js";
 import type { AssistantToolsFor } from "./assistantRuntime.js";
 import type { AssistantTool, ToolOutcome } from "./assistantTurn.js";
+import { changeTools, type AssistantChangeProposer } from "./changeTools.js";
 
 /**
  * The registry's in-app actions this user may use, as the assistant's tools (VAY-2518). Each call
@@ -79,6 +80,11 @@ export function delegatedAssistantTools(
     log: AiActionLog;
     /** The model route in use, for the log; null while AI is off. */
     model: () => string | null;
+    /**
+     * VAY-2524's proposer, only with AI_CHANGES_ENABLED: the change actions on the in-app surface
+     * become tools that ask for a change. Without it the assistant only reads.
+     */
+    propose?: AssistantChangeProposer;
   },
 ): AssistantToolsFor {
   return async ({ session, propertyId, conversationId }) => {
@@ -101,11 +107,12 @@ export function delegatedAssistantTools(
       throw error;
     }
     if (!delegatedPropertyIds(context).includes(propertyId)) return undefined;
-    return registryTools(app, {
-      context,
-      contextFor: delegate,
-      log: options.log,
-      model: options.model(),
-    });
+    const model = options.model();
+    const reads = registryTools(app, { context, contextFor: delegate, log: options.log, model });
+    if (!options.propose) return reads;
+    return [
+      ...reads,
+      ...changeTools({ context, contextFor: delegate, propose: options.propose, model }),
+    ];
   };
 }

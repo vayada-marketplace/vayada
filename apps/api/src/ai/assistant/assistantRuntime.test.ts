@@ -1,5 +1,6 @@
 import type { RequestContext } from "@vayada/backend-auth";
 import { describe, expect, it, vi } from "vitest";
+import { ASSISTANT_INSTRUCTIONS, ASSISTANT_INSTRUCTIONS_WITH_CHANGES } from "./instructions.js";
 
 import type { AiStepInput, AiStepOptions, AiStepResult } from "../provider/aiProvider.js";
 import type { ModelRoute } from "../provider/catalog.js";
@@ -229,5 +230,30 @@ describe("assistant runtime (VAY-2518)", () => {
       expect.stringMatching(/^[0-9a-f]{64}$/),
     );
     expect(list).toHaveBeenCalledWith(owner, read.mock.calls[0]![2], { limit: 5 });
+  });
+
+  it("explains changes to the model only when a change tool is offered (VAY-2524)", async () => {
+    const seen: AiStepInput[] = [];
+    const record: Step = async (input) => {
+      seen.push(input);
+      return answer("Two rooms.");
+    };
+    const asks = {
+      ...tool,
+      asksFirst: true as const,
+      definition: { ...tool.definition, name: "room_block_create" },
+    };
+    const plain = runtimeWith([record]);
+    await (
+      await start(plain.runtime)
+    ).done;
+    const withChanges = runtimeWith([record], { toolsFor: async () => [tool, asks] });
+    await (
+      await start(withChanges.runtime)
+    ).done;
+    expect(seen[0]!.instructions).toBe(ASSISTANT_INSTRUCTIONS);
+    expect(seen[1]!.instructions).toBe(ASSISTANT_INSTRUCTIONS_WITH_CHANGES);
+    expect(ASSISTANT_INSTRUCTIONS_WITH_CHANGES).toContain("only their Yes makes it");
+    expect(ASSISTANT_INSTRUCTIONS_WITH_CHANGES).not.toContain("You can't change anything yet");
   });
 });

@@ -22,6 +22,20 @@ export const ASSISTANT_INSTRUCTIONS = [
 ].join("\n");
 
 /**
+ * The same, for a person offered change tools (VAY-2524, with AI_CHANGES_ENABLED). A change tool
+ * never makes the change: vayada shows a Yes/No card, and only the person's Yes makes it.
+ */
+export const ASSISTANT_INSTRUCTIONS_WITH_CHANGES = ASSISTANT_INSTRUCTIONS.replace(
+  "- You can't change anything yet. If asked to, say that you can't do it here and where in vayada it is done.",
+  [
+    "- Some tools ask for a change. They never make it: vayada shows the person a card with the change and Yes and No buttons, and only their Yes makes it. Typing yes in the chat does nothing.",
+    "- Ask for a change only when the person asked for it, with exactly what they asked. When the tool answers with a pendingActionId, tell them in one short sentence to check the card below and answer it there. Never say the change is made.",
+    "- You don't see the person's answer. If they ask whether a change was made, tell them the card shows it.",
+    "- For a change no tool offers, say that you can't do it here and where in vayada it is done.",
+  ].join("\n"),
+);
+
+/**
  * vayada's note sent with each question: today's date where the hotel is, and the property the
  * chat is about. Built from parts: locale date strings differ between Node versions.
  */

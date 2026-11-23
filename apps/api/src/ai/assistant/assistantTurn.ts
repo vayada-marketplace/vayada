@@ -59,7 +59,12 @@ export type ToolOutcome =
 
 export type AssistantTool = {
   definition: ToolDefinition;
-  run(input: unknown, call: { toolCallId: string; signal: AbortSignal }): Promise<ToolOutcome>;
+  /** A change tool (VAY-2524): it only asks; the person's Yes on vayada's card makes the change. */
+  asksFirst?: true;
+  run(
+    input: unknown,
+    call: { toolCallId: string; signal: AbortSignal; turnId: string },
+  ): Promise<ToolOutcome>;
 };
 
 export type TurnEndEvent = { type: "end"; status: TurnEnd["status"]; reason: string | null };
@@ -310,6 +315,7 @@ export async function runAssistantTurn(
       outcome = await tool.run(call.input, {
         toolCallId: call.toolCallId,
         signal: AbortSignal.any([running.signal, untilDeadline()]),
+        turnId,
       });
     } catch (error) {
       // Never the error's own text: it can carry what the route answered.

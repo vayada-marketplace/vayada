@@ -51,6 +51,7 @@ describe("assistant tools from the action registry (VAY-2518)", () => {
     const outcome = await tool!.run(rooms.input(WORLD.P1), {
       toolCallId: "toolu_01ABC",
       signal: new AbortController().signal,
+      turnId: "turn-1",
     });
     expect(outcome).toMatchObject({ ok: true });
     expect(contextFor).toHaveBeenCalledWith("toolu_01ABC");
@@ -68,6 +69,7 @@ describe("assistant tools from the action registry (VAY-2518)", () => {
     const refused = await tool!.run(rooms.input(WORLD.P3), {
       toolCallId: "toolu_01ABD",
       signal: new AbortController().signal,
+      turnId: "turn-1",
     });
     expect(refused).toMatchObject({ ok: false, error: { code: "not_allowed" } });
     expect(log.rows).toHaveLength(2);
@@ -116,6 +118,7 @@ describe("who may use the assistant for a property (VAY-2518, the production che
     const outcome = await tools![0]!.run(rooms.input(WORLD.P1), {
       toolCallId: "toolu_02",
       signal: new AbortController().signal,
+      turnId: "turn-1",
     });
     expect(outcome).toMatchObject({ ok: true });
     expect(log.rows[0]).toMatchObject({
