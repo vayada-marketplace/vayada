@@ -422,6 +422,7 @@
   "bookings.detail.paymentStatus.awaiting_paypal": "PayPal-Zahlung ausstehend",
   "bookings.detail.ratePlan": "Tarifplan",
   "bookings.detail.channelManaged": "Über Buchungskanal verwaltet",
+  "bookings.detail.notProvidedByChannel": "Nicht von {channel} übermittelt",
   "bookings.detail.grossAmount": "Bruttobetrag",
   "bookings.detail.stripeFee": "Stripe-Gebühr",
   "bookings.detail.vayadaCommission": "vayada-Provision",

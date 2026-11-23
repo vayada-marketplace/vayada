@@ -424,6 +424,7 @@
   "bookings.detail.paymentStatus.awaiting_paypal": "Awaiting PayPal",
   "bookings.detail.ratePlan": "Rate plan",
   "bookings.detail.channelManaged": "Channel-managed",
+  "bookings.detail.notProvidedByChannel": "Not provided by {channel}",
   "bookings.detail.grossAmount": "Gross amount",
   "bookings.detail.stripeFee": "Stripe fee",
   "bookings.detail.vayadaCommission": "vayada commission",

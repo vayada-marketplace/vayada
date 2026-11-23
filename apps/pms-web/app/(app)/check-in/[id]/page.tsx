@@ -26,7 +26,11 @@ import { DEFAULT_CHECKIN_SETTINGS, withGuestDataFields } from "@/lib/settings/ch
 import { useGuestStayTimes } from "@/lib/settings/useGuestStayTimes";
 import { useHasPmsPermission } from "@/lib/settings/PmsAccessContext";
 import { guestDataSettingsService } from "@/services/guests";
-import { bookingChannelLabel, isChannelBooking } from "@/lib/bookings/channelLabel";
+import {
+  bookingChannelLabel,
+  isChannelBooking,
+  notProvidedByChannel,
+} from "@/lib/bookings/channelLabel";
 import { guestProfileEdit, withBookerEdit } from "@/lib/bookings/guestProfileEdit";
 import {
   expectedRegistrations,
@@ -343,6 +347,8 @@ export default function CheckInPage() {
   };
 
   const ota = isChannelBooking(booking?.channel);
+  // VAY-2577: the booker's empty email or phone says the channel didn't send it.
+  const bookerNotProvided = notProvidedByChannel(booking?.channel, t);
   const lockedFields = (guest: RegistrationGuest) => {
     const locked = new Set<GuestLockableField>();
     // The booker is edited through their guest record (VAY-2420), also on channel bookings (a
@@ -968,6 +974,7 @@ export default function CheckInPage() {
                 movedFrom={movedFrom}
                 formInitial={formInitial}
                 lockedFields={lockedFields}
+                notProvided={(guest) => (guest.role === "booker" ? bookerNotProvided : null)}
                 onSaveGuest={saveGuest}
                 guestFlush={guestFlush}
                 onGuestUnsaved={setGuestUnsaved}

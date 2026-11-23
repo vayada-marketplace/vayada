@@ -75,6 +75,7 @@ export function GuestForm({
   settings,
   rooms,
   lockedFields: lockedOnOpen,
+  notProvided = null,
   canReadIdentity,
   savedFilledFields,
   onSave,
@@ -93,6 +94,8 @@ export function GuestForm({
   /** Values staff can't change here: an OTA import's, or the booker's when their guest record
    * can't be reached. */
   lockedFields: ReadonlySet<GuestLockableField>;
+  /** The placeholder of an email or phone the booking's channel didn't send (VAY-2577). */
+  notProvided?: string | null;
   canReadIdentity: boolean;
   /** The registration fields on record; the status uses them when the ID fields are hidden. */
   savedFilledFields: readonly string[];
@@ -298,9 +301,11 @@ export function GuestForm({
               placeholder={
                 key === "documentNumber"
                   ? t("checkIn.flow.form.documentNumberPlaceholder")
-                  : required(name)
-                    ? undefined
-                    : t("checkIn.flow.form.optional")
+                  : notProvided && !initial[key]
+                    ? notProvided
+                    : required(name)
+                      ? undefined
+                      : t("checkIn.flow.form.optional")
               }
               onChange={(event) => set({ [key]: event.target.value } as Partial<GuestFormValues>)}
               className={INPUT_CLASS}
