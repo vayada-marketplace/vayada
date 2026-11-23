@@ -734,7 +734,7 @@ export async function mockBookingAdminShellRoutes(
     }),
   );
   // An unanswered dashboard read logs an error, and Next's dev overlay badge then covers the
-  // sidebar's Collapse button. dashboard-funnel.spec registers its own funnel after these mocks.
+  // bottom of the sidebar. dashboard-funnel.spec registers its own funnel after these mocks.
   await page.route("**/api/booking/properties/*/dashboard/conversion-funnel**", (route) =>
     route.fulfill({
       json: {

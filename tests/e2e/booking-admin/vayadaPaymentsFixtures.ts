@@ -11,7 +11,8 @@ const PAYOUT_PATH = `/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/payout
 /** The statement route as mocked (unroute with this same pattern). */
 export const PAYOUT_STATEMENT_ROUTE = `**/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/payout-statement`;
 
-/** A hotel's payout statement (VAY-2584): made-up money, as the design shows it. */
+/** A hotel's payout statement (VAY-2584): made-up money, as the design shows it. The card payment's
+ * booking reference is full length, as the booking engine makes them ("VAY-" and 32 characters). */
 export const PAYOUT_STATEMENT = {
   totals: [
     {
@@ -36,9 +37,17 @@ export const PAYOUT_STATEMENT = {
     payout("p2", "1258000000", "1102", "2026-11-02", "sent"),
   ],
   lines: [
-    line("charge", "320000000", "44800000", "2026-11-24", "VAY-7KQ2C", "2026-11-28", {
-      fees: { planMinor: "25600000", vayadaMinor: "19200000", vayadaPercent: 6 },
-    }),
+    line(
+      "charge",
+      "320000000",
+      "44800000",
+      "2026-11-24",
+      "VAY-0A1B2C3D4E5F40718293A4B5C6D7E8F9",
+      "2026-11-28",
+      {
+        fees: { planMinor: "25600000", vayadaMinor: "19200000", vayadaPercent: 6 },
+      },
+    ),
     line("payout", "-912000000", "0", "2026-11-23", null, null, { payoutId: "p23" }),
     line("refund", "-150000000", "-12000000", "2026-11-22", "VAY-5MX9P", "2026-11-25"),
     line("dispute", "-240000000", "40500000", "2026-11-21", "VAY-3HD4K", "2026-11-19"),

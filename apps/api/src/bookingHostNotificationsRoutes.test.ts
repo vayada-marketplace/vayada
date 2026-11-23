@@ -143,6 +143,86 @@ describe("Booking Admin notification routes", () => {
     expect(repository.markRead).not.toHaveBeenCalled();
   });
 
+  it("marks a notification unread, or done for the whole team (VAY-2591)", async () => {
+    const repository = repositoryFake();
+    app = await routeApp(repository);
+
+    const unread = await app.inject({
+      method: "POST",
+      url: `${url}/unread`,
+      headers,
+      payload: { keys: [key] },
+    });
+    expect(unread.statusCode).toBe(204);
+    expect(repository.markUnread).toHaveBeenCalledWith(
+      propertyId,
+      expect.objectContaining({ userId: actorUserId, organizationId }),
+      [key],
+    );
+
+    const done = await app.inject({
+      method: "POST",
+      url: `${url}/done`,
+      headers,
+      payload: { keys: [key] },
+    });
+    expect(done.statusCode).toBe(204);
+    expect(done.headers["cache-control"]).toBe("no-store");
+    // The person's view decides what they may mark done (their promo permission, for one).
+    expect(repository.markDone).toHaveBeenCalledWith(
+      propertyId,
+      expect.objectContaining({ userId: actorUserId, organizationId, canReadPromos: false }),
+      [key],
+    );
+
+    // Nothing that needs action under those keys now: a booking, a team update, the sync card, an old item.
+    repository.markDone.mockResolvedValueOnce([]);
+    const nothing = await app.inject({
+      method: "POST",
+      url: `${url}/done`,
+      headers,
+      payload: { keys: ["team-joined:m1"] },
+    });
+    expect(nothing.statusCode).toBe(404);
+    expect(nothing.json()).toEqual({ code: "notification_not_found" });
+
+    repository.markUnread.mockClear();
+    repository.markDone.mockClear();
+    for (const path of ["unread", "done"])
+      for (const payload of [
+        {},
+        { keys: [] },
+        { keys: ["not a key"] },
+        { keys: [key], propertyId },
+        { keys: Array.from({ length: 101 }, () => key) },
+      ]) {
+        const response = await app.inject({
+          method: "POST",
+          url: `${url}/${path}`,
+          headers,
+          payload,
+        });
+        expect(response.statusCode).toBe(400);
+        expect(response.json()).toEqual({ code: "invalid_notification_keys" });
+      }
+    expect(repository.markUnread).not.toHaveBeenCalled();
+    expect(repository.markDone).not.toHaveBeenCalled();
+
+    repository.markUnread.mockRejectedValueOnce(new Error("database down"));
+    repository.markDone.mockRejectedValueOnce(new Error("database down"));
+    for (const path of ["unread", "done"])
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: `${url}/${path}`,
+            headers,
+            payload: { keys: [key] },
+          })
+        ).statusCode,
+      ).toBe(503);
+  });
+
   it("answers 404 for a missing property and 503 when the database fails", async () => {
     const repository = repositoryFake();
     app = await routeApp(repository);
@@ -197,8 +277,26 @@ describe("Booking Admin notification routes", () => {
         })
       ).statusCode,
     ).toBe(403);
+    for (const path of ["unread", "done"]) {
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: `${url}/${path}`,
+            headers,
+            payload: { keys: [key] },
+          })
+        ).statusCode,
+      ).toBe(403);
+      expect(
+        (await app.inject({ method: "POST", url: `${url}/${path}`, payload: { keys: [key] } }))
+          .statusCode,
+      ).toBe(401);
+    }
     expect(repository.read).not.toHaveBeenCalled();
     expect(repository.markRead).not.toHaveBeenCalled();
+    expect(repository.markUnread).not.toHaveBeenCalled();
+    expect(repository.markDone).not.toHaveBeenCalled();
     expect(repository.markAllRead).not.toHaveBeenCalled();
   });
 
@@ -206,7 +304,18 @@ describe("Booking Admin notification routes", () => {
     const repository = repositoryFake();
     app = await routeApp(repository, { assignedPropertyIds: [otherPropertyId] });
     expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `${url}/done`,
+          headers,
+          payload: { keys: [key] },
+        })
+      ).statusCode,
+    ).toBe(403);
     expect(repository.read).not.toHaveBeenCalled();
+    expect(repository.markDone).not.toHaveBeenCalled();
   });
 });
 
@@ -214,6 +323,10 @@ function repositoryFake() {
   return {
     read: vi.fn<BookingHostNotificationsRepository["read"]>(async () => feed),
     markRead: vi.fn<BookingHostNotificationsRepository["markRead"]>(async () => {}),
+    markUnread: vi.fn<BookingHostNotificationsRepository["markUnread"]>(async () => {}),
+    markDone: vi.fn<BookingHostNotificationsRepository["markDone"]>(
+      async (_property, _viewer, keys) => [...keys],
+    ),
     markAllRead: vi.fn<BookingHostNotificationsRepository["markAllRead"]>(async () => {}),
   };
 }

@@ -433,7 +433,24 @@ it("says a stay booked after free cancellation's last day was never refundable (
     "17500",
     instant,
   );
-  expect(late.badge).toEqual({ kind: "nonRefundable" });
+  // VAY-2587: its own badge, "No free cancellation"; only the Non-refundable rate reads "Non-refundable".
+  expect(late.badge).toEqual({ kind: "lateBooking" });
+  // With a request or a bank transfer, from when the hotel accepts or the money arrives.
+  const lateStay = { checkIn: "2026-10-26", today: "2026-10-25", bookedOn: "2026-10-25" };
+  expect(
+    cancellationPolicy(free(3), lateStay, "17500", { request: true, card: false }).badge,
+  ).toEqual({ kind: "lateBookingOnceAccepted" });
+  expect(
+    cancellationPolicy(free(3), lateStay, "17500", {
+      request: false,
+      card: false,
+      bankTransfer: true,
+    }).badge,
+  ).toEqual({ kind: "lateBookingOncePaid" });
+  // The Non-refundable rate keeps its own words.
+  expect(
+    cancellationPolicy(nonRefundable, lateStay, "17500", { request: true, card: false }).badge,
+  ).toEqual({ kind: "notRefundableOnceAccepted" });
   expect(late.tone).toBe("amber");
   expect(late.note).toEqual({ kind: "lateBooking", date: "2026-10-23", days: 3 });
   // Booked on the last free day itself, it is still free until its end.
@@ -452,7 +469,7 @@ it("says a stay booked after free cancellation's last day was never refundable (
     "17500",
     { request: false, card: false, bankTransfer: true },
   );
-  expect(transfer.badge).toEqual({ kind: "notRefundableOncePaid" });
+  expect(transfer.badge).toEqual({ kind: "lateBookingOncePaid" });
   expect(transfer.rows[0]).toMatchObject({ when: { kind: "beforeTransfer" }, now: true });
   expect(transfer.note).toEqual({ kind: "paidLateBooking", date: "2026-10-23", days: 3 });
   // Step 3 books today; the deadline day itself still counts.
