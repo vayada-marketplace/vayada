@@ -341,6 +341,9 @@ const REFERENCES = [
   "identity.organizations <- platform.ai_usage_ledger(organization_id) c",
   "identity.users <- platform.ai_budgets(updated_by_user_id) n",
   "identity.users <- platform.ai_usage_ledger(user_id) n",
+  // 0552 (VAY-2518): assistant chats go with the account and with the user who wrote them.
+  "identity.organizations <- platform.ai_conversations(organization_id) c",
+  "identity.users <- platform.ai_conversations(user_id) c",
   // 0553 (VAY-2524): an AI change, with the text it carries, goes with the account and the user.
   "identity.organizations <- platform.ai_operations(organization_id) c",
   "identity.users <- platform.ai_operations(user_id) c",

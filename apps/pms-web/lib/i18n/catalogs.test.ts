@@ -9,6 +9,10 @@ import enMessages from "../../messages/en.json";
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sourceRoots = ["app", "components", "lib"].map((directory) => path.join(appRoot, directory));
+// Shared components PMS shows that take PMS's translations: the notifications bell (VAY-2591).
+const sharedSources = ["NotificationsBell.tsx", "notificationRows.ts"].map((file) =>
+  path.join(appRoot, "../../packages/product-onboarding/src", file),
+);
 
 function sourceFiles(directory: string): string[] {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -21,7 +25,7 @@ function sourceFiles(directory: string): string[] {
 
 function staticallyReferencedKeys(): string[] {
   const keys = new Set<string>();
-  for (const file of sourceRoots.flatMap(sourceFiles)) {
+  for (const file of [...sourceRoots.flatMap(sourceFiles), ...sharedSources]) {
     const source = fs.readFileSync(file, "utf8");
     for (const match of Array.from(source.matchAll(/\bt\(\s*["'`]([^"'`$]+)["'`]/g))) {
       keys.add(match[1]);

@@ -25,20 +25,28 @@ export function toastCandidates(feed: HostNotificationFeed): Toast[] {
   return toasts;
 }
 
+/** Every item and sync card the feed shows, read or not. */
+function feedKeys(feed: HostNotificationFeed): string[] {
+  const keys = feed.items.map((item) => item.key);
+  if (feed.syncAlert) keys.push(feed.syncAlert.key);
+  return keys;
+}
+
 /** Folds a new read into the shown toasts. The first read for a property only notes what is there: toasts
  * are for what arrives while Booking Admin is open. Read or vanished items lose their toast; new ones are
- * added oldest first, so the newest is at the bottom. */
+ * added oldest first, so the newest is at the bottom. Everything seen once, read or not, never toasts again:
+ * marking a seen item unread (VAY-2591) is not something arriving. */
 export function nextToasts(
   shown: Toast[],
   seen: Set<string> | null,
   feed: HostNotificationFeed,
 ): { toasts: Toast[]; seen: Set<string> } {
   const candidates = toastCandidates(feed);
-  if (!seen) return { toasts: [], seen: new Set(candidates.map((toast) => toast.key)) };
+  if (!seen) return { toasts: [], seen: new Set(feedKeys(feed)) };
   const live = new Set(candidates.map((toast) => toast.key));
   const fresh = candidates.filter((toast) => !seen.has(toast.key)).reverse();
   return {
     toasts: [...shown.filter((toast) => live.has(toast.key)), ...fresh].slice(-MAX_TOASTS),
-    seen: new Set([...Array.from(seen), ...fresh.map((toast) => toast.key)]),
+    seen: new Set([...Array.from(seen), ...feedKeys(feed)]),
   };
 }

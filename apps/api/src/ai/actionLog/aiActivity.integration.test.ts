@@ -154,6 +154,7 @@ describe.skipIf(!URL)("PostgreSQL AI action log: activity list and retention", (
     expect(await retention.purgeExpiredBatch(NOW, 1_000)).toMatchObject({
       logRows: 0,
       assistResults: 0,
+      conversations: 0,
     });
     const left = await activity.list({ organizationId: ORG, limit: 10 });
     expect(left.map((row) => row.requestId)).toEqual(["kept"]);

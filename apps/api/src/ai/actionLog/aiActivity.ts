@@ -1,5 +1,6 @@
 import pg from "pg";
 
+import { purgeExpiredConversations } from "../assistant/conversationStore.js";
 import type { AiActionGroup, AiActionOutcome, AiRecordRef, AiSurface } from "./actionLog.js";
 
 /**
@@ -7,7 +8,8 @@ import type { AiActionGroup, AiActionOutcome, AiRecordRef, AiSurface } from "./a
  * The log keeps rows two years (design note §7.3). The same worker also empties Inbox assist
  * results whose own 30-day retention passed: `pms.purge_expired_message_assistance_results`
  * (0146) is operator-only and nothing ran it, so the API does the same UPDATE as plain DML,
- * clamped to the database clock like that function.
+ * clamped to the database clock like that function. And it deletes the in-app assistant's
+ * conversations 30 days after their last activity (VAY-2518).
  */
 export const AI_ACTION_LOG_RETENTION = "2 years";
 /** AI changes, with the text their arguments can carry (plan 3.6, VAY-2524). */
@@ -51,12 +53,17 @@ export type AiActivityStore = {
   list(query: AiActivityQuery): Promise<AiActivityItem[]>;
 };
 
-export type AiRetentionBatch = { logRows: number; assistResults: number; operations: number };
+export type AiRetentionBatch = {
+  logRows: number;
+  assistResults: number;
+  conversations: number;
+  operations: number;
+};
 
 export type AiActionLogRetentionStore = {
   /**
-   * Deletes up to `limit` expired log rows, empties up to `limit` expired assist results and
-   * deletes up to `limit` AI changes past their retention (VAY-2524).
+   * Deletes up to `limit` expired log rows, assistant conversations and AI changes past their
+   * retention (VAY-2524) each, and empties up to `limit` expired assist results.
    */
   purgeExpiredBatch(now: Date, limit: number): Promise<AiRetentionBatch>;
   close(): Promise<void>;
@@ -158,6 +165,7 @@ export function createPgAiActionLogRetentionStore(config: {
          SELECT count(*)::int AS n FROM purged`,
         [now.toISOString(), limit],
       );
+      const conversations = await purgeExpiredConversations(db, now, limit);
       const operations = await db.query<{ n: number }>(
         `WITH expired AS (
            SELECT id FROM platform.ai_operations
@@ -176,6 +184,7 @@ export function createPgAiActionLogRetentionStore(config: {
       return {
         logRows: log.rows[0]?.n ?? 0,
         assistResults: assist.rows[0]?.n ?? 0,
+        conversations,
         operations: operations.rows[0]?.n ?? 0,
       };
     },

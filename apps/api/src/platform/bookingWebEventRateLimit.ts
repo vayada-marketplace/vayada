@@ -17,7 +17,8 @@ const WINDOW_MS = 60_000;
 
 export type BookingWebEventRateLimit = (event: {
   address: string;
-  sessionId: string;
+  /** Null for an anonymous page view (VAY-2592): only the address and hotel limits apply. */
+  sessionId: string | null;
   hotelSlug: string;
 }) =>
   | { allowed: true }
@@ -73,16 +74,17 @@ export function createBookingWebEventRateLimit(
     if (all >= limits.all) return refuse("all");
     const keys = {
       address: hmac("address", sourcePrefix(event.address)),
-      session: hmac("session", event.sessionId),
+      session: event.sessionId === null ? null : hmac("session", event.sessionId),
       hotel: hmac("hotel", event.hotelSlug.toLowerCase()),
     };
-    for (const scope of ["address", "session", "hotel"] as const) {
-      const used = counts[scope].get(keys[scope]) ?? 0;
+    const scopes = (["address", "session", "hotel"] as const).filter((scope) => keys[scope]);
+    for (const scope of scopes) {
+      const used = counts[scope].get(keys[scope]!) ?? 0;
       if (used >= limits[scope]) return refuse(scope);
     }
     all += 1;
-    for (const scope of ["address", "session", "hotel"] as const)
-      counts[scope].set(keys[scope], (counts[scope].get(keys[scope]) ?? 0) + 1);
+    for (const scope of scopes)
+      counts[scope].set(keys[scope]!, (counts[scope].get(keys[scope]!) ?? 0) + 1);
     return { allowed: true };
   };
 }

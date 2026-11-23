@@ -60,7 +60,8 @@ export const TASK_SETTINGS: Readonly<Record<AiTask, TaskSetting>> = Object.freez
   inbox_translate: setting(HAIKU, "low"),
   inbox_summarise: setting(HAIKU, "low"),
   inbox_draft: setting(SONNET, "low"),
-  assistant_chat: setting(SONNET, "medium"),
+  // Streamed (VAY-2518), so no 45 s limit on one answer; thinking counts against this too.
+  assistant_chat: Object.freeze({ ...setting(SONNET, "medium"), maxOutputTokens: 16_000 }),
   concierge_understand: setting(HAIKU, "low"),
   concierge_reply: setting(SONNET, "low"),
 });
