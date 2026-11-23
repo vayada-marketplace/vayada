@@ -54,6 +54,7 @@
     "./GoLiveChecklistCard": "./src/GoLiveChecklistCard.tsx",
     "./hotelSetupChecklistApi": "./src/hotelSetupChecklistApi.ts",
     "./CountryPhoneField": "./src/CountryPhoneField.tsx",
+    "./LocationChangeConfirmDialog": "./src/LocationChangeConfirmDialog.tsx",
     "./hostNotifications": "./src/hostNotifications.ts",
     "./notificationRows": "./src/notificationRows.ts",
     "./useHostNotifications": "./src/useHostNotifications.ts",

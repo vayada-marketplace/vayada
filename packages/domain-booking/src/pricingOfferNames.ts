@@ -40,8 +40,8 @@ export function lastRefundDays(cancellation: ReplacementOfferTerms["cancellation
   return days.length ? Math.min(...days) : null;
 }
 
-/** An option's plain name as a meal and a cancellation, for an app to word: "room_only" + "free" is "Free
- * cancellation", "breakfast" + "non_refundable" is "Breakfast included, non-refundable", and so on. A null
+/** An option's plain name as a meal and a cancellation, for an app to word: "room_only" + "free" is "Flexible
+ * rate", "breakfast" + "non_refundable" is "Breakfast included, non-refundable", and so on. A null
  * cancellation (unknown) names the meal alone. `days` is a free cancellation's deadline: a page that knows the stay
  * says "until <date>" with it, and a stay that starts inside the deadline has no free cancellation. For a partial
  * refund it is the last refund day when the offer gives it (VAY-2406): after it, no refund. */

@@ -32,6 +32,8 @@ export default function NearbyLocationForm({
   disabled,
   translate,
   locale,
+  timezoneId,
+  countryId,
 }: {
   value: PropertyProfileLocation;
   onChange: (value: PropertyProfileLocation) => void;
@@ -40,6 +42,9 @@ export default function NearbyLocationForm({
   /** The form's copy (VAY-2322; the address fields are shared with the PMS); English without it. */
   translate?: (key: LocationFormKey) => string;
   locale?: string;
+  /** The time zone and country fields' ids, for the focus after the live hotel question (VAY-2586). */
+  timezoneId?: string;
+  countryId?: string;
 }) {
   const t = translate ?? ((key: LocationFormKey) => english[key]);
   function change(patch: Partial<PropertyProfileLocation>) {
@@ -58,10 +63,12 @@ export default function NearbyLocationForm({
         disabled={disabled}
         translate={t}
         locale={locale}
+        countryId={countryId}
       />
       <label className="block text-sm font-medium text-gray-700">
         {t("locationForm.timezone")}
         <input
+          id={timezoneId}
           className={nearbyInputClass}
           value={value.timezone}
           maxLength={200}

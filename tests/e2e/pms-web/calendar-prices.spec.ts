@@ -35,7 +35,7 @@ const offer = (
   price,
   restrictions,
 });
-// Free cancellation €90, "High" season €108 from 6 to 8 November, an own price of €70 on 30 October; Non-refundable
+// Flexible rate €90, "High" season €108 from 6 to 8 November, an own price of €70 on 30 October; Non-refundable
 // is 10% less, so it is the cheapest rate every night.
 const publication = {
   currency: "EUR",
@@ -271,7 +271,7 @@ test.describe("PMS calendar prices", () => {
     await expect(popover.getByText("Available")).toBeVisible();
     await expect(popover.getByText("Season: Standard")).toBeVisible();
     await expect(popover.getByRole("listitem").nth(0)).toHaveText(/Non-refundable\s*Lowest\s*€63/);
-    await expect(popover.getByRole("listitem").nth(1)).toHaveText(/Free cancellation\s*€70/);
+    await expect(popover.getByRole("listitem").nth(1)).toHaveText(/Flexible rate\s*€70/);
     await expect(popover.getByText("1 night", { exact: true })).toBeVisible();
     await expect(popover.getByText("Free until Nov 3 · 4 nights open")).toBeVisible();
     await expect(popover.getByText("Next arrival Nov 3: Ada Lovelace · Direct")).toBeVisible();
@@ -301,7 +301,7 @@ test.describe("PMS calendar prices", () => {
     await expect(popover).toBeVisible();
     const total = popover.locator("section", { hasText: "Total" }).getByRole("listitem");
     await expect(total.nth(0)).toHaveText(/Non-refundable\s*Lowest\s*€306/);
-    await expect(total.nth(1)).toHaveText(/Free cancellation\s*€340/);
+    await expect(total.nth(1)).toHaveText(/Flexible rate\s*€340/);
     await expect(popover.getByRole("button", { name: "New Booking · 4 nights" })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("calendar-stay-popover.png") });
 
@@ -452,7 +452,7 @@ test.describe("PMS phone calendar rooms and prices", () => {
     await expect(sheet.getByText("Available")).toBeVisible();
     await expect(sheet.getByText("Season: Standard")).toBeVisible();
     await expect(sheet.getByRole("listitem").nth(0)).toHaveText(/Non-refundable\s*Lowest\s*€81/);
-    await expect(sheet.getByRole("listitem").nth(1)).toHaveText(/Free cancellation\s*€90/);
+    await expect(sheet.getByRole("listitem").nth(1)).toHaveText(/Flexible rate\s*€90/);
     await expect(sheet.getByText("1 night", { exact: true })).toBeVisible();
     await expect(sheet.getByText("Free until Nov 12 · 8 nights open")).toBeVisible();
     await expect(sheet.getByRole("link", { name: /Edit prices & rules/ })).toHaveAttribute(

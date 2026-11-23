@@ -23,6 +23,7 @@
     "@vayada/fonts": "*",
     "@vayada/product-onboarding": "*",
     "@vayada/settings-ui": "*",
+    "@vayada/web-security": "*",
     "@vayada/locale-constants": "*",
     "clsx": "^2.0.0",
     "next": "16.2.6",

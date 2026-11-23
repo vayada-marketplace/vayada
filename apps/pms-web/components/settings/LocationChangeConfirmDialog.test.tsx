@@ -2,7 +2,9 @@ import { createElement } from "react";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 import type { PropertyLocationChanges } from "@vayada/domain-hotels";
+import { locationChangeConfirmEnglish } from "@vayada/product-onboarding/LocationChangeConfirmDialog";
 import { ApiErrorResponse } from "@/services/api/client";
+import en from "../../messages/en.json";
 
 import {
   LocationChangeConfirmDialog,
@@ -126,6 +128,13 @@ describe("live hotel location change question (VAY-2582)", () => {
     act(() => saving.keep.props.onClick());
     expect(saving.onKeep).not.toHaveBeenCalled();
     saving.view.unmount();
+  });
+
+  // VAY-2586: the question moved to @vayada/product-onboarding; its English stays the PMS's approved copy.
+  it("shares the PMS's approved English with Booking Admin", () => {
+    for (const [key, text] of Object.entries(locationChangeConfirmEnglish))
+      if (key !== "locationConfirm.saving")
+        expect((en as Record<string, string>)[`settings.property.${key}`], key).toBe(text);
   });
 
   it("reads the question from the server's answer, and only from that one", () => {

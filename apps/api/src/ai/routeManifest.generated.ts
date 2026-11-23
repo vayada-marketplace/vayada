@@ -102,6 +102,7 @@ export const ROUTE_MANIFEST = [
   "GET /api/finance/properties/:propertyId/payment-settings",
   "GET /api/finance/properties/:propertyId/payment-windows",
   "GET /api/finance/properties/:propertyId/payout-destination",
+  "GET /api/finance/properties/:propertyId/payout-statement",
   "GET /api/finance/properties/:propertyId/payouts",
   "GET /api/finance/properties/:propertyId/plan-status",
   "GET /api/finance/properties/:propertyId/reconciliation/payments",

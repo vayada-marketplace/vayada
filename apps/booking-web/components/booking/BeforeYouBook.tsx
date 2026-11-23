@@ -230,12 +230,18 @@ export function BookingConsent({
   // until then, as the policy's first row says.
   const notRefundable = blocks.filter(
     ({ policy }) => policy.tone === "amber" && !policy.request && !policy.bankTransfer,
-  ).length;
-  const consentNonRefundable = !notRefundable
+  );
+  // VAY-2587: "non-refundable" only when each of them is the Non-refundable rate; a Flexible rate
+  // booked after its free cancellation ended (or a partial refund past its last refund day) can't
+  // be cancelled for free, as its rate box says, and neither can a mix with them.
+  const nonRefundableRate = notRefundable.every(
+    ({ policy }) => policy.badge.kind === "nonRefundable",
+  );
+  const consentNonRefundable = !notRefundable.length
     ? null
-    : notRefundable === blocks.length
-      ? t("agreeNonRefundable")
-      : t("agreeSomeNonRefundable");
+    : notRefundable.length === blocks.length
+      ? t(nonRefundableRate ? "agreeNonRefundable" : "agreeNoFreeCancellation")
+      : t(nonRefundableRate ? "agreeSomeNonRefundable" : "agreeSomeNoFreeCancellation");
   return (
     <div className="space-y-2">
       {status && (
