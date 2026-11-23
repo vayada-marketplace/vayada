@@ -202,6 +202,25 @@ describe("an AI asking for a change (VAY-2524)", () => {
     expect(proposed).toEqual([]);
   });
 
+  it("stores ids in lower case, so one change asked in any letter case is one question", async () => {
+    const { propose, proposed, log } = setUp();
+    const result = await propose(await worldContext(OWNER, ORG_A, CALENDAR), {
+      action: "room_block_create@1",
+      arguments: {
+        ...args(P1.toUpperCase()),
+        roomTypeId: DELUXE.toUpperCase(),
+        roomIds: [R12.toUpperCase(), R12],
+      },
+      client: "vayada:pms",
+    });
+    expect(result.ok).toBe(true);
+    expect(proposed[0]).toMatchObject({
+      propertyId: P1,
+      arguments: { propertyId: P1, roomTypeId: DELUXE, roomIds: [R12, R12] },
+    });
+    expect(log.rows[0]).toMatchObject({ propertyId: P1, outcome: "ok" });
+  });
+
   it("passes vayada's own preview digest and its shorter expiry to the stored change", async () => {
     const { propose, proposed } = setUp();
     await propose(await worldContext(OWNER, ORG_A, CALENDAR), {

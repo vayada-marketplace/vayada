@@ -83,8 +83,9 @@ export function createAiChangeProposer(deps: {
     const started = performance.now();
     const action = findAction(request.action);
     const parsed = action?.input.safeParse(request.arguments ?? {});
-    const propertyId =
-      parsed?.success && isLoggableUuid(parsed.data.propertyId) ? parsed.data.propertyId : null;
+    // As checked, with ids in lower case: one change asked in any letter case is one question.
+    const data = action && parsed?.success ? lowerCaseIds(action, parsed.data) : undefined;
+    const propertyId = data && isLoggableUuid(data.propertyId) ? data.propertyId : null;
 
     const log = (outcome: AiActionOutcome, errorCode: string | null, operationId: string | null) =>
       deps.log
@@ -101,7 +102,7 @@ export function createAiChangeProposer(deps: {
           actionVersion: action?.version ?? 1,
           group: "ask",
           // Only declared ids, dates and enum values survive; never the free text.
-          arguments: parsed?.success ? parsed.data : undefined,
+          arguments: data,
           argumentKinds: action ? argumentKindsOf(action.input) : {},
           outcome,
           errorCode,
@@ -130,7 +131,7 @@ export function createAiChangeProposer(deps: {
       return refuse("invalid_input", issues.join("; ") || "The input is not valid.");
     }
     // What its card could never show (e.g. a last night before the first).
-    const problem = changeArgumentProblem(action.key, parsed.data);
+    const problem = changeArgumentProblem(action.key, data!);
     if (problem) return refuse("invalid_input", problem);
     if (
       !propertyId ||
@@ -153,7 +154,7 @@ export function createAiChangeProposer(deps: {
           requestScope: request.requestScope,
           client: request.client,
           action,
-          arguments: parsed.data,
+          arguments: data!,
           previewSha256: request.previewSha256,
           expiresInMs: request.expiresInMs,
         },
@@ -177,3 +178,19 @@ export function createAiChangeProposer(deps: {
 }
 
 const loggable = (id: string | undefined): string | null => (isLoggableUuid(id) ? id : null);
+
+/** The action's id and id-list arguments in lower case, as the database writes UUIDs. */
+function lowerCaseIds(
+  action: Pick<ChangeAction, "input">,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  const lowered = { ...args };
+  for (const [key, kind] of Object.entries(argumentKindsOf(action.input))) {
+    const value = lowered[key];
+    if (kind === "id" && typeof value === "string") lowered[key] = value.toLowerCase();
+    if (kind === "ids" && Array.isArray(value)) {
+      lowered[key] = value.map((id: unknown) => (typeof id === "string" ? id.toLowerCase() : id));
+    }
+  }
+  return lowered;
+}

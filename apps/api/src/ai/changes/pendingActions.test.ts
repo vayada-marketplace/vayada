@@ -130,9 +130,19 @@ async function setUp(
     /** Instead of aiOn: may also change rows, as another tab would meanwhile. */
     aiEnabled?: (rows: Map<string, AiOperation>) => Promise<boolean>;
     startFails?: boolean;
+    findFails?: boolean;
   } = {},
 ) {
-  const { store, rows } = memoryStore(...operations);
+  const memory = memoryStore(...operations);
+  const { rows } = memory;
+  const store: typeof memory.store = options.findFails
+    ? {
+        ...memory.store,
+        find: async () => {
+          throw new Error("AI operation store query failed (57014)");
+        },
+      }
+    : memory.store;
   const starts: string[] = [];
   const world = worldAuthorization(options.permissions ?? CALENDAR);
   app = Fastify({ logger: false });
@@ -433,6 +443,14 @@ describe("answering AI changes (VAY-2524)", () => {
       category: "dependency",
       message: "vayada can't do this right now. Try again.",
     });
+    await app!.close();
+    app = undefined;
+    // Looking the change up fails too: the same plain answer.
+    const broken = await setUp([op], { findFails: true });
+    const look = await broken.get(op.id);
+    expect(look.statusCode).toBe(503);
+    expect(look.json()).toMatchObject({ code: "unavailable" });
+    expect(JSON.stringify(look.json())).not.toContain("57014");
   });
 
   it("tells each way a change ended", () => {

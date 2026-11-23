@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { CHANGE_ACTIONS } from "../actions/registry.js";
 import {
   CARD_WRITERS,
+  CardReadError,
   CardTargetMissingError,
   cardSha256,
   changeArgumentProblem,
@@ -153,6 +154,29 @@ describe("the Yes/No card (VAY-2524)", () => {
         "If channels are connected, they get the new availability.",
       ],
     });
+    // The linked line never makes a card unanswerable: groups the person can't read, or a type
+    // whose name can't be read, give the line without names; a failed read still fails.
+    const effectsWith = async (linked: Partial<CardReader>) =>
+      (await write("room_block_create@1", args, reader(linked))).effects;
+    expect(
+      await effectsWith({
+        linkedRoomTypeIds: async () => {
+          throw new CardReadError("not_allowed");
+        },
+      }),
+    ).toContain("If linked room types share these rooms, their availability changes too.");
+    expect(
+      await effectsWith({
+        linkedRoomTypeIds: async () => ["eeeeeeee-0000-4000-8000-000000000099"],
+      }),
+    ).toContain("Linked room types share these rooms, so their availability changes too.");
+    await expect(
+      effectsWith({
+        linkedRoomTypeIds: async () => {
+          throw new CardReadError("unavailable");
+        },
+      }),
+    ).rejects.toMatchObject({ reason: "unavailable" });
     // A last night before the first is refused when the AI asks, never shown.
     expect(changeArgumentProblem("room_block_create@1", { ...args, endsOn: "2026-12-11" })).toBe(
       "endsOn: must not be before startsOn",

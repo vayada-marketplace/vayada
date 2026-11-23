@@ -94,6 +94,8 @@ const ROOM_STATES: Readonly<Record<string, string>> = {
 };
 const CHANNELS = "If channels are connected, they get the new availability.";
 const GUEST_NOT_TOLD = "The guest is not told.";
+const LINKED = "Linked room types share these rooms, so their availability changes too.";
+const LINKED_MAYBE = "If linked room types share these rooms, their availability changes too.";
 const PROVIDERS: Readonly<Record<string, string>> = {
   airbnb: "Airbnb",
   booking: "Booking.com",
@@ -168,8 +170,9 @@ async function typeNameOf(input: CardInput, roomTypeId: string): Promise<string>
 }
 
 /**
- * The rooms of one room type a change names, in the order asked and each once (the route blocks a
- * room once however often it is named); any missing one is a change.
+ * The rooms of one room type a change names, in the order asked and each once (proposeChange stores
+ * ids in lower case, and the route blocks a room once however often it is named); any missing one
+ * is a change.
  */
 async function roomsOfType(
   input: CardInput,
@@ -193,14 +196,31 @@ async function roomsOfType(
 const roomsText = (numbers: readonly string[]) =>
   numbers.length === 1 ? `room ${numbers[0]}` : `rooms ${listText(numbers)}`;
 
-/** Room types that share rooms with this one see the change too (linked inventory). */
+/**
+ * Room types that share rooms with this one see the change too (linked inventory). Only a line of
+ * what else happens: a person who can't read the groups, or a type whose name can't be read, gets
+ * the same line without names, never a card they can't answer. A failed read still fails (it
+ * would change the card's text between two looks).
+ */
 async function linkedEffect(input: CardInput, roomTypeId: string): Promise<string[]> {
-  const linked = await input.reader.linkedRoomTypeIds(input.propertyId, roomTypeId);
+  let linked: readonly string[];
+  try {
+    linked = await input.reader.linkedRoomTypeIds(input.propertyId, roomTypeId);
+  } catch (error) {
+    if (error instanceof CardReadError && error.reason === "not_allowed") return [LINKED_MAYBE];
+    throw error;
+  }
   if (linked.length === 0) return [];
-  const names = await Promise.all(linked.map((id) => typeNameOf(input, id)));
-  return [
-    `Linked room types share these rooms, so their availability changes too: ${listText(names)}.`,
-  ];
+  const names: string[] = [];
+  for (const id of linked) {
+    try {
+      names.push(await typeNameOf(input, id));
+    } catch (error) {
+      if (!(error instanceof CardTargetMissingError)) throw error;
+      return [LINKED];
+    }
+  }
+  return [`${LINKED.slice(0, -1)}: ${listText(names)}.`];
 }
 
 const roomBlockCreate: CardWriter = async (input) => {

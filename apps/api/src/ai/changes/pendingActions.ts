@@ -219,6 +219,23 @@ export async function registerPendingActionRoutes(
   const readerFor =
     options.reader ?? ((authorization: string) => createCardReader(options.root, authorization));
 
+  const closedAs = (operation: AiOperation, reason: AiOperationCloseReason) =>
+    operation.status === "closed" && operation.closeReason === reason;
+  /** The refusal for a change that no longer waits: expired, or answered (maybe running). */
+  const answeredRefusal = (operation: AiOperation): Refusal =>
+    closedAs(operation, "expired")
+      ? { statusCode: 409, code: "expired", message: "This question expired." }
+      : { statusCode: 409, code: "already_answered", message: "This was answered already." };
+  /** Anything unexpected: no detail leaves (store or executor errors name tables and states). */
+  const unavailable = (request: FastifyRequest, reply: FastifyReply, error: unknown) => {
+    request.log.error({ err: error }, "AI change answer failed");
+    return sendError(reply, {
+      statusCode: 503,
+      code: "unavailable",
+      message: "vayada can't do this right now. Try again.",
+    });
+  };
+
   /** The person's own operation, or the reply that refused the request. */
   async function load(
     request: FastifyRequest<{ Params: Params }>,
@@ -232,7 +249,13 @@ export async function registerPendingActionRoutes(
     }
     const notFound = { statusCode: 404, code: "not_found", message: "No such change." } as const;
     const id = request.params.id;
-    const operation = UUID.test(id) ? await options.store.find(id) : null;
+    let operation: AiOperation | null = null;
+    try {
+      operation = UUID.test(id) ? await options.store.find(id) : null;
+    } catch (error) {
+      unavailable(request, reply, error);
+      return undefined;
+    }
     if (!operation) {
       sendError(reply, notFound);
       return undefined;
@@ -372,23 +395,6 @@ export async function registerPendingActionRoutes(
       throw error;
     }
   }
-
-  const closedAs = (operation: AiOperation, reason: AiOperationCloseReason) =>
-    operation.status === "closed" && operation.closeReason === reason;
-  /** The refusal for a change that no longer waits: expired, or answered (maybe running). */
-  const answeredRefusal = (operation: AiOperation): Refusal =>
-    closedAs(operation, "expired")
-      ? { statusCode: 409, code: "expired", message: "This question expired." }
-      : { statusCode: 409, code: "already_answered", message: "This was answered already." };
-  /** Anything unexpected: no detail leaves (store or executor errors name tables and states). */
-  const unavailable = (request: FastifyRequest, reply: FastifyReply, error: unknown) => {
-    request.log.error({ err: error }, "AI change answer failed");
-    return sendError(reply, {
-      statusCode: 503,
-      code: "unavailable",
-      message: "vayada can't do this right now. Try again.",
-    });
-  };
 
   const viewOf = (settled: Settled) =>
     pendingActionView(settled.operation, settled.card, now(), {
