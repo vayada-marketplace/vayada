@@ -361,6 +361,115 @@ test("Your chats lists the person's chats and opens one", async ({ page }, testI
   await healthy();
 });
 
+/** A promise the spec settles itself: holds an answer or a read while it looks at the panel. */
+function gate() {
+  let open = () => {};
+  const opened = new Promise<void>((resolve) => (open = resolve));
+  return { opened, open };
+}
+
+test("Stop pressed before the answer starts stops it as soon as it does", async ({
+  page,
+}, testInfo) => {
+  const healthy = watchPageHealth(page, testInfo);
+  await setup(page);
+  const slow = gate();
+  const question = "Which rooms are free tonight?";
+  const seen = await routeAssistant(page, {
+    answer: () => ({
+      wait: slow.opened,
+      events: [
+        { type: "turn", conversationId: "c-stop", turnId: "c-stop-turn-1" },
+        { type: "end", status: "stopped", reason: "user_stopped" },
+      ],
+      stored: chatView("c-stop", [{ question, status: "stopped", endReason: "user_stopped" }]),
+    }),
+  });
+  await page.goto("/dashboard");
+  await page.getByRole("button", { name: "Ask AI" }).click();
+  const panel = panelOf(page);
+  await panel.getByRole("textbox").fill(question);
+  await panel.getByRole("textbox").press("Enter");
+  await expect(panel.getByText("Thinking...")).toBeVisible();
+  await panel.getByRole("button", { name: "Stop" }).click();
+  expect(seen.stops).toEqual([]);
+  slow.open();
+  await expect(panel.getByText("You stopped this answer.")).toBeVisible();
+  await expect
+    .poll(() => seen.stops)
+    .toEqual([{ propertyId: PMS_WEB_PROPERTY_ID, app: "pms", turnId: "c-stop-turn-1" }]);
+  // Stop is gone: the question box has the focus again.
+  await expect(panel.getByRole("textbox")).toBeFocused();
+  await healthy();
+});
+
+test("opening another chat while an answer runs keeps that chat", async ({ page }, testInfo) => {
+  const healthy = watchPageHealth(page, testInfo);
+  await setup(page);
+  const slow = gate();
+  const seen = await routeAssistant(page, {
+    chats: [
+      chatView("c-old", [{ question: "Which rooms are closed?", answer: "None are closed." }]),
+    ],
+    answer: (request, call) =>
+      call === 1
+        ? {
+            wait: slow.opened,
+            events: [
+              { type: "turn", conversationId: "c-late", turnId: "c-late-turn-1" },
+              { type: "text", text: "A late answer for the other chat." },
+              { type: "end", status: "done", reason: null },
+            ],
+            stored: chatView("c-late", [
+              { question: request.question, answer: "A late answer for the other chat." },
+            ]),
+          }
+        : answered("c-old", request.question, "Still none."),
+  });
+  await page.goto("/dashboard");
+  await page.getByRole("button", { name: "Ask AI" }).click();
+  const panel = panelOf(page);
+  await panel.getByRole("button", { name: "What arrives today?" }).click();
+  await expect(panel.getByRole("button", { name: "Stop" })).toBeVisible();
+  await panel.getByRole("button", { name: "Your chats" }).click();
+  await panel.getByRole("button", { name: /Which rooms are closed\?/ }).click();
+  await expect(panel.getByText("None are closed.")).toBeVisible();
+  const late = page.waitForResponse(/\/api\/ai\/assistant\/turns/);
+  slow.open();
+  await late;
+  // The other chat's late answer never shows here, and the next question goes to this chat.
+  await panel.getByRole("textbox").fill("And tomorrow?");
+  await panel.getByRole("textbox").press("Enter");
+  await expect(panel.getByText("Still none.")).toBeVisible();
+  await expect(panel.getByText("A late answer for the other chat.")).toHaveCount(0);
+  expect(seen.turns[1]).toMatchObject({ question: "And tomorrow?", conversationId: "c-old" });
+  await healthy();
+});
+
+test("the answer stays on screen while the chat is read back", async ({ page }, testInfo) => {
+  const healthy = watchPageHealth(page, testInfo);
+  await setup(page);
+  const reading = gate();
+  const answer = "Four guests arrive today.";
+  await routeAssistant(page, {
+    answer: (request) => answered("c-hold", request.question, answer),
+    holdRead: (id) => (id === "c-hold" ? reading.opened : undefined),
+  });
+  await page.goto("/dashboard");
+  await page.getByRole("button", { name: "Ask AI" }).click();
+  const panel = panelOf(page);
+  const readBack = page.waitForRequest(/\/api\/ai\/assistant\/conversations\/c-hold\?/);
+  await panel.getByRole("button", { name: "What arrives today?" }).click();
+  await readBack;
+  await expect(panel.getByText(answer)).toBeVisible();
+  // The stream has ended and the chat is being read: no greeting, the answer is still there.
+  await expect(panel.getByRole("heading", { name: GREETING })).toHaveCount(0);
+  reading.open();
+  await expect(panel.getByText("Looked at the calendar")).toBeVisible();
+  await expect(panel.getByText(answer)).toBeVisible();
+  await healthy();
+});
+
 test.describe("on a phone", () => {
   test.use({ viewport: PHONE });
 
@@ -377,9 +486,17 @@ test.describe("on a phone", () => {
     });
     await page.goto("/dashboard");
     await page.getByRole("button", { name: "Ask AI" }).click();
-    const panel = panelOf(page);
+    // On a phone the panel covers the page: a modal dialog.
+    const panel = page.getByRole("dialog", { name: "Assistant" });
+    await expect(panel).toHaveAttribute("aria-modal", "true");
     await expect(panel.getByRole("heading", { name: GREETING })).toBeVisible();
     expect(await panel.boundingBox()).toEqual({ x: 0, y: 0, ...PHONE });
+    // Tab stays inside the sheet.
+    await panel.getByRole("button", { name: "Close" }).focus();
+    for (let step = 0; step < 12; step += 1) {
+      await page.keyboard.press("Tab");
+      expect(await panel.evaluate((sheet) => sheet.contains(document.activeElement))).toBe(true);
+    }
     await shot(page, testInfo, "11-phone-empty");
     await panel.getByRole("button", { name: "What arrives today?" }).click();
     await expect(panel.getByText("Anna Keller still owes €360.", { exact: false })).toBeVisible();

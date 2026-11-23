@@ -283,7 +283,15 @@ export class ApiClient {
         retry: send,
       });
     }
-    this.handleUnauthorized(new ApiErrorResponse(401, {}));
+    // Its detail says whether the session expired (the login page then says so).
+    const detail = await response
+      .clone()
+      .json()
+      .then(
+        (body: ApiError) => body,
+        () => ({}),
+      );
+    this.handleUnauthorized(new ApiErrorResponse(401, detail));
     return response;
   }
 }

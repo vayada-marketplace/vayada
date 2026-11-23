@@ -137,7 +137,12 @@ export async function routeAssistant(
   options: {
     chats?: FakeChat[];
     /** What a question gets: the streamed events and the chat as stored afterwards. */
-    answer?: (request: TurnRequest, call: number) => { events: object[]; stored?: FakeChat };
+    answer?: (
+      request: TurnRequest,
+      call: number,
+    ) => { events: object[]; stored?: FakeChat; wait?: Promise<void> };
+    /** Holds a chat's read until the promise settles (to look at the panel meanwhile). */
+    holdRead?: (conversationId: string) => Promise<void> | undefined;
     /** The chat as stored after Stop. */
     onStop?: (conversationId: string) => FakeChat | undefined;
   } = {},
@@ -170,6 +175,7 @@ export async function routeAssistant(
     }
     const read = path.match(/\/api\/ai\/assistant\/conversations\/([^/]+)$/);
     if (request.method() === "GET" && read) {
+      await options.holdRead?.(read[1]!);
       const chat = chats.get(read[1]!);
       return chat
         ? route.fulfill({ json: chat })
@@ -182,6 +188,8 @@ export async function routeAssistant(
       const body = request.postDataJSON() as TurnRequest;
       seen.turns.push(body);
       const reply = options.answer?.(body, seen.turns.length) ?? { events: [] };
+      // The answer arrives only once the spec lets it (a slow model, as far as the panel knows).
+      if (reply.wait) await reply.wait;
       if (reply.stored) chats.set(reply.stored.id, reply.stored);
       return route.fulfill({
         status: 200,

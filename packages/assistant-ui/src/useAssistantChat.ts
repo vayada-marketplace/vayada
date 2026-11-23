@@ -57,34 +57,49 @@ export function useAssistantChat(api: AssistantApi, scope: AssistantScope) {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [blocker, setBlocker] = useState<Blocker>(null);
   const [lastQuestion, setLastQuestion] = useState("");
-  const turnId = useRef<string | undefined>(undefined);
+  // Bumped by every question, chat switch, New chat, property switch and close: whatever an
+  // earlier one still sends back (a late event, a read, a timer) is dropped.
+  const epoch = useRef(0);
+  // The turn being answered; a Stop pressed before the API named the turn is sent once it does.
+  const turn = useRef<{ conversationId?: string; turnId?: string; stopAsked: boolean }>({
+    stopAsked: false,
+  });
   const follow = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  // Which chat the state belongs to: a late answer for another property is dropped.
-  const scopeKey = useRef(storageKey(scope));
 
-  const stopFollowing = () => {
+  const begin = () => {
     clearTimeout(follow.current);
-    follow.current = undefined;
+    epoch.current += 1;
+    return epoch.current;
   };
 
+  /**
+   * Shows the stored chat. While one of its turns still runs (a reload mid-answer, a dropped
+   * stream), reads it again every FOLLOW_MS until the turn ends; a failed read is retried then.
+   * Resolves true once the chat is shown.
+   */
   const load = useCallback(
-    async (id: string, key = scopeKey.current): Promise<void> => {
+    async (id: string, mine: number, following = false): Promise<boolean> => {
       let view: ConversationView | undefined;
       try {
         view = await api.read(scope, id);
       } catch {
-        if (key === scopeKey.current) setNotice("load_failed");
-        return;
+        if (mine !== epoch.current) return false;
+        if (following) follow.current = setTimeout(() => void load(id, mine, true), FOLLOW_MS);
+        else setNotice("load_failed");
+        return false;
       }
-      if (key !== scopeKey.current) return;
+      if (mine !== epoch.current) return false;
       if (!view) {
         setConversationId(undefined);
         remember(scope, undefined);
         setItems([]);
+        setLive(null);
+        setAnswering(false);
         setNotice("not_found");
-        return;
+        return false;
       }
       setItems(transcriptOf(view));
+      setLive(null);
       const readOnlyReason = view.readOnlyReason;
       setBlocker((current) =>
         readOnlyReason
@@ -94,23 +109,21 @@ export function useAssistantChat(api: AssistantApi, scope: AssistantScope) {
             : current,
       );
       const running = runningTurn(view);
-      stopFollowing();
       if (running) {
-        // A turn that went on without this page (a reload mid-answer): follow it until it ends.
-        turnId.current = running.id;
+        turn.current = { conversationId: id, turnId: running.id, stopAsked: false };
         setAnswering(true);
-        follow.current = setTimeout(() => void load(id, key), FOLLOW_MS);
+        follow.current = setTimeout(() => void load(id, mine, true), FOLLOW_MS);
       } else {
         setAnswering(false);
       }
+      return true;
     },
     [api, scope],
   );
 
-  // A new property or app: its own remembered chat.
+  // A new property or app: its own remembered chat. Closing the panel drops what is in flight.
   useEffect(() => {
-    scopeKey.current = storageKey(scope);
-    stopFollowing();
+    const mine = begin();
     const id = remembered(scope);
     setConversationId(id);
     setItems([]);
@@ -118,38 +131,41 @@ export function useAssistantChat(api: AssistantApi, scope: AssistantScope) {
     setAnswering(false);
     setNotice(null);
     setBlocker(null);
-    if (id) void load(id);
-    return stopFollowing;
+    if (id) void load(id, mine);
+    return () => {
+      begin();
+    };
   }, [scope, load]);
 
   const open = useCallback(
     (id: string) => {
-      stopFollowing();
+      const mine = begin();
       setConversationId(id);
       remember(scope, id);
+      setItems([]);
+      setLive(null);
+      setAnswering(false);
       setNotice(null);
       setBlocker(null);
-      setItems([]);
-      void load(id);
+      void load(id, mine);
     },
     [scope, load],
   );
 
   const newChat = useCallback(() => {
-    stopFollowing();
+    begin();
     setConversationId(undefined);
     remember(scope, undefined);
     setItems([]);
     setLive(null);
-    setNotice(null);
     setAnswering(false);
+    setNotice(null);
     setBlocker((current) => (current?.kind === "read_only" ? null : current));
   }, [scope]);
 
   function settle(last: TurnEndEvent | RefusedEvent | undefined, hadTurn: boolean) {
     if (!last) {
-      if (hadTurn) setNotice("reloaded");
-      else setNotice("failed");
+      setNotice(hadTurn ? "reloaded" : "failed");
       return;
     }
     if (last.type === "refused") {
@@ -173,8 +189,8 @@ export function useAssistantChat(api: AssistantApi, scope: AssistantScope) {
     async (question: string) => {
       const text = question.trim();
       if (!text || answering) return;
-      const key = scopeKey.current;
-      stopFollowing();
+      const mine = begin();
+      turn.current = { conversationId, stopAsked: false };
       setNotice(null);
       setLastQuestion(text);
       setAnswering(true);
@@ -182,15 +198,18 @@ export function useAssistantChat(api: AssistantApi, scope: AssistantScope) {
       let id = conversationId;
       let hadTurn = false;
       let last: TurnEndEvent | RefusedEvent | undefined;
+      let broke = false;
       try {
         last = await api.ask(scope, { question: text, conversationId: id }, (event) => {
-          if (key !== scopeKey.current) return;
+          if (mine !== epoch.current) return;
           if (event.type === "turn") {
             hadTurn = true;
             id = event.conversationId;
-            turnId.current = event.turnId;
+            const stopAsked = turn.current.stopAsked;
+            turn.current = { conversationId: id, turnId: event.turnId, stopAsked: false };
             setConversationId(id);
             remember(scope, id);
+            if (stopAsked) void api.stop(scope, id, event.turnId).catch(() => undefined);
           } else if (event.type === "text") {
             setLive((current) => current && { ...current, text: current.text + event.text });
           } else if (event.type === "tool") {
@@ -202,33 +221,37 @@ export function useAssistantChat(api: AssistantApi, scope: AssistantScope) {
             });
           }
         });
-        if (key !== scopeKey.current) return;
-        settle(last, hadTurn);
-        if (last?.type === "refused" && last.reason === "not_found") id = undefined;
       } catch (error) {
-        if (key !== scopeKey.current) return;
+        broke = true;
+        if (mine !== epoch.current) return;
         if (error instanceof AssistantUnavailableError) setBlocker({ kind: "off" });
         else setNotice("failed");
-      } finally {
-        if (key === scopeKey.current) {
-          setLive(null);
-          setAnswering(false);
-          // The stored chat is what counts, also after a broken stream.
-          if (id) await load(id, key);
-        }
       }
+      if (mine !== epoch.current) return;
+      if (!broke) settle(last, hadTurn);
+      if (last?.type === "refused" && last.reason === "not_found") id = undefined;
+      // The stored chat is what counts, also after a broken stream. Until it is read, the
+      // streamed answer stays on screen (and stays if the read fails).
+      if (id && (await load(id, mine))) return;
+      if (mine !== epoch.current) return;
+      if (!id) setLive(null);
+      setAnswering(false);
     },
     [answering, api, conversationId, load, scope],
   );
 
   const stop = useCallback(async () => {
-    if (!conversationId) return;
+    const current = turn.current;
+    if (!current.conversationId || !current.turnId) {
+      turn.current = { ...current, stopAsked: true };
+      return;
+    }
     try {
-      await api.stop(scope, conversationId, turnId.current);
+      await api.stop(scope, current.conversationId, current.turnId);
     } catch {
       // The turn ends on its own limits; the next read shows how it ended.
     }
-  }, [api, conversationId, scope]);
+  }, [api, scope]);
 
   return {
     conversationId,

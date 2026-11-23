@@ -242,7 +242,17 @@ function OpenDrawer({
   const [view, setView] = useState<"chat" | "history">("chat");
   const [draft, setDraft] = useState("");
   const input = useRef<HTMLTextAreaElement>(null);
+  const sheet = useRef<HTMLElement>(null);
+  const refocus = useRef(false);
+  const phone = usePhone();
   const paused = chat.blocker?.kind === "off" || chat.blocker?.kind === "allowance";
+
+  // Stop disappears when the answer ends: the question box takes the focus it had.
+  useEffect(() => {
+    if (chat.answering || !refocus.current) return;
+    refocus.current = false;
+    input.current?.focus();
+  }, [chat.answering]);
 
   // Opened with the button: straight into the question. (Reopened by a reload: focus stays put.)
   useEffect(() => {
@@ -265,10 +275,15 @@ function OpenDrawer({
 
   return (
     <aside
+      ref={sheet}
       id={PANEL_ID}
       aria-label={m.title}
+      // On a phone the panel covers the page: a modal sheet that keeps the keyboard inside.
+      role={phone ? "dialog" : undefined}
+      aria-modal={phone ? true : undefined}
       onKeyDown={(event) => {
-        if (event.key === "Escape") close();
+        if (event.key === "Escape" && !event.nativeEvent.isComposing) close();
+        if (event.key === "Tab" && phone && sheet.current) keepTabInside(event, sheet.current);
       }}
       className="fixed inset-0 z-50 flex flex-col bg-white md:static md:inset-auto md:z-auto md:w-[420px] md:shrink-0 md:border-l md:border-gray-200"
     >
@@ -363,7 +378,7 @@ function OpenDrawer({
             value={draft}
             maxLength={MAX_QUESTION_CHARS}
             disabled={Boolean(chat.blocker)}
-            aria-label={m.placeholder.replace("{property}", propertyName)}
+            aria-label={fill(m.placeholder, { property: propertyName })}
             placeholder={placeholderOf(chat, m, propertyName, panel.locale)}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -375,7 +390,14 @@ function OpenDrawer({
             className="max-h-36 min-h-[36px] flex-1 resize-none bg-transparent py-1.5 text-[15px] leading-6 text-gray-900 outline-none [field-sizing:content] placeholder:text-gray-400 disabled:cursor-default"
           />
           {chat.answering ? (
-            <button type="button" className={SECONDARY_BUTTON} onClick={() => void chat.stop()}>
+            <button
+              type="button"
+              className={SECONDARY_BUTTON}
+              onClick={() => {
+                refocus.current = true;
+                void chat.stop();
+              }}
+            >
               <StopIcon className="h-3.5 w-3.5" aria-hidden="true" />
               {m.stop}
             </button>
@@ -394,6 +416,36 @@ function OpenDrawer({
       </form>
     </aside>
   );
+}
+
+/** Below Tailwind's md breakpoint the panel is a full-screen sheet. */
+function usePhone(): boolean {
+  const [phone, setPhone] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 767px)");
+    const update = () => setPhone(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return phone;
+}
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function keepTabInside(event: KeyboardEvent<HTMLElement>, container: HTMLElement) {
+  const focusable = Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE));
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (!first || !last) return;
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 function placeholderOf(
