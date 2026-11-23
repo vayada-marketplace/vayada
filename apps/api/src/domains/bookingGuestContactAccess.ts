@@ -4,6 +4,8 @@ import { activeBookingPlanEntitlementSql } from "./propertyPlanReadModel.js";
 
 export const HIDDEN_GUEST_CONTACT = "Hidden until you accept";
 
+/** When a commission-plan property may see a booking's guest contact: an accepted request, a stay
+ * the PMS has taken in, or a channel booking (VAY-2577). Only for contact; it is not a booking state. */
 export const BOOKING_HAS_EVER_BEEN_ACCEPTED_SQL = `(
   EXISTS (
     SELECT 1
