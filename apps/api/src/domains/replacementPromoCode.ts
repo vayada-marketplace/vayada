@@ -100,12 +100,15 @@ export async function lockReplacementPromoCode(
       return null;
   // `source` fingerprints the hotel's promo rows for the quote. VAY-2437's partner columns don't
   // change a price, so they stay out: quotes from before 0545 and partner externalId edits stay valid.
+  // So does the use count (VAY-2566): one guest's booking must not stale every other open quote
+  // with a code. A used-up code still fails the eligibility check below at acceptance, and the
+  // redemption's own `current_uses<max_uses` guards the last use.
   const rows = (
     await client.query(
       `SELECT p.*,discount_value::text AS discount, min_booking_value::text AS minimum,
     valid_from::text AS booking_from,valid_until::text AS booking_until,
     stay_date_from::text AS arrival_from,stay_date_until::text AS arrival_until,
-    (to_jsonb(p)-'created_at'-'updated_at'-'partner_client_id'-'external_id')::text AS source
+    (to_jsonb(p)-'created_at'-'updated_at'-'partner_client_id'-'external_id'-'current_uses')::text AS source
     FROM booking.promo_definitions p WHERE property_id=$1 ORDER BY id FOR UPDATE`,
       [propertyId],
     )
