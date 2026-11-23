@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "@/lib/i18n";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { settingsService, type PropertySettings } from "@/services/settings";
@@ -498,7 +499,9 @@ function PageViewsDetailModal({ locale, t, timeZone, onClose }: PageViewsDetailM
       })
     : "";
 
-  return (
+  // On <body>, not inside the page's space-y stack: its margin-top would push the backdrop down
+  // and leave a white strip above the header (VAY-2590).
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onClick={onClose}
@@ -649,6 +652,7 @@ function PageViewsDetailModal({ locale, t, timeZone, onClose }: PageViewsDetailM
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

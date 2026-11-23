@@ -93,6 +93,9 @@ test.describe("booking-admin page-view timeline", () => {
 
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByText("Page-view data could not be loaded.")).toBeVisible();
+    // VAY-2590: the backdrop covers the whole window, its top edge included (no white strip).
+    const backdrop = await dialog.boundingBox();
+    expect(backdrop).toMatchObject({ x: 0, y: 0, height: page.viewportSize()!.height });
     timelineMode = "success";
     const retry = dialog.getByRole("button", { name: "Try again" }).click();
     await timelineRequested;
