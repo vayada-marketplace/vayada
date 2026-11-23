@@ -64,7 +64,10 @@ test("the owner sees what is owed, each payout and every deduction, on desktop a
   await expect(lines).toHaveCount(7);
 
   // Phone: every line still reads, nothing runs off the screen.
+  // Opened on a phone (a fresh load, so the menu starts closed as it does there).
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await expect(lines).toHaveCount(7);
   await expect(lines.nth(0)).toContainText("2,752,000");
   // Both layouts are in the page; the phone one is the one showing.
   await expect(
