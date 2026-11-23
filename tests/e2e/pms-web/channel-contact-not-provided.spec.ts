@@ -85,9 +85,9 @@ test("shows the booker's missing phone as not provided by the channel at check-i
   await main.getByRole("button", { name: /^Edit Ada Lovelace/ }).click();
   const form = main.getByRole("form", { name: "Ada Lovelace" });
   const phone = form.getByRole("textbox", { name: /^Phone/ });
-  // Staff can still type the number the guest gives at the desk.
+  // Said under the field, in full; staff can still type the number the guest gives at the desk.
+  await expect(form.getByText("Not provided by Booking.com", { exact: true })).toBeVisible();
   await expect(phone).toHaveValue("");
-  await expect(phone).toHaveAttribute("placeholder", "Not provided by Booking.com");
   await expect(phone).toBeEditable();
   await expect(form.getByRole("textbox", { name: /^Email/ })).toHaveValue("ada@example.com");
   await assertHealthy();
@@ -110,11 +110,10 @@ test("says so in the booker's locked phone when their guest record can't be reac
   const main = page.locator("main").first();
   await main.getByRole("button", { name: "Confirm arrival" }).click();
   await main.getByRole("button", { name: /^Edit Ada Lovelace/ }).click();
-  const phone = main
-    .getByRole("form", { name: "Ada Lovelace" })
-    .getByRole("textbox", { name: /^Phone/ });
-  await expect(phone).not.toBeEditable();
-  await expect(phone).toHaveAttribute("placeholder", "Not provided by Booking.com");
+  const form = main.getByRole("form", { name: "Ada Lovelace" });
+  await expect(form.getByRole("textbox", { name: /^Phone/ })).not.toBeEditable();
+  // The lock line says what the channel didn't send instead of "From the booking".
+  await expect(form.getByText("Not provided by Booking.com", { exact: true })).toBeVisible();
   await assertHealthy();
 });
 

@@ -94,7 +94,7 @@ export function GuestForm({
   /** Values staff can't change here: an OTA import's, or the booker's when their guest record
    * can't be reached. */
   lockedFields: ReadonlySet<GuestLockableField>;
-  /** The placeholder of an email or phone the booking's channel didn't send (VAY-2577). */
+  /** Shown under an email or phone the booking's channel didn't send (VAY-2577). */
   notProvided?: string | null;
   canReadIdentity: boolean;
   /** The registration fields on record; the status uses them when the ID fields are hidden. */
@@ -214,18 +214,17 @@ export function GuestForm({
     </span>
   );
   /** A value from the booking: shown as it is, on white, with a lock under it (VAY-2418). */
-  const lockedInput = (label: string, isRequired: boolean, value: string, placeholder?: string) => (
+  const lockedInput = (label: string, isRequired: boolean, value: string, hint?: string) => (
     <label className="block">
       {caption(label, isRequired)}
       <input
         value={value}
-        placeholder={placeholder}
         readOnly
         className={`${INPUT_CLASS} cursor-default focus:border-gray-300 focus:ring-0`}
       />
       <span className="mt-1 flex items-center gap-1 text-xs text-gray-500">
         <LockClosedIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        {t("checkIn.flow.form.fromBooking")}
+        {hint ?? t("checkIn.flow.form.fromBooking")}
       </span>
     </label>
   );
@@ -290,8 +289,11 @@ export function GuestForm({
       }
       default: {
         const key = name as "email" | "phone" | "documentNumber";
+        // VAY-2577: what the channel didn't send, under the field (a placeholder gets cut off).
+        const channelHint =
+          (key === "email" || key === "phone") && notProvided && !initial[key] ? notProvided : null;
         if ((key === "email" || key === "phone") && lockedFields.has(key))
-          return lockedInput(label, required(name), values[key], notProvided ?? undefined);
+          return lockedInput(label, required(name), values[key], channelHint ?? undefined);
         return (
           <label className="block">
             {caption(label, required(name))}
@@ -302,15 +304,14 @@ export function GuestForm({
               placeholder={
                 key === "documentNumber"
                   ? t("checkIn.flow.form.documentNumberPlaceholder")
-                  : notProvided && !initial[key]
-                    ? notProvided
-                    : required(name)
-                      ? undefined
-                      : t("checkIn.flow.form.optional")
+                  : required(name)
+                    ? undefined
+                    : t("checkIn.flow.form.optional")
               }
               onChange={(event) => set({ [key]: event.target.value } as Partial<GuestFormValues>)}
               className={INPUT_CLASS}
             />
+            {channelHint && <span className="mt-1 block text-xs text-gray-500">{channelHint}</span>}
           </label>
         );
       }
