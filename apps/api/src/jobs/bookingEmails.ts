@@ -207,6 +207,10 @@ export async function enqueueBookingLifecycleEmailJob(
     notificationType: input.kind,
     transition,
     ...(input.resendKey ? { resentByUserId: input.actor?.userId } : {}),
+    // VAY-2099: the sender adds the PMS origin (AUTH_PMS_WEB_ORIGIN) for a link to the request.
+    ...(input.kind === "host_review_required"
+      ? { pmsBookingPath: `/bookings/${encodeURIComponent(input.booking.guestBookingId)}` }
+      : {}),
   };
   const actorType = input.actor?.type ?? "system";
 
@@ -917,6 +921,8 @@ function emailCopy(input: BookingLifecycleEmailInput) {
   }
   if (input.kind === "host_new_booking" || input.kind === "host_review_required") {
     const reviewRequired = input.kind === "host_review_required";
+    // VAY-2099: the hotel has until the request's deadline to answer; after it the request expires.
+    const answerBy = text(record(booking.bookingMetadata)["hostResponseDeadlineAt"]);
     return {
       template: reviewRequired ? "booking_host_review_required" : "booking_host_new_booking",
       subject: reviewRequired
@@ -928,6 +934,13 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         `Total: ${money(booking.totalAmount, booking.currency)}`,
         `Booking reference: ${booking.bookingReference}`,
+        ...(reviewRequired
+          ? [
+              answerBy
+                ? `Accept or reject it in your PMS by ${deadlineText(answerBy, booking.propertyTimeZone)}. If you don't answer by then, the request expires and the rooms are released.`
+                : "Accept or reject it in your PMS.",
+            ]
+          : []),
       ].join("\n\n"),
     };
   }

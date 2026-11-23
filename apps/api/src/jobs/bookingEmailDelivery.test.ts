@@ -81,6 +81,66 @@ describe("booking email delivery", () => {
     },
   );
 
+  // VAY-2099: a booking request's hotel email links to the booking in the PMS, when the PMS origin
+  // is known and the job names a well-formed booking page.
+  it.each([
+    ["https://next-pms.vayada.com", "/bookings/3f2b6c1e-0000-4000-8000-000000000001", true],
+    [undefined, "/bookings/3f2b6c1e-0000-4000-8000-000000000001", false],
+    ["https://next-pms.vayada.com", "https://elsewhere.example/bookings/x", false],
+    ["https://next-pms.vayada.com", undefined, false],
+  ])("links a request to the PMS (origin %s, path %s)", async (origin, path, linked) => {
+    const pool = {
+      query: vi.fn(async (text: string) => {
+        if (text.includes("RETURNING job.id::text AS id"))
+          return {
+            rows: [
+              {
+                id: "33333333-3333-4333-8333-333333333333",
+                jobKey: "email.booking-host-review-required:booking-1:v1",
+                attemptsCount: 1,
+                workerId: "worker-1",
+                payload: {
+                  emailProduct: "booking",
+                  to: "hotel@example.test",
+                  subject: "Booking request requires review - VAY-1",
+                  text: "A new booking request requires review.",
+                  notificationType: "host_review_required",
+                  ...(path ? { pmsBookingPath: path } : {}),
+                },
+              },
+            ],
+          };
+        if (text.includes("FOR SHARE OF booking"))
+          return { rows: [{ unverified: false, due: true }] };
+        if (text.includes("RETURNING id::text AS id")) return { rows: [{ id: "audit-1" }] };
+        return { rows: [] };
+      }),
+    };
+    const send = vi.fn(async () => undefined);
+    await expect(
+      runBookingEmailDeliveryJobs(
+        "postgres://unused",
+        { send },
+        {
+          pool: {
+            ...pool,
+            connect: async () => ({ query: pool.query, release: vi.fn() }),
+          } as never,
+          limit: 1,
+          workerId: "worker-1",
+          ...(origin ? { pmsWebOrigin: origin } : {}),
+        },
+      ),
+    ).resolves.toEqual({ processed: 1, failed: 0 });
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: linked
+          ? "A new booking request requires review.\n\nOpen the request in your PMS: https://next-pms.vayada.com/bookings/3f2b6c1e-0000-4000-8000-000000000001"
+          : "A new booking request requires review.",
+      }),
+    );
+  });
+
   // VAY-2348: a reminder for a booking that was paid or released meanwhile is not sent and not retried.
   it.each([
     ["before the bank details are read", false, false],

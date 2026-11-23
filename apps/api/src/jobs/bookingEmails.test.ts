@@ -743,6 +743,54 @@ describe("booking lifecycle email jobs", () => {
     expect(text).not.toMatch(/\d{4}-\d{2}-\d{2}/);
   });
 
+  // VAY-2099: the hotel learns by when to answer a request (in hotel time) and the sender gets the
+  // PMS booking page to link to; a confirmed booking's email is unchanged.
+  it("tells the hotel by when to answer a booking request, and names its PMS page", async () => {
+    const target = createTargetEmailStore();
+    const input = bookingEmailInput({
+      kind: "host_review_required",
+      recipient: { role: "host", email: "reservations@alpenrose.test" },
+    });
+    input.booking.propertyTimeZone = "Asia/Makassar";
+    input.booking.bookingMetadata = { hostResponseDeadlineAt: "2026-09-02T10:00:00.000Z" };
+    await enqueueBookingLifecycleEmailJob(target, input);
+    const payload = JSON.parse(
+      String(target.requiredCall("INSERT INTO platform.jobs").values?.[8]),
+    ) as { text: string; pmsBookingPath?: string };
+    expect(payload.text).toMatch(
+      /Accept or reject it in your PMS by Wed, 2 Sept? 2026, 18:00 GMT\+8\. If you don't answer by then, the request expires and the rooms are released\./,
+    );
+    expect(payload.pmsBookingPath).toBe(
+      `/bookings/${encodeURIComponent(input.booking.guestBookingId)}`,
+    );
+
+    const noDeadline = createTargetEmailStore();
+    await enqueueBookingLifecycleEmailJob(
+      noDeadline,
+      bookingEmailInput({
+        kind: "host_review_required",
+        recipient: { role: "host", email: "reservations@alpenrose.test" },
+      }),
+    );
+    expect(
+      JSON.parse(String(noDeadline.requiredCall("INSERT INTO platform.jobs").values?.[8])).text,
+    ).toMatch(/\n\nAccept or reject it in your PMS\.$/);
+
+    const confirmed = createTargetEmailStore();
+    await enqueueBookingLifecycleEmailJob(
+      confirmed,
+      bookingEmailInput({
+        kind: "host_new_booking",
+        recipient: { role: "host", email: "reservations@alpenrose.test" },
+      }),
+    );
+    const confirmedPayload = JSON.parse(
+      String(confirmed.requiredCall("INSERT INTO platform.jobs").values?.[8]),
+    ) as { text: string; pmsBookingPath?: string };
+    expect(confirmedPayload.text).not.toContain("Accept or reject");
+    expect(confirmedPayload.pmsBookingPath).toBeUndefined();
+  });
+
   it("reads the hotel's time zone with the booking", async () => {
     const target = createTargetEmailStore();
     await enqueueBookingTransitionNotifications(target, {
