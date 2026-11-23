@@ -178,6 +178,8 @@ test("staff who aren't the owner see the payout account masked and can't change 
   await expect(page.getByText("Sri Lanka · account •••• 4321")).toBeVisible();
   await expect(page.getByRole("button", { name: "Change", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Remove", exact: true })).toHaveCount(0);
+  // The payout statement is the owner's too (VAY-2584): no link to it.
+  await expect(page.getByTestId("payout-statement-link")).toHaveCount(0);
 });
 
 test("a stopped hotel still changes its payout account and turns card off, but can't save card on (VAY-2570)", async ({
