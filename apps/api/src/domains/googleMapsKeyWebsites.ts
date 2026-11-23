@@ -1,5 +1,4 @@
 import { createSign } from "node:crypto";
-import type { BookingCustomDomainVerifier } from "./bookingCustomDomainVerification.js";
 
 /**
  * The browser Maps key's website list (VAY-2589). Google refuses the key on any website missing from
@@ -29,7 +28,7 @@ export class GoogleMapsKeyError extends Error {
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const API_KEYS_URL = "https://apikeys.googleapis.com/v2/";
 const SCOPE = "https://www.googleapis.com/auth/cloud-platform";
-const KEY_NAME = /^projects\/[^/]+\/locations\/global\/keys\/[^/]+$/;
+const KEY_NAME = /^projects\/[A-Za-z0-9-]+\/locations\/global\/keys\/[A-Za-z0-9_-]+$/;
 const HOSTNAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 
 type Key = {
@@ -108,6 +107,8 @@ export function createGoogleMapsKeyWebsites(config: {
       error?: { status?: unknown };
     };
     if (!response.ok) {
+      // A revoked or replaced service account key: ask for a new token next time.
+      if (response.status === 401) token = undefined;
       throw new GoogleMapsKeyError(
         step,
         response.status,
@@ -130,7 +131,7 @@ export function createGoogleMapsKeyWebsites(config: {
         );
       }
 
-      // A change made since the read (the etag no longer matches) fails the update: read it again once.
+      // A change made since the read (the etag no longer matches) fails the update: read again once.
       for (let attempt = 1; ; attempt += 1) {
         const key = (await call("read", config.keyName)) as Key;
         const browser = key.restrictions?.browserKeyRestrictions;
@@ -174,7 +175,7 @@ export function createGoogleMapsKeyWebsites(config: {
           }
           return missing;
         } catch (error) {
-          if (attempt >= 2) throw error;
+          if (attempt >= 2 || !isStaleKey(error)) throw error;
         }
       }
     },
@@ -182,63 +183,53 @@ export function createGoogleMapsKeyWebsites(config: {
 }
 
 /**
- * A domain that verifies goes onto the Maps key's website list at once, after the check answers; a
- * failure is reported, and the hourly pass (`startMapsKeyWebsitesSync`) tries again.
- */
-export function addVerifiedDomainsToMapsKey(
-  verifier: BookingCustomDomainVerifier,
-  websites: MapsKeyWebsites,
-  report: (outcome: { host: string; added: boolean } | { host: string; error: unknown }) => void,
-): BookingCustomDomainVerifier {
-  return {
-    async check(hostname, propertyId) {
-      const result = await verifier.check(hostname, propertyId);
-      if (result.status === "verified") {
-        websites.allow([hostname]).then(
-          (added) => report({ host: hostname, added: added.length > 0 }),
-          (error: unknown) => report({ host: hostname, error }),
-        );
-      }
-      return result;
-    },
-    release: (hostnameId) => verifier.release(hostnameId),
-  };
-}
-
-/**
  * Puts every hotel domain the booking page is served on (platform's next_booking_custom_domains) onto
- * the Maps key's website list a minute after start and then hourly. It covers the hotels connected
- * before VAY-2589 and any domain whose addition failed. Returns the stop function.
+ * the Maps key's website list a minute after start and then hourly; once they are all there, it is one
+ * read. A domain is routed before its hotel can verify it, so it is listed by then; this also covers
+ * the hotels connected before VAY-2589 and retries a failed addition. Returns the stop function, which
+ * leaves a pass in flight to finish on its own (adding is safe to repeat).
  */
 export function startMapsKeyWebsitesSync(options: {
   websites: MapsKeyWebsites;
-  hosts: () => readonly string[];
+  hosts: readonly string[];
   report: (outcome: { added: string[] } | { error: unknown }) => void;
   firstRunMs?: number;
   intervalMs?: number;
-}): () => Promise<void> {
-  let running: Promise<void> | undefined;
+}): () => void {
+  let running = false;
   const run = () => {
     if (running) return;
-    running = options.websites
-      .allow(options.hosts())
+    running = true;
+    options.websites
+      .allow(options.hosts)
       .then(
         (added) => options.report({ added }),
         (error: unknown) => options.report({ error }),
       )
+      .catch(() => undefined)
       .finally(() => {
-        running = undefined;
+        running = false;
       });
   };
   const first = setTimeout(run, options.firstRunMs ?? 60_000);
   const timer = setInterval(run, options.intervalMs ?? 60 * 60_000);
   first.unref();
   timer.unref();
-  return async () => {
+  return () => {
     clearTimeout(first);
     clearInterval(timer);
-    await running;
   };
+}
+
+/** The key changed between the read and the update: its etag no longer matches. */
+function isStaleKey(error: unknown): boolean {
+  return (
+    error instanceof GoogleMapsKeyError &&
+    (error.httpStatus === 409 ||
+      error.httpStatus === 412 ||
+      error.googleStatus === "ABORTED" ||
+      error.googleStatus === "FAILED_PRECONDITION")
+  );
 }
 
 function readServiceAccount(json: string): { clientEmail: string; privateKey: string } {

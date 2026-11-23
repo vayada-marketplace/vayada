@@ -1,13 +1,10 @@
 import { createVerify, generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { BookingCustomDomainVerifier } from "./bookingCustomDomainVerification.js";
 import {
   GoogleMapsKeyError,
-  addVerifiedDomainsToMapsKey,
   createGoogleMapsKeyWebsites,
   startMapsKeyWebsitesSync,
-  type MapsKeyWebsites,
 } from "./googleMapsKeyWebsites.js";
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", {
@@ -67,13 +64,13 @@ function google(keys: unknown[], patches: Array<[number, unknown]> = [[200, { na
 
 function websites(
   fetch: typeof globalThis.fetch,
-  overrides: { keyName?: string; json?: string } = {},
+  overrides: { keyName?: string; json?: string; now?: () => number } = {},
 ) {
   return createGoogleMapsKeyWebsites({
     keyName: overrides.keyName ?? keyName,
     credentialsJson: overrides.json ?? credentialsJson,
     fetch,
-    now: () => NOW,
+    now: overrides.now ?? (() => NOW),
   });
 }
 
@@ -123,7 +120,31 @@ describe("Google Maps key websites (VAY-2589)", () => {
     });
   });
 
-  it("changes nothing for a domain already on the list, and asks for one token per hour", async () => {
+  it("keeps settings it doesn't know about", async () => {
+    const future = {
+      name: storedName,
+      etag: "etag-1",
+      restrictions: {
+        browserKeyRestrictions: { allowedReferrers: listed, futureSetting: { on: true } },
+        apiTargets,
+        futureRestriction: "kept",
+      },
+    };
+    const { calls, fetch } = google([future]);
+
+    await websites(fetch).allow(["booking.hotel.example"]);
+
+    expect(JSON.parse(calls[2].body).restrictions).toEqual({
+      browserKeyRestrictions: {
+        allowedReferrers: [...listed, "https://booking.hotel.example/*"],
+        futureSetting: { on: true },
+      },
+      apiTargets,
+      futureRestriction: "kept",
+    });
+  });
+
+  it("changes nothing for a domain already on the list, with one token for both reads", async () => {
     const { calls, fetch } = google([
       key([...listed, "https://booking.hotel.example/*"]),
       key([...listed, "booking.hotel.example/*"]),
@@ -138,6 +159,30 @@ describe("Google Maps key websites (VAY-2589)", () => {
     expect(calls.map((call) => call.method)).toEqual(["POST", "GET", "GET"]);
   });
 
+  it("asks for a new token when the old one runs out, or once Google refuses it", async () => {
+    let now = NOW;
+    const listedAlready = () => key([...listed, "https://booking.hotel.example/*"]);
+    const { calls, fetch } = google([listedAlready(), listedAlready(), listedAlready()]);
+    const maps = websites(fetch, { now: () => now });
+
+    await maps.allow(["booking.hotel.example"]);
+    now += 59 * 60_000;
+    await maps.allow(["booking.hotel.example"]);
+    expect(calls.map((call) => call.method)).toEqual(["POST", "GET", "POST", "GET"]);
+
+    // A revoked service account key: the cached token stops working before it runs out.
+    fetch.mockImplementationOnce(async () =>
+      Response.json({ error: { status: "UNAUTHENTICATED" } }, { status: 401 }),
+    );
+    await expect(maps.allow(["booking.hotel.example"])).rejects.toEqual(
+      new GoogleMapsKeyError("read", 401, "UNAUTHENTICATED"),
+    );
+    await maps.allow(["booking.hotel.example"]);
+    // The refused read isn't in `calls` (it was answered by the one-off reply above).
+    expect(fetch).toHaveBeenCalledTimes(7);
+    expect(calls.map((call) => call.method)).toEqual(["POST", "GET", "POST", "GET", "POST", "GET"]);
+  });
+
   it("calls nothing without a valid hostname", async () => {
     const { fetch } = google([]);
 
@@ -148,12 +193,18 @@ describe("Google Maps key websites (VAY-2589)", () => {
   });
 
   it("leaves a key without a website list as it is", async () => {
-    const { calls, fetch } = google([key(undefined), key([])]);
+    const serverKey = {
+      name: storedName,
+      etag: "etag-1",
+      restrictions: { serverKeyRestrictions: { allowedIps: ["203.0.113.7"] }, apiTargets },
+    };
+    const { calls, fetch } = google([key(undefined), key([]), serverKey]);
     const maps = websites(fetch);
 
     await expect(maps.allow(["booking.hotel.example"])).rejects.toThrow(
       "The Maps key has no website list; it was left as it is.",
     );
+    await expect(maps.allow(["booking.hotel.example"])).rejects.toThrow("no website list");
     await expect(maps.allow(["booking.hotel.example"])).rejects.toThrow("no website list");
     expect(calls.filter((call) => call.method === "PATCH")).toEqual([]);
   });
@@ -187,21 +238,37 @@ describe("Google Maps key websites (VAY-2589)", () => {
     });
   });
 
-  it("gives up after the second refused update, and reports a failed change", async () => {
-    const refused: [number, unknown] = [409, { error: { status: "ABORTED" } }];
-    const first = google([key(listed), key(listed)], [refused, refused]);
+  it("stops when the second read already has the domain", async () => {
+    const { calls, fetch } = google(
+      [key(listed), key([...listed, "https://booking.hotel.example/*"], "etag-2")],
+      [[400, { error: { status: "FAILED_PRECONDITION" } }]],
+    );
+
+    await expect(websites(fetch).allow(["booking.hotel.example"])).resolves.toEqual([]);
+    expect(calls.filter((call) => call.method === "PATCH")).toHaveLength(1);
+  });
+
+  it("gives up after the second stale update, and retries no other refusal", async () => {
+    const stale: [number, unknown] = [409, { error: { status: "ABORTED" } }];
+    const first = google([key(listed), key(listed)], [stale, stale]);
     await expect(websites(first.fetch).allow(["booking.hotel.example"])).rejects.toEqual(
       new GoogleMapsKeyError("update", 409, "ABORTED"),
     );
 
-    const failed: [number, unknown] = [
-      200,
-      { name: "op-1", done: true, error: { code: 3, status: "INVALID_ARGUMENT" } },
-    ];
-    const second = google([key(listed), key(listed)], [failed, failed]);
-    await expect(websites(second.fetch).allow(["booking.hotel.example"])).rejects.toThrow(
+    const denied = google([key(listed)], [[403, { error: { status: "PERMISSION_DENIED" } }]]);
+    await expect(websites(denied.fetch).allow(["booking.hotel.example"])).rejects.toEqual(
+      new GoogleMapsKeyError("update", 403, "PERMISSION_DENIED"),
+    );
+    expect(denied.calls.filter((call) => call.method === "PATCH")).toHaveLength(1);
+
+    const failed = google(
+      [key(listed)],
+      [[200, { name: "op-1", done: true, error: { code: 3, status: "INVALID_ARGUMENT" } }]],
+    );
+    await expect(websites(failed.fetch).allow(["booking.hotel.example"])).rejects.toThrow(
       "Google Maps key update failed (HTTP 200; INVALID_ARGUMENT).",
     );
+    expect(failed.calls.filter((call) => call.method === "PATCH")).toHaveLength(1);
   });
 
   it("reports a refused token or read without the key or the token", async () => {
@@ -232,66 +299,20 @@ describe("Google Maps key websites (VAY-2589)", () => {
 
     const parseError = await websites(fetch, { json: broken })
       .allow(["booking.hotel.example"])
-      .catch((caught: unknown) => caught as Error);
-    expect(parseError.message).toBe("The Maps key editor credentials are not valid JSON.");
+      .then(
+        () => null,
+        (caught: unknown) => caught as Error,
+      );
+    expect(parseError?.message).toBe("The Maps key editor credentials are not valid JSON.");
     await expect(
       websites(fetch, { json: '{"type":"authorized_user"}' }).allow(["booking.hotel.example"]),
     ).rejects.toThrow("not a service account key");
-    await expect(
-      websites(fetch, { keyName: "key-1" }).allow(["booking.hotel.example"]),
-    ).rejects.toThrow("projects/<project>/locations/global/keys/<key id>");
+    for (const badName of ["key-1", `${keyName}?updateMask=displayName`]) {
+      await expect(
+        websites(fetch, { keyName: badName }).allow(["booking.hotel.example"]),
+      ).rejects.toThrow("projects/<project>/locations/global/keys/<key id>");
+    }
     expect(fetch).not.toHaveBeenCalled();
-  });
-});
-
-describe("verified domains onto the Maps key (VAY-2589)", () => {
-  const verified = { status: "verified", issue: null, recordHost: null, errors: [] } as const;
-  const pending = {
-    status: "pending",
-    issue: { code: "certificate_pending", foundTarget: null },
-    recordHost: null,
-    errors: [],
-  } as const;
-
-  function setUp(allow: MapsKeyWebsites["allow"]) {
-    const check = vi.fn<BookingCustomDomainVerifier["check"]>();
-    const release = vi.fn<BookingCustomDomainVerifier["release"]>(async () => "deleted");
-    const reports: unknown[] = [];
-    const verifier = addVerifiedDomainsToMapsKey(
-      { check, release },
-      { allow: vi.fn(allow) },
-      (outcome) => reports.push(outcome),
-    );
-    return { check, release, reports, verifier };
-  }
-
-  it("adds a domain once it verifies, and only then", async () => {
-    const allow = vi.fn(async (hosts: readonly string[]) => [...hosts]);
-    const { check, reports, verifier } = setUp(allow);
-    check.mockResolvedValueOnce(pending).mockResolvedValueOnce(verified);
-
-    await expect(verifier.check("booking.hotel.example", "p-1")).resolves.toBe(pending);
-    await expect(verifier.check("booking.hotel.example", "p-1")).resolves.toBe(verified);
-
-    await vi.waitFor(() => expect(reports).toHaveLength(1));
-    expect(allow).toHaveBeenCalledOnce();
-    expect(allow).toHaveBeenCalledWith(["booking.hotel.example"]);
-    expect(reports).toEqual([{ host: "booking.hotel.example", added: true }]);
-  });
-
-  it("answers verified even when Google fails, and reports the failure", async () => {
-    const failure = new GoogleMapsKeyError("update", 503, "UNAVAILABLE");
-    const { check, release, reports, verifier } = setUp(async () => {
-      throw failure;
-    });
-    check.mockResolvedValue(verified);
-
-    await expect(verifier.check("booking.hotel.example", "p-1")).resolves.toBe(verified);
-    await vi.waitFor(() =>
-      expect(reports).toEqual([{ host: "booking.hotel.example", error: failure }]),
-    );
-    await expect(verifier.release("ch-1")).resolves.toBe("deleted");
-    expect(release).toHaveBeenCalledWith("ch-1");
   });
 });
 
@@ -312,7 +333,7 @@ describe("Maps key website pass (VAY-2589)", () => {
     const reports: unknown[] = [];
     const stop = startMapsKeyWebsitesSync({
       websites: { allow },
-      hosts: () => ["booking.hotel.example", "booking.other.example"],
+      hosts: ["booking.hotel.example", "booking.other.example"],
       report: (outcome) => reports.push(outcome),
     });
 
@@ -330,25 +351,33 @@ describe("Maps key website pass (VAY-2589)", () => {
 
     await vi.advanceTimersByTimeAsync(60 * 60_000);
     expect(allow).toHaveBeenCalledTimes(2);
+    // Stopping doesn't wait for the pass in flight, which still finishes and reports.
+    stop();
     finish([]);
-    await stop();
     await vi.advanceTimersByTimeAsync(3 * 60 * 60_000);
     expect(allow).toHaveBeenCalledTimes(2);
     expect(reports).toEqual([{ added: ["booking.other.example"] }, { added: [] }]);
   });
 
-  it("reports a failed pass", async () => {
+  it("reports a failed pass, and keeps going when reporting fails", async () => {
     vi.useFakeTimers();
     const error = new Error("offline");
     const reports: unknown[] = [];
+    const allow = vi.fn(async () => Promise.reject(error));
     const stop = startMapsKeyWebsitesSync({
-      websites: { allow: vi.fn(async () => Promise.reject(error)) },
-      hosts: () => ["booking.hotel.example"],
-      report: (outcome) => reports.push(outcome),
+      websites: { allow },
+      hosts: ["booking.hotel.example"],
+      report: (outcome) => {
+        reports.push(outcome);
+        throw new Error("the logger failed");
+      },
       firstRunMs: 10,
+      intervalMs: 1_000,
     });
     await vi.advanceTimersByTimeAsync(10);
     expect(reports).toEqual([{ error }]);
-    await stop();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(allow).toHaveBeenCalledTimes(2);
+    stop();
   });
 });
