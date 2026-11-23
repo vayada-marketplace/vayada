@@ -26,7 +26,12 @@ export function choiceKeys(
   );
   const passed = keys.map(({ days }) => !!stay && days !== null && refundsEnded(stay, days, now));
   const order = offers.map((_, index) => index).sort((a, b) => +passed[a]! - +passed[b]!);
-  const numbers = pricingOfferNameKeys(order.map((index) => offers[index]!));
+  const numbers = pricingOfferNameKeys(
+    order.map((index) => ({
+      mealPlan: offers[index]!.mealPlan,
+      cancellation: offers[index]!.cancellation,
+    })),
+  );
   return keys.map((own, index) => {
     const mealDescription = offers[index]!.mealDescription;
     return {
