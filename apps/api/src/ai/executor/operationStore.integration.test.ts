@@ -521,6 +521,16 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
       created: false,
       operation: { id: noteId },
     });
+    // The resumed turn also asks something new, then retries the block: still the same block.
+    await store.propose(change({ conversationId }), at(6_000));
+    expect(await store.propose(block, at(7_000))).toMatchObject({
+      created: false,
+      operation: { id: blockId },
+    });
+    // The same request from a new turn after that is a new request.
+    expect((await store.propose({ ...block, requestScope: "turn-2" }, at(8_000))).created).toBe(
+      true,
+    );
   });
 
   it("closes changes nobody answered in time", async () => {
