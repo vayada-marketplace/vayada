@@ -38,31 +38,50 @@ function buttons(markup: string) {
 }
 
 describe("BookingPageStatusView", () => {
-  it("shows an online page with its link and an open button", () => {
+  it("shows nothing for a live page with nothing to fix: the header's pill says Live (VAY-2594)", () => {
+    expect(
+      render({ kind: "online", url: "https://hotel-alpenrose.booking.vayada.com/", items: [] }),
+    ).toBe("");
+  });
+
+  it("lists what to fix on a live page, with its link and an open button", () => {
     const markup = render({
       kind: "online",
       url: "https://hotel-alpenrose.booking.vayada.com/",
-      items: [],
+      items: [
+        { groupId: "booking.payments", message: "Choose how guests can pay.", step: "payments" },
+      ],
     });
     expect(markup).toContain("Your booking page");
     expect(markup).toContain(">Online<");
     expect(markup).toContain(">hotel-alpenrose.booking.vayada.com<");
-    expect(markup).toContain("Guests can book. Changes you save go live automatically.");
+    expect(markup).toContain("Guests may not be able to book until the items below are fixed.");
     expect(markup).toContain("Open booking page");
+    expect(markup).toContain("Fix in setup");
     expect(buttons(markup)).toEqual([]);
   });
 
-  it("says guests can't open a published page that has no guest URL", () => {
+  it("says in one red line that a live page went offline, and links to the fix (VAY-2594)", () => {
     const markup = render({
       kind: "hidden",
       items: [
         { groupId: "booking.payments", message: "Choose how guests can pay.", step: "payments" },
       ],
     });
-    expect(markup).toContain(">Offline<");
-    expect(markup).toContain("Your page is published, but guests can&#x27;t open it right now.");
-    expect(markup).not.toContain("Guests can book");
-    expect(markup).toContain("Fix in setup");
+    expect(markup).toContain("<strong>Your booking page is offline.</strong>");
+    expect(markup).toContain("Guests can&#x27;t book right now.");
+    expect(markup).toMatch(/<a href="[^"]*step=payments[^"]*"[^>]*>Fix now →<\/a>/);
+    expect(markup).not.toContain("Your booking page</h2>");
+    expect(buttons(markup)).toEqual([]);
+  });
+
+  it("offers Check again on an offline page without a setup step to fix", () => {
+    const markup = render({
+      kind: "hidden",
+      items: [{ groupId: "booking.payments", message: null, step: null }],
+    });
+    expect(markup).toContain("Your booking page is offline.");
+    expect(markup).not.toContain("Fix now");
     expect(buttons(markup)).toEqual([{ label: "Check again", disabled: false }]);
   });
 

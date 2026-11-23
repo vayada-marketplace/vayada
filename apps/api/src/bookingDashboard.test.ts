@@ -98,8 +98,17 @@ describe("Booking dashboard routes", () => {
     expect(allowed.body).toMatchObject({
       funnel: { steps: [], paymentMethods: [], biggestDrop: null },
     });
+    // The dashboard's last 90 days (VAY-2594), but not a day more.
+    const ninetyDays = await injectJson(app, {
+      method: "GET",
+      url,
+      headers,
+      query: { windowStart: "2026-04-02", windowEnd: "2026-06-30" },
+    });
+    expect(ninetyDays.statusCode).toBe(200);
     for (const query of [
       { windowStart: "2026-02-30", windowEnd: "2026-03-01" },
+      { windowStart: "2026-04-01", windowEnd: "2026-06-30" },
       { windowStart: "2026-01-01", windowEnd: "2026-06-30" },
     ]) {
       expect((await injectJson(app, { method: "GET", url, headers, query })).statusCode).toBe(400);

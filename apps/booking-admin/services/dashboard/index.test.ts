@@ -75,8 +75,6 @@ describe("dashboardService target route adapter", () => {
       other_currency_bookings: 1,
       other_currency_bookings_previous: 0,
       bookings_previous: 8,
-      avg_nightly_rate: 120,
-      avg_nightly_rate_previous: 110,
       page_views: 28,
       page_views_previous: 21,
       next_arrival: "2026-07-04",
@@ -165,7 +163,7 @@ describe("dashboardService target route adapter", () => {
     );
   });
 
-  it("compares Today with the same weekday last week and charts the week ending today", async () => {
+  it("compares Today with yesterday and charts the week ending today (VAY-2594)", async () => {
     vi.setSystemTime(new Date("2026-06-14T23:30:00.000Z"));
     vi.stubGlobal(
       "fetch",
@@ -197,14 +195,51 @@ describe("dashboardService target route adapter", () => {
     await dashboardService.getSparklines("today", "Pacific/Auckland");
 
     expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain(
-      "periodStart=2026-06-15&periodEnd=2026-06-15&previousPeriodStart=2026-06-08&previousPeriodEnd=2026-06-08",
+      "periodStart=2026-06-15&periodEnd=2026-06-15&previousPeriodStart=2026-06-14&previousPeriodEnd=2026-06-14",
     );
     expect(String(vi.mocked(fetch).mock.calls[1]?.[0])).toContain(
       "/sparklines?windowStart=2026-06-09&windowEnd=2026-06-15",
     );
   });
 
-  it.each(["today", "week", "month"] as const)(
+  it("compares the last 90 days with the 90 days right before them (VAY-2594)", async () => {
+    vi.setSystemTime(new Date("2026-06-14T23:30:00.000Z"));
+    const zero = {
+      totalRevenue: { amountDecimal: "0", currency: "EUR" },
+      bookingCount: 0,
+      avgNightlyRate: { amountDecimal: "0", currency: "EUR" },
+      pageViewCount: 0,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          metrics: { current: zero, previous: zero, nextArrivalDate: null, liveSinceDate: null },
+        }),
+      ),
+    );
+
+    await dashboardService.getStats("quarter", "Pacific/Auckland");
+
+    expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain(
+      "periodStart=2026-03-18&periodEnd=2026-06-15&previousPeriodStart=2025-12-18&previousPeriodEnd=2026-03-17",
+    );
+  });
+
+  it("loads the previous period's funnel for the conversion comparison (VAY-2594)", async () => {
+    vi.setSystemTime(new Date("2026-06-14T23:30:00.000Z"));
+    const funnel = { steps: [], paymentMethods: [], biggestDrop: null };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ funnel })),
+    );
+    await dashboardService.getConversionFunnel("week", "Pacific/Auckland", "previous");
+    expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain(
+      "/conversion-funnel?windowStart=2026-06-02&windowEnd=2026-06-08",
+    );
+  });
+
+  it.each(["today", "week", "month", "quarter"] as const)(
     "loads the %s funnel in property-local dates",
     async (range) => {
       const funnel = { steps: [], paymentMethods: [], biggestDrop: null };

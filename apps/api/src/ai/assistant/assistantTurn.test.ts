@@ -415,6 +415,28 @@ describe("assistant turn (VAY-2518)", () => {
     expect(model.inputs).toHaveLength(1);
   });
 
+  it("starts no tool once the API is shutting down: a closing server answers no route", async () => {
+    let shuttingDown = false;
+    const { end, tool, memory } = await turn(
+      [
+        async () => {
+          shuttingDown = true;
+          return asks(["toolu_1", "rooms_list", {}]);
+        },
+      ],
+      { shuttingDown: () => shuttingDown },
+    );
+    expect(end).toMatchObject({ status: "interrupted", reason: "shutdown" });
+    expect(tool.run).not.toHaveBeenCalled();
+    expect(resultsOf(memory.messages)[0]!.output).toEqual({
+      type: "error-json",
+      value: {
+        code: "not_run",
+        message: "The server restarted before this ran. Ask again in a moment.",
+      },
+    });
+  });
+
   it("the user's Stop ends the step and the turn", async () => {
     const stop = new AbortController();
     const { end } = await turn(

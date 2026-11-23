@@ -27,12 +27,15 @@ import {
   getSelectedBookingHotelId,
   SELECTED_HOTEL_CHANGED_EVENT,
 } from "@/services/api/bookingHotelScope";
-import { BOOKING_PAGE_ONLINE_EVENT, PUBLISH_BOOKING_PAGE_EVENT } from "./DashboardSetupChecklist";
+import { BOOKING_PAGE_ONLINE_EVENT, PUBLISH_BOOKING_PAGE_EVENT } from "./bookingPageEvents";
 
 const POLL_INTERVAL_MS = 2000;
 const POLL_LIMIT = 15;
 
-/** Shows whether the hotel's booking page is online and publishes it the first time (VAY-2187). */
+/**
+ * Publishes the hotel's booking page the first time (VAY-2187) and says what keeps it offline. A
+ * live page with nothing to fix shows nothing: the header's Live pill says so (VAY-2594).
+ */
 export function BookingPageStatusCard() {
   const [propertyId, setPropertyId] = useState<string | null>(null);
   const [review, setReview] = useState<BookingPublicationReview | null>(null);
@@ -41,6 +44,8 @@ export function BookingPageStatusCard() {
   const [publishFailure, setPublishFailure] = useState<BookingPageFailure | null>(null);
   const [busy, setBusy] = useState(false);
   const [polls, setPolls] = useState(0);
+  // Nothing shows until the first check answered, so a live page's dashboard doesn't flash a card.
+  const [checked, setChecked] = useState(false);
   const active = useRef(false);
   const mounted = useRef(true);
   const propertyIdRef = useRef<string | null>(null);
@@ -76,7 +81,10 @@ export function BookingPageStatusCard() {
       else setLoadFailed(true);
     } finally {
       active.current = false;
-      if (mounted.current) setBusy(false);
+      if (mounted.current) {
+        setBusy(false);
+        setChecked(true);
+      }
     }
   }, [load]);
 
@@ -197,7 +205,7 @@ export function BookingPageStatusCard() {
     }
   }
 
-  if (noAccess || (!status && !loadFailed && !busy)) return null;
+  if (noAccess || !checked || (!status && !loadFailed && !busy)) return null;
   return (
     <BookingPageStatusView
       status={
@@ -266,10 +274,11 @@ export function BookingPageStatusView({
 
   switch (status.kind) {
     case "online":
+      if (!status.items.length) return null;
       return (
         <Card>
           <Summary
-            tone={status.items.length ? "amber" : "green"}
+            tone="amber"
             icon={<GlobeAltIcon className="h-5 w-5" />}
             pill={<Pill dot="bg-green-500">{t("dashboard.bookingPage.status.online")}</Pill>}
             detail={
@@ -283,9 +292,7 @@ export function BookingPageStatusView({
                   {status.url.replace(/^https:\/\//, "").replace(/\/$/, "")}
                 </a>
                 <span aria-hidden="true"> · </span>
-                {status.items.length
-                  ? t("dashboard.bookingPage.online.needsAttention")
-                  : t("dashboard.bookingPage.online.detail")}
+                {t("dashboard.bookingPage.online.needsAttention")}
               </>
             }
             actions={
@@ -305,16 +312,12 @@ export function BookingPageStatusView({
       );
     case "hidden":
       return (
-        <Card>
-          <Summary
-            tone="amber"
-            icon={<GlobeAltIcon className="h-5 w-5" />}
-            pill={<Pill dot="bg-amber-500">{offline}</Pill>}
-            detail={t("dashboard.bookingPage.hidden.detail")}
-            actions={checkAgain}
-          />
-          <MissingItems items={status.items} propertyId={propertyId} />
-        </Card>
+        <OfflineBanner
+          items={status.items}
+          propertyId={propertyId}
+          busy={busy}
+          onRefresh={onRefresh}
+        />
       );
     case "publishing":
       return (
@@ -396,6 +399,58 @@ export function BookingPageStatusView({
         </Card>
       );
   }
+}
+
+/** A live page guests can't open any more: one line, and where to fix it (VAY-2594). */
+function OfflineBanner({
+  items,
+  propertyId,
+  busy,
+  onRefresh,
+}: {
+  items: BookingPageItem[];
+  propertyId: string | null;
+  busy: boolean;
+  onRefresh: () => void;
+}) {
+  const { t } = useTranslation();
+  const fix = items.find((item) => item.step);
+  return (
+    <div
+      role="status"
+      className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[10px] border border-[#F4C7C3] bg-[#FEF3F2] px-4 py-3 text-[#912018]"
+    >
+      <ExclamationTriangleIcon aria-hidden="true" className="h-[18px] w-[18px] shrink-0" />
+      <p className="min-w-0 flex-1 text-sm">
+        <strong>{t("dashboard.bookingPage.offlineBanner.title")}</strong>{" "}
+        {t("dashboard.bookingPage.offlineBanner.detail")}
+      </p>
+      {fix?.step ? (
+        <a
+          href={buildSharedHotelSetupRedirectPath({
+            entryProduct: "booking",
+            returnProduct: "booking",
+            returnTo: "/dashboard",
+            propertyId,
+            step: fix.step,
+            focus: fix.focus,
+          })}
+          className="text-[13px] font-semibold text-inherit hover:underline"
+        >
+          {t("dashboard.bookingPage.offlineBanner.fixNow")} →
+        </a>
+      ) : (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onRefresh}
+          className="text-[13px] font-semibold text-inherit hover:underline disabled:opacity-50"
+        >
+          {t("dashboard.bookingPage.checkAgain")}
+        </button>
+      )}
+    </div>
+  );
 }
 
 const TONES = {

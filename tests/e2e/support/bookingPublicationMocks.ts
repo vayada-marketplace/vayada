@@ -7,6 +7,8 @@ import {
 /** The publication review behind Booking Admin's "Your booking page" card (VAY-2187). */
 export type BookingPublicationMockState =
   | "online"
+  // Published, but guests can't open it any more, e.g. after a payment method went away.
+  | "hidden"
   | "ready"
   | "not_ready"
   | "publishing"
@@ -96,6 +98,7 @@ export async function bookingPublicationReviewMock(
 ) {
   const now = "2026-10-14T08:00:00.000Z";
   const online = state === "online";
+  const published = online || state === "hidden";
   const operation =
     state === "publishing" || state === "failed"
       ? {
@@ -109,7 +112,7 @@ export async function bookingPublicationReviewMock(
           updatedAt: now,
           completedAt: state === "failed" ? now : null,
         }
-      : online
+      : published
         ? {
             operationId: OPERATION_ID,
             propertyId,
@@ -125,12 +128,15 @@ export async function bookingPublicationReviewMock(
   return {
     contractVersion: "booking-publication-review.v1",
     propertyId,
-    activeContentRevisionId: online ? ACTIVE_REVISION_ID : null,
+    activeContentRevisionId: published ? ACTIVE_REVISION_ID : null,
     publishedUrl: online ? "https://hotel-alpenrose.booking.vayada.com" : null,
     publicSite: "serving",
     latestOperation: operation,
     recoveredOperation: null,
-    readiness: await bookingReadinessMock(propertyId, state === "not_ready" ? blockers : []),
+    readiness: await bookingReadinessMock(
+      propertyId,
+      state === "not_ready" || state === "hidden" ? blockers : [],
+    ),
   };
 }
 
