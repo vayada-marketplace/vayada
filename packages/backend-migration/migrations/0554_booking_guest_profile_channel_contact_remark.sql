@@ -9,9 +9,12 @@
 -- the guest record's empty email or phone (a channel booking never replaces a value there).
 --
 -- Only rows whose guest record lacks a value the stay has are marked, so a second run marks nothing.
--- updated_at is left alone: the row itself didn't change. Expired bookings are left out (the job never
--- reads them). Dry run on production 2026-11-23: 4 closed channel stays, all canceled (Tiga 1, Aether 3).
--- The job's code must be #4220's or later, which any release carrying this migration is.
+-- Left out: a row holding a Channex mask ("***", stored before #4220), which the job would copy; a row
+-- whose name differs from its guest record's, since re-reading it would let the job rename that record
+-- (undoing a staff rename) or merge it away; and expired bookings, which the job never reads.
+-- updated_at is left alone: the row itself didn't change. Dry run on production 2026-11-23: 4 closed channel stays, all canceled (Tiga 1,
+-- Aether 3). The job's code must be #4220's or later (live since 2026-11-23 17:39Z): an older job would
+-- clear the mark without filling anything.
 SET LOCAL lock_timeout = '5s';
 
 UPDATE booking.booking_guests guest
@@ -27,6 +30,9 @@ WHERE booking.id = guest.guest_booking_id
     WHERE mapping.guest_booking_id = booking.id
       AND mapping.property_id = booking.property_id
   )
+  AND profile.name_key = lower(regexp_replace(btrim(guest.first_name || ' ' || guest.last_name), '\s+', ' ', 'g'))
+  AND btrim(COALESCE(guest.email, '')) !~ '^[*]+$'
+  AND btrim(COALESCE(guest.phone, '')) !~ '^[*]+$'
   AND (
     (profile.email IS NULL AND btrim(COALESCE(guest.email, '')) <> '')
     OR (profile.phone IS NULL AND btrim(COALESCE(guest.phone, '')) <> '')
