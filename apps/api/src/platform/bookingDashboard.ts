@@ -390,7 +390,14 @@ function sparklineSql(): string {
 function pageViewBucketsSql(): string {
   return `${bookingScopedPropertyCte()},
   telemetry_scope AS (
-    SELECT scoped.property_id, location.timezone AS time_zone
+    SELECT scoped.property_id, location.timezone AS time_zone,
+      -- VAY-2592: from a hotel's first anonymous page view on, every page load sends one, so
+      -- only those count. Before it, the consented visits are the only page views there are.
+      (
+        SELECT MIN(first_view.occurred_at)
+        FROM distribution.booking_web_events first_view
+        WHERE first_view.property_id = scoped.property_id AND first_view.event_type = 'page_view'
+      ) AS views_counted_from
     FROM scoped_property scoped
     JOIN hotel_catalog.property_locations location ON location.property_id = scoped.property_id
     JOIN pg_timezone_names timezone ON timezone.name = location.timezone
@@ -408,7 +415,13 @@ function pageViewBucketsSql(): string {
   LEFT JOIN telemetry_scope scope ON TRUE
   LEFT JOIN distribution.booking_web_events event
     ON event.property_id = scope.property_id
-   AND event.event_type = 'page_visit'
+   AND (
+     event.event_type = 'page_view'
+     OR (
+       event.event_type = 'page_visit'
+       AND (scope.views_counted_from IS NULL OR event.occurred_at < scope.views_counted_from)
+     )
+   )
    AND event.traffic_class = 'human'
    AND event.occurred_at >= (bucket.bucket_date::timestamp AT TIME ZONE scope.time_zone)
    AND event.occurred_at < ((bucket.bucket_date + 1)::timestamp AT TIME ZONE scope.time_zone)

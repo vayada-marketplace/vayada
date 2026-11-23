@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BOOKING_WEB_ANALYTICS_CONSENT_VERSION } from "@vayada/domain-booking/conversion-funnel";
-import { trackEvent } from "./tracking";
+import { trackEvent, trackPageView } from "./tracking";
 import { analyticsChoice, onAnalyticsAllowed, saveAnalyticsChoice } from "./analyticsConsent";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -99,6 +99,45 @@ describe("Booking funnel instrumentation", () => {
     });
     expect(() => trackEvent("hotel", "rate_selected", { entry: "room_card" })).not.toThrow();
   });
+
+  it.each([null, { version: BOOKING_WEB_ANALYTICS_CONSENT_VERSION, analytics: false }])(
+    "counts a page view without consent, touching no storage and sending only the hotel and a fresh id (VAY-2592): %j",
+    (choice) => {
+      mockBrowser(choice);
+      const touched: string[] = [];
+      const untouchable = (name: string) =>
+        new Proxy({}, { get: (_target, key) => touched.push(`${name}.${String(key)}`) });
+      vi.stubGlobal("localStorage", untouchable("localStorage"));
+      vi.stubGlobal("sessionStorage", untouchable("sessionStorage"));
+      vi.stubGlobal("document", untouchable("document"));
+      const fetch = vi.fn(async () => new Response(null, { status: 204 }));
+      vi.stubGlobal("fetch", fetch);
+
+      trackPageView("hotel");
+      trackPageView("hotel");
+      trackPageView("");
+
+      expect(touched).toEqual([]);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      const sent = fetch.mock.calls.map((call) => {
+        const [url, init] = call as unknown as [string, RequestInit];
+        expect(url).toMatch(/\/api\/booking-web\/events$/);
+        expect(init).toMatchObject({
+          method: "POST",
+          credentials: "omit",
+          keepalive: true,
+          referrerPolicy: "no-referrer",
+        });
+        return JSON.parse(init.body as string) as Record<string, string>;
+      });
+      for (const body of sent) {
+        expect(Object.keys(body).sort()).toEqual(["eventId", "eventType", "hotelSlug"]);
+        expect(body).toMatchObject({ hotelSlug: "hotel", eventType: "page_view" });
+      }
+      // A fresh id each time, so two views can't be linked.
+      expect(sent[0]!.eventId).not.toBe(sent[1]!.eventId);
+    },
+  );
 
   it("sends only each event's own properties, without the page address (VAY-2197)", () => {
     mockBrowser();

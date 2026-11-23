@@ -64,6 +64,7 @@ import type { ExternalChangePresentationPort } from "../domains/booking/external
 import {
   bestBookingPromotion,
   BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
+  BOOKING_WEB_PAGE_VIEW_EVENT,
   isFunnelId,
   isManualPricingPaymentMethod,
   parseAccountBookingPageSlug,
@@ -239,7 +240,8 @@ export type BookingWebTelemetryEvent = {
   hotelSlug: string;
   eventType: string;
   eventId: string;
-  sessionId: string;
+  /** Null for an anonymous page view (VAY-2592). */
+  sessionId: string | null;
   occurredAt: Date;
   /** Only to tell bots apart; not stored. */
   userAgent?: string;
@@ -1060,9 +1062,13 @@ export async function registerBookingWebPublicRoutes(
       // string.
       const body =
         typeof request.body === "string" ? parseTelemetryEventBody(request.body) : request.body;
+      // VAY-2592: a page view is counted without consent, so it may carry nothing but the hotel,
+      // its type and a fresh random id: no session, consent fields or properties are stored.
+      const pageView = body?.eventType === BOOKING_WEB_PAGE_VIEW_EVENT;
       if (
-        body?.analyticsConsent !== true ||
-        body?.consentVersion !== BOOKING_WEB_ANALYTICS_CONSENT_VERSION
+        !pageView &&
+        (body?.analyticsConsent !== true ||
+          body?.consentVersion !== BOOKING_WEB_ANALYTICS_CONSENT_VERSION)
       ) {
         return reply.header("Cache-Control", "no-store").status(204).send();
       }
@@ -1071,14 +1077,27 @@ export async function registerBookingWebPublicRoutes(
       if (!hotelSlug || !eventType) {
         throw createHttpError(400, "Hotel slug and event type are required.");
       }
-      const metadata = parseFunnelEventMetadata(eventType, body?.metadata);
       const eventId = firstString(body?.eventId, body?.event_id);
-      const sessionId = firstString(body?.sessionId, body?.session_id);
-      if (!metadata || !isFunnelId(eventId) || !isFunnelId(sessionId)) {
-        throw createHttpError(400, "Invalid booking funnel event.");
+      let metadata: Record<string, unknown> | null;
+      let sessionId: string | null;
+      if (pageView) {
+        if (
+          !isFunnelId(eventId) ||
+          Object.keys(body ?? {}).some((key) => !PAGE_VIEW_FIELDS.has(key))
+        ) {
+          throw createHttpError(400, "Invalid booking page view.");
+        }
+        metadata = {};
+        sessionId = null;
+      } else {
+        metadata = parseFunnelEventMetadata(eventType, body?.metadata);
+        sessionId = firstString(body?.sessionId, body?.session_id) ?? null;
+        if (!metadata || !isFunnelId(eventId) || !isFunnelId(sessionId)) {
+          throw createHttpError(400, "Invalid booking funnel event.");
+        }
       }
-      // Per address, session and hotel, before any database read (VAY-2214). Nothing is stored
-      // for a refused event, and the browser ignores the answer.
+      // Per address, session (page views have none) and hotel, before any database read
+      // (VAY-2214). Nothing is stored for a refused event, and the browser ignores the answer.
       const limit = eventRateLimit({ address: request.ip, sessionId, hotelSlug });
       if (!limit.allowed) {
         // No address or session; the slug names the hotel being flooded.
@@ -1119,6 +1138,9 @@ export async function registerBookingWebPublicRoutes(
     },
   );
 }
+
+/** The only fields an anonymous page view may send (VAY-2592). */
+const PAGE_VIEW_FIELDS = new Set(["hotelSlug", "eventType", "eventId"]);
 
 /**
  * Guests' browsers post the booking lookup straight to this API, so its per-address limit counts

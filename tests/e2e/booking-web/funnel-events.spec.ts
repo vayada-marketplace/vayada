@@ -79,18 +79,21 @@ async function mockFunnel(page: Page, { extras = true, refusePrices = false } = 
     route.fulfill({ status: 404, json: { detail: "Not found." } }),
   );
   await page.route("**/change-request**", (route) => route.fulfill({ status: 404, json: {} }));
-  // Every event request the page makes, with whether it carried the page's address.
+  // Every event request the page makes, with whether it carried the page's address or cookies.
+  // VAY-2592: the anonymous page views, sent with or without consent, are kept apart.
   const sent: (Sent & { referer: string | null; body: string })[] = [];
+  const views: { body: Record<string, unknown>; referer: string | null; cookie: string | null }[] =
+    [];
   await page.route("**/api/booking-web/events", async (route) => {
     const request = route.request();
-    sent.push({
-      ...request.postDataJSON(),
-      referer: await request.headerValue("referer"),
-      body: request.postData() ?? "",
-    });
+    const body = request.postDataJSON();
+    const referer = await request.headerValue("referer");
+    if (body.eventType === "page_view")
+      views.push({ body, referer, cookie: await request.headerValue("cookie") });
+    else sent.push({ ...body, referer, body: request.postData() ?? "" });
     await route.fulfill({ status: 204 });
   });
-  return sent;
+  return Object.assign(sent, { views });
 }
 
 function saveChoice(page: Page, analytics: boolean) {
@@ -219,7 +222,7 @@ test("a refused price is reported once, without the guest's details", async ({ p
 });
 
 for (const choice of ["rejected", "unanswered"] as const) {
-  test(`sends nothing when analytics is ${choice}`, async ({ page }) => {
+  test(`sends only an anonymous page view when analytics is ${choice}`, async ({ page }) => {
     if (choice === "rejected") await saveChoice(page, false);
     const sent = await mockFunnel(page);
     await page.goto(HOTEL);
@@ -233,5 +236,16 @@ for (const choice of ["rejected", "unanswered"] as const) {
     expect(
       await page.evaluate(() => Object.keys(sessionStorage).filter((key) => key.includes("sid"))),
     ).toEqual([]);
+    // VAY-2592: the hotel page's load is counted without asking: the hotel, the type and a fresh
+    // id, no session, address or cookie. The dev server's double effects can send it twice.
+    expect(sent.views.length).toBeGreaterThanOrEqual(1);
+    expect(sent.views.length).toBeLessThanOrEqual(2);
+    for (const view of sent.views) {
+      expect(Object.keys(view.body).sort()).toEqual(["eventId", "eventType", "hotelSlug"]);
+      expect(view.body).toMatchObject({ hotelSlug: SEEDED_BOOKING_SLUG, eventType: "page_view" });
+      expect(view.referer).toBeNull();
+      expect(view.cookie).toBeNull();
+    }
+    expect(new Set(sent.views.map((view) => view.body.eventId)).size).toBe(sent.views.length);
   });
 }
