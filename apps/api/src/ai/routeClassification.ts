@@ -197,6 +197,10 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
   "PUT /api/booking/properties/:propertyId/location-map": later(),
   "PUT /api/booking/properties/:propertyId/location-map/nearby": later(),
   "GET /api/booking/properties/:propertyId/notifications": later(),
+  "POST /api/booking/properties/:propertyId/notifications/done": notForAi(
+    "plumbing",
+    "bell done markers (VAY-2591)",
+  ),
   "POST /api/booking/properties/:propertyId/notifications/read": notForAi(
     "plumbing",
     "read markers",
@@ -204,6 +208,10 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
   "POST /api/booking/properties/:propertyId/notifications/read-all": notForAi(
     "plumbing",
     "read markers",
+  ),
+  "POST /api/booking/properties/:propertyId/notifications/unread": notForAi(
+    "plumbing",
+    "read markers (VAY-2591)",
   ),
   "GET /api/booking/properties/:propertyId/partner-connections": later(),
   "GET /api/booking/properties/:propertyId/room-sorting": later(),

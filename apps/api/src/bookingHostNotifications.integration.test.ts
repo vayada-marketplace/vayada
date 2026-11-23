@@ -98,6 +98,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking Admin notifications (runtime login)
          has_table_privilege($1, 'booking.host_notification_reads', 'SELECT') AS "readsSelect",
          has_table_privilege($1, 'booking.host_notification_reads', 'INSERT') AS "readsInsert",
          has_table_privilege($1, 'booking.host_notification_reads', 'DELETE') AS "readsDelete",
+         has_table_privilege($1, 'booking.host_notification_done', 'SELECT') AS "doneSelect",
+         has_table_privilege($1, 'booking.host_notification_done', 'INSERT') AS "doneInsert",
+         has_table_privilege($1, 'booking.host_notification_done', 'DELETE') AS "doneDelete",
          has_table_privilege($1, 'booking.booking_status_events', 'SELECT') AS "eventsSelect",
          has_table_privilege($1, 'pms.channel_sync_status', 'SELECT') AS "syncSelect",
          has_table_privilege($1, 'pms.channel_sync_status', 'UPDATE') AS "syncUpdate"`,
@@ -107,6 +110,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking Admin notifications (runtime login)
       readsSelect: true,
       readsInsert: true,
       readsDelete: true,
+      doneSelect: true,
+      doneInsert: true,
+      doneDelete: true,
       eventsSelect: true,
       syncSelect: true,
       syncUpdate: false,
@@ -346,6 +352,67 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking Admin notifications (runtime login)
     expect(await repository.read(randomUUID(), viewer)).toBeNull();
   });
 
+  it("marks items done for the whole team and unread for the person alone (VAY-2591)", async () => {
+    const colleague: HostNotificationViewer = { ...viewer, userId: colleagueId };
+    const item = async (person: HostNotificationViewer, key: string) =>
+      (await repository.read(propertyId, person))!.items.find((entry) => entry.key === key);
+    const missed = await seedBooking({
+      firstName: "Nora",
+      lastName: "Late",
+      status: "expired",
+      cancellationReason: "pending_booking_expired",
+      metadata: { paymentMethod: "bank_transfer" },
+    });
+    const missedKey = `booking-event:${await seedEvent(missed, "guest_booking.expired", {
+      toStatus: "expired",
+      actorType: "system",
+      ago: "1 hour",
+    })}`;
+    const created = await seedBooking({ firstName: "Paul", lastName: "New" });
+    const createdKey = `booking-event:${await seedEvent(created, "guest_booking.created", {
+      ago: "1 hour",
+    })}`;
+
+    // Only what needs action now: not a new booking, not an unknown item.
+    expect(
+      await repository.markDone(propertyId, viewer, [missedKey, createdKey, "booking-event:gone"]),
+    ).toEqual([missedKey]);
+    // A second mark is fine; the first person stays the one who did it.
+    expect(await repository.markDone(propertyId, colleague, [missedKey])).toEqual([missedKey]);
+    const marks = await admin.query<{ doneBy: string }>(
+      `SELECT done_by::text AS "doneBy" FROM booking.host_notification_done
+       WHERE property_id=$1 AND notification_key=$2`,
+      [propertyId, missedKey],
+    );
+    expect(marks.rows).toEqual([{ doneBy: viewerId }]);
+    // Done counts for everyone on the team, and reads as read.
+    expect(await item(viewer, missedKey)).toMatchObject({ done: true, read: true });
+    expect(await item(colleague, missedKey)).toMatchObject({ done: true, read: true });
+
+    // "Mark as unread" is the person's own, and a done item stays read.
+    await repository.markRead(propertyId, viewerId, [createdKey, missedKey]);
+    await repository.markRead(propertyId, colleagueId, [createdKey]);
+    await repository.markUnread(propertyId, viewerId, [createdKey, missedKey]);
+    expect(await item(viewer, createdKey)).toMatchObject({ read: false, done: false });
+    expect(await item(colleague, createdKey)).toMatchObject({ read: true });
+    expect(await item(viewer, missedKey)).toMatchObject({ done: true, read: true });
+
+    // Done marks older than 60 days are deleted on the next done mark.
+    await admin.query(
+      `INSERT INTO booking.host_notification_done(property_id,notification_key,done_by,done_at)
+       VALUES($1,'promo-limit:old:1',$2,now() - interval '61 days')`,
+      [propertyId, viewerId],
+    );
+    await repository.markDone(propertyId, viewer, [missedKey]);
+    const left = await admin.query<{ key: string }>(
+      "SELECT notification_key AS key FROM booking.host_notification_done WHERE property_id=$1",
+      [propertyId],
+    );
+    expect(left.rows.map((row) => row.key)).toEqual([missedKey]);
+
+    expect(await repository.markDone(randomUUID(), viewer, [missedKey])).toEqual([]);
+  });
+
   // ---------------------------------------------------------------- fixtures
 
   async function seedBooking(seed: {
@@ -494,6 +561,7 @@ async function cleanup(pool: pg.Pool): Promise<void> {
     );
     for (const table of [
       "booking.host_notification_reads",
+      "booking.host_notification_done",
       "booking.guest_bookings",
       "booking.promo_definitions",
       "pms.channel_sync_status",
