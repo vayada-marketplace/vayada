@@ -17,14 +17,21 @@ import type { ChangeAction } from "../actions/defineChangeAction.js";
 /** How long an Ask-first change waits for the person's answer at most (plan 3.4.2). */
 export const PENDING_ANSWER_MS = 15 * 60_000;
 /**
- * How long a retry (a resent call, a regenerated step, a resume) joins a change that already ended
- * the same way: done, declined, revoked, AI switched off, or failed after it sent a request. A
- * running change is always joined; a pending one until it expires.
+ * How long after it ended a retry (a resent call, a regenerated step, a resume) joins a change that
+ * ended done, declined, revoked, with AI switched off, or failed after it sent a request: within its
+ * request scope (the in-app turn), and only if nothing newer happened in the same conversation or
+ * connection. A pending or running change is always joined (until a pending one expires).
  */
 export const RETRY_JOIN_MS = 10 * 60_000;
+/** The same, for a request without a scope (MCP): only quick resends join. */
+export const UNSCOPED_RETRY_JOIN_MS = 2 * 60_000;
+/** A run that gave up may or may not have changed something: every retry learns that. */
+export const GAVE_UP_JOIN_MS = 24 * 60 * 60_000;
 /** Runs taken over this often give up. */
 export const MAX_ATTEMPTS = 5;
 export const MAX_STEPS = 20;
+/** The table keeps at most 32 KB of `jsonb::text`; JSON text grows by at most half in it. */
+const MAX_ARGUMENT_BYTES = 16_384;
 const MAX_JSON_BYTES = 32_768;
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
@@ -64,7 +71,10 @@ export type AiOperation = {
   closeReason: AiOperationCloseReason | null;
   expiresAt: string | null;
   previewSha256: string | null;
-  /** The token of the current lease: new at every start and take-over. */
+  /**
+   * The current lease's token (new at every start and take-over), only for the caller that won the
+   * start or took the run over; null for everyone else.
+   */
   leaseOwner: string | null;
   leaseExpiresAt: string | null;
   attempts: number;
@@ -87,8 +97,9 @@ export type ProposedChange = {
   connectionId?: string;
   conversationId?: string;
   /**
-   * What tells a retry from a new request: the in-app turn (a regenerated step stays in its turn;
-   * a new question is a new turn). Without it, retries are told apart by RETRY_JOIN_MS alone.
+   * What tells a retry from a new request once a change has ended: the in-app turn (a regenerated
+   * step stays in its turn; a new question is a new turn). A pending or running change is joined
+   * from any scope, so one change never has two live cards.
    */
   requestScope?: string;
   client: string;
@@ -156,7 +167,7 @@ export class AiOperationStoreError extends Error {
 
 /**
  * The arguments as they are stored: plain JSON, no NUL and no broken characters (the database
- * refuses those, quoting the text), at most MAX_JSON_BYTES.
+ * refuses those, quoting the text), small enough for the table.
  */
 export function storedArguments(value: Record<string, unknown>): {
   json: string;
@@ -172,22 +183,28 @@ export function storedArguments(value: Record<string, unknown>): {
   if (!json || !parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new AiOperationStoreError("AI change arguments must be an object");
   }
-  if (Buffer.byteLength(json) > MAX_JSON_BYTES) {
+  if (Buffer.byteLength(json) > MAX_ARGUMENT_BYTES) {
     throw new AiOperationStoreError("AI change arguments are too large");
   }
-  const clean = (node: unknown): boolean =>
-    typeof node === "string"
-      ? !LONE_SURROGATE.test(node) && !node.includes("\u0000")
-      : Array.isArray(node)
-        ? node.every(clean)
-        : node !== null && typeof node === "object"
-          ? Object.entries(node).every(([key, child]) => clean(key) && clean(child))
-          : true;
-  if (!clean(parsed)) throw new AiOperationStoreError("AI change arguments hold broken text");
+  if (!cleanText(parsed)) throw new AiOperationStoreError("AI change arguments hold broken text");
   return { json, parsed: parsed as Record<string, unknown> };
 }
 
-/** Who asked, where, in which request scope, for which action, with which arguments. */
+/** True when no string in the value holds NUL or half a surrogate pair. */
+function cleanText(node: unknown): boolean {
+  return typeof node === "string"
+    ? !LONE_SURROGATE.test(node) && !node.includes("\u0000")
+    : Array.isArray(node)
+      ? node.every(cleanText)
+      : node !== null && typeof node === "object"
+        ? Object.entries(node).every(([key, child]) => cleanText(key) && cleanText(child))
+        : true;
+}
+
+/**
+ * Who asked, where (the conversation or connection), for which action, with which arguments. The
+ * request scope is not part of it: it only decides whether an ended change is joined.
+ */
 export function operationBusinessKey(change: ProposedChange): string {
   return createHash("sha256")
     .update(
@@ -198,7 +215,6 @@ export function operationBusinessKey(change: ProposedChange): string {
         change.surface,
         change.connectionId ?? null,
         change.conversationId ?? null,
-        change.requestScope ?? null,
         change.action.name,
         change.action.version,
         // Exactly what is stored: dates as their JSON text, no undefined members.
@@ -239,8 +255,10 @@ const SHA256 = /^[0-9a-f]{64}$/;
 
 type Row = Omit<AiOperation, (typeof TIMES)[number]> & Record<(typeof TIMES)[number], Date | null>;
 
-function toOperation(row: Row): AiOperation {
+/** The row as callers see it: the lease token only for the lease holder (`withLease`). */
+function toOperation(row: Row, withLease = false): AiOperation {
   const operation = { ...row } as unknown as AiOperation;
+  if (!withLease) operation.leaseOwner = null;
   for (const field of TIMES) {
     const value = row[field];
     (operation as Record<string, unknown>)[field] = value ? value.toISOString() : null;
@@ -341,23 +359,55 @@ export function createPgAiOperationStore(config: {
             WHERE business_key = $1 AND status = 'pending' AND expires_at <= $2::timestamptz`,
           [businessKey, now.toISOString()],
         );
+        const joinMs = change.requestScope ? RETRY_JOIN_MS : UNSCOPED_RETRY_JOIN_MS;
         const existing = await run<Row>(
           client,
-          `SELECT ${COLUMNS} FROM platform.ai_operations
+          `SELECT ${COLUMNS} FROM platform.ai_operations operation
             WHERE business_key = $1
               AND (status IN ('pending', 'running')
-                   OR (created_at > $2::timestamptz
+                   -- An outcome nobody knows: every retry learns it, whatever its scope.
+                   OR (status = 'failed' AND error_code = 'gave_up'
+                       AND finished_at > $4::timestamptz)
+                   OR (finished_at > $2::timestamptz
+                       AND request_scope IS NOT DISTINCT FROM $3
                        AND (status = 'done'
                             OR (status = 'closed'
                                 AND close_reason IN ('declined', 'revoked', 'ai_switched_off'))
-                            OR (status = 'failed' AND jsonb_array_length(steps) > 0))))
+                            OR (status = 'failed' AND jsonb_array_length(steps) > 0))
+                       -- A retry comes before anything else happens in its conversation or
+                       -- connection: "block, release, block again" asks again.
+                       AND NOT EXISTS (
+                         SELECT 1 FROM platform.ai_operations later
+                          WHERE later.user_id = operation.user_id
+                            AND later.connection_id IS NOT DISTINCT FROM operation.connection_id
+                            AND later.conversation_id IS NOT DISTINCT FROM operation.conversation_id
+                            AND later.created_at > operation.created_at)))
             ORDER BY created_at DESC
             LIMIT 1`,
-          [businessKey, new Date(now.getTime() - RETRY_JOIN_MS).toISOString()],
+          [
+            businessKey,
+            new Date(now.getTime() - joinMs).toISOString(),
+            change.requestScope ?? null,
+            new Date(now.getTime() - GAVE_UP_JOIN_MS).toISOString(),
+          ],
         );
-        if (existing.rows[0]) {
+        const found = existing.rows[0];
+        const newPreview =
+          found?.status === "pending" &&
+          (found.previewSha256 ?? null) !== (change.previewSha256 ?? null);
+        if (found && !newPreview) {
           await run(client, "COMMIT", []);
-          return { operation: toOperation(existing.rows[0]), created: false };
+          return { operation: toOperation(found), created: false };
+        }
+        if (found && newPreview) {
+          // What the card shows changed: the old card can't be answered, a new one asks.
+          await run(
+            client,
+            `UPDATE platform.ai_operations
+                SET status = 'closed', close_reason = 'changed', finished_at = $2::timestamptz
+              WHERE id = $1::uuid AND status = 'pending'`,
+            [found.id, now.toISOString()],
+          );
         }
         const inserted = await run<Row>(
           client,
@@ -407,7 +457,7 @@ export function createPgAiOperationStore(config: {
           RETURNING ${COLUMNS}`,
         [id, lease.token, lease.until, now.toISOString()],
       );
-      if (result.rows[0]) return { operation: toOperation(result.rows[0]), won: true };
+      if (result.rows[0]) return { operation: toOperation(result.rows[0], true), won: true };
       // Not started: an unanswered change past its expiry is closed, never left looking pending.
       await run(
         db,
@@ -454,7 +504,7 @@ export function createPgAiOperationStore(config: {
             RETURNING ${COLUMNS}`,
           [id, lease.token, lease.until, now.toISOString(), MAX_ATTEMPTS],
         );
-        if (result.rows[0]) taken.push(toOperation(result.rows[0]));
+        if (result.rows[0]) taken.push(toOperation(result.rows[0], true));
       }
       return taken;
     },
@@ -493,10 +543,10 @@ export function createPgAiOperationStore(config: {
       const result = await run(
         db,
         `UPDATE platform.ai_operations
-            SET steps = COALESCE((SELECT jsonb_agg(entry ORDER BY (entry->>'step')::int)
-                                    FROM jsonb_array_elements(steps) entry
-                                   WHERE (entry->>'step')::int <> $4), '[]'::jsonb)
-                        || jsonb_build_array($3::jsonb),
+            SET steps = (SELECT jsonb_agg(entry ORDER BY (entry->>'step')::int)
+                           FROM (SELECT entry FROM jsonb_array_elements(steps) entry
+                                  WHERE (entry->>'step')::int <> $4
+                                 UNION ALL SELECT $3::jsonb) recorded(entry)),
                 step_cursor = GREATEST(step_cursor, $4)
           WHERE id = $1::uuid AND status = 'running' AND lease_owner = $2`,
         [id, leaseOwner, JSON.stringify(record), step.step],
@@ -508,15 +558,27 @@ export function createPgAiOperationStore(config: {
       if (!TOKEN.test(leaseOwner)) return false;
       let result: string | null = null;
       if (outcome.status === "done") {
-        const json = JSON.stringify(outcome.result ?? null);
-        result = Buffer.byteLength(json) <= MAX_JSON_BYTES ? json : null;
+        // An answer that can't be kept is dropped: the change still counts as done.
+        let json: string | undefined;
+        try {
+          json = JSON.stringify(outcome.result ?? null);
+        } catch {
+          json = undefined;
+        }
+        result =
+          json && Buffer.byteLength(json) <= MAX_JSON_BYTES && cleanText(JSON.parse(json))
+            ? json
+            : null;
       } else if (!ERROR_CODE.test(outcome.errorCode)) {
         throw new AiOperationStoreError("AI change error code is invalid");
       }
       const updated = await run(
         db,
         `UPDATE platform.ai_operations
-            SET status = $3, result = $4::jsonb, error_code = $5, finished_at = $6::timestamptz,
+            SET status = $3,
+                result = CASE WHEN octet_length($4::jsonb::text) <= ${MAX_JSON_BYTES}
+                              THEN $4::jsonb END,
+                error_code = $5, finished_at = $6::timestamptz,
                 lease_owner = NULL, lease_expires_at = NULL
           WHERE id = $1::uuid AND status = 'running' AND lease_owner = $2`,
         [

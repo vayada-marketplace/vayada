@@ -440,20 +440,25 @@ running with an expired lease --> resumed by the recovery job (same steps, same 
 ([`apps/api/src/ai/executor/operationStore.ts`](../apps/api/src/ai/executor/operationStore.ts)):
 
 - **Business key:** a hash of the account, property, user, surface, connection or conversation, the
-  request scope (the in-app turn: a regenerated step stays in its turn, a new question is a new
-  turn), the action and version, and exactly the JSON of the change's arguments as stored (keys
-  sorted). This one rule covers the per-action keys of plan 3.4.0; an action can get a narrower key
-  when one needs it. Copies sent at once write one row (advisory lock on the key), and at most one
-  row of a key is pending or running (unique index).
-- **Which retries join:** a running change always; a pending one until it expires; for 10 minutes a
-  change that ended done, declined, revoked or with AI switched off, or failed after it sent a
-  request. After that, or after an expiry or a "changed" close, the same request asks again (a new
-  card), so a deliberate repeat (block, release, block again) is never swallowed.
+  action and version, and exactly the JSON of the change's arguments as stored (keys sorted). This
+  one rule covers the per-action keys of plan 3.4.0; an action can get a narrower key when one needs
+  it. Copies sent at once write one row (advisory lock on the key), and at most one row of a key is
+  pending or running (unique index).
+- **Which retries join:** a pending (until it expires) or running change always, from any turn, so
+  one change never has two live cards; a run that gave up (outcome unknown) for 24 hours, from any
+  turn. A change that ended done, declined, revoked, with AI switched off, or failed after it sent a
+  request is joined only by a retry in the same request scope (the in-app turn: a regenerated step
+  stays in its turn, a new question is a new turn), within 10 minutes of its end (2 minutes without
+  a scope, i.e. MCP), and only if nothing newer happened in its conversation or connection. So a
+  deliberate repeat (block, release, block again) asks again. The cost on MCP: a same-arguments
+  request within 2 minutes of a No gets the No back, not a new card. After an expiry or a "changed"
+  close the same request always asks again, and a new preview digest closes the old card as
+  `changed`.
 - **States** as above, enforced by the table's checks. `start` moves a pending change to running for
   exactly one caller; every other caller gets the row and joins the run. Each start and take-over
-  gets a new lease token, and only that token renews, records a step (request id, key hash, status
-  code: no answer text; a replayed step replaces its record) or finishes, so a stalled worker can't
-  write after a take-over. The recovery job takes over a run whose lease ran out, once, with the same
+  gets a new lease token, handed only to the winner or the recovery job, and only that token renews,
+  records a step (request id, key hash, status code: no answer text; a replayed step replaces its
+  record) or finishes, so a stalled worker can't write after a take-over. The recovery job takes over a run whose lease ran out, once, with the same
   step keys (`op_<id>:<step>`, bound to the action); after 5 attempts it gives up (`failed`,
   `gave_up`). `failed` otherwise means the change certainly did not happen; an outcome the executor
   can't be sure of stays running for the recovery job.
@@ -461,7 +466,9 @@ running with an expired lease --> resumed by the recovery job (same steps, same 
   preview's digest for the Yes. An answer after the expiry closes the row as `expired`; No, revoke,
   AI switched off and "changed since" (a stale preview at the Yes) close it with their reason.
 - **Arguments** must be plain JSON for the change's property (no NUL, no broken characters, at most
-  32 KB); database errors are rethrown without the row, so the text never reaches a log. The
+  16 KB of JSON text, which stays under the table's 32 KB of `jsonb` text); an answer that can't be
+  kept is dropped and the change still counts as done; database errors are rethrown without the
+  row, so the text never reaches a log. The
   preconditions travel inside the arguments (the action's expected-version fields); the undo record
   (VAY-2559) will point to its operation.
 - **Retention:** 90 days (plan 3.6), by the AI retention worker; with the account, the property or the

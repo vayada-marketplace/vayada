@@ -16,6 +16,7 @@ import {
   PENDING_ANSWER_MS,
   RETRY_JOIN_MS,
   storedArguments,
+  UNSCOPED_RETRY_JOIN_MS,
   type ProposedChange,
 } from "./operationStore.js";
 
@@ -23,21 +24,20 @@ const URL_ = process.env["TEST_DATABASE_URL"];
 const ORG = randomUUID();
 const PROPERTY = randomUUID();
 const USER = randomUUID();
-const CONVERSATION = randomUUID();
 const T0 = new Date("2026-12-01T09:00:00.000Z");
 const at = (ms: number) => new Date(T0.getTime() + ms);
 const A = { holder: "task-a", ms: 60_000 };
 const B = { holder: "task-b", ms: 60_000 };
 
 let seq = 0;
-/** A change with arguments of its own, so tests don't find each other's rows. */
+/** A change in a conversation of its own, so tests don't find each other's rows. */
 function change(overrides: Partial<ProposedChange> = {}): ProposedChange {
   return {
     organizationId: ORG,
     propertyId: PROPERTY,
     userId: USER,
     surface: "in_app",
-    conversationId: CONVERSATION,
+    conversationId: randomUUID(),
     requestScope: "turn-1",
     client: "vayada:pms",
     action: { name: "thread_mark_done", version: 1, group: "ask" },
@@ -66,11 +66,14 @@ describe("the business key (VAY-2524)", () => {
       arguments: Object.fromEntries(Object.entries(base.arguments).reverse()),
     };
     expect(operationBusinessKey(reordered)).toBe(operationBusinessKey(base));
+    // The request scope only decides whether an ended change joins: never part of the key.
+    expect(operationBusinessKey({ ...base, requestScope: "turn-2" })).toBe(
+      operationBusinessKey(base),
+    );
     expect(canonicalJson({ b: 1, a: [{ d: 2, c: null }] })).toBe('{"a":[{"c":null,"d":2}],"b":1}');
     for (const other of [
       { ...base, arguments: { ...base.arguments, expectedThreadVersion: 99 } },
       { ...base, conversationId: randomUUID() },
-      { ...base, requestScope: "turn-2" },
       { ...base, userId: randomUUID() },
       { ...base, action: { ...base.action, version: 2 } },
     ]) {
@@ -172,7 +175,7 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
       group: "ask",
       action: "thread_mark_done",
       surface: "in_app",
-      conversationId: CONVERSATION,
+      conversationId: asked.conversationId,
       connectionId: null,
       requestScope: "turn-1",
       businessKey: operationBusinessKey(asked),
@@ -198,7 +201,7 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
     ).rejects.toThrow(/another property/);
   });
 
-  it("gives a retried or regenerated tool call the same change; a new request gets its own", async () => {
+  it("gives a retry the same change; a pending change is joined from any turn", async () => {
     const asked = change();
     const first = await store.propose(asked, T0);
     const again = await store.propose(
@@ -206,8 +209,22 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
       at(5_000),
     );
     expect(again).toEqual({ operation: first.operation, created: false });
-    const newTurn = await store.propose({ ...asked, requestScope: "turn-2" }, at(5_000));
-    expect(newTurn.created).toBe(true);
+    // A turn cut off by a deploy, asked again: still the one card, never a second.
+    expect(await store.propose({ ...asked, requestScope: "turn-2" }, at(6_000))).toEqual({
+      operation: first.operation,
+      created: false,
+    });
+  });
+
+  it("asks again when the card's preview changed", async () => {
+    const asked = change({ previewSha256: "c".repeat(64) });
+    const first = await store.propose(asked, T0);
+    const second = await store.propose({ ...asked, previewSha256: "d".repeat(64) }, at(1_000));
+    expect(second.created).toBe(true);
+    expect(await store.find(first.operation.id)).toMatchObject({
+      status: "closed",
+      closeReason: "changed",
+    });
   });
 
   it("writes one change for copies of a tool call sent at once", async () => {
@@ -217,15 +234,56 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
     expect(new Set(results.map((result) => result.operation.id)).size).toBe(1);
   });
 
-  it("joins a done change only while retries come, so the same request later runs again", async () => {
-    // Block, release, block again: the second block is a new request, not a retry of the first.
+  it("joins a done change only while retries come, in its turn, so the same request runs again", async () => {
     const asked = change();
-    const id = await ended(asked, "done");
-    expect(await store.propose(asked, at(RETRY_JOIN_MS - 1))).toMatchObject({
+    const id = await ended(asked, "done"); // finished at 2 s
+    expect(await store.propose(asked, at(2_000 + RETRY_JOIN_MS - 1))).toMatchObject({
       created: false,
       operation: { id, status: "done", result: { ok: 1 } },
     });
-    expect((await store.propose(asked, at(RETRY_JOIN_MS + 1))).created).toBe(true);
+    // A new question in a new turn is a new request.
+    expect((await store.propose({ ...asked, requestScope: "turn-2" }, at(3_000))).created).toBe(
+      true,
+    );
+    const later = change();
+    await ended(later, "done");
+    expect((await store.propose(later, at(2_000 + RETRY_JOIN_MS + 1))).created).toBe(true);
+  });
+
+  it("counts the retry window from the answer, not from the question", async () => {
+    // A Yes in the card's 14th minute, and the resumed turn retrying half a minute later.
+    const asked = change();
+    const { operation } = await store.propose(asked, T0);
+    const token = (await store.start(operation.id, A, at(14 * 60_000)))!.operation.leaseOwner!;
+    await store.finish(operation.id, token, { status: "done", result: { ok: 1 } }, at(14 * 60_000));
+    expect(await store.propose(asked, at(14.5 * 60_000))).toMatchObject({
+      created: false,
+      operation: { id: operation.id, status: "done" },
+    });
+  });
+
+  it("on MCP, joins only quick resends, and asks again once anything else happened", async () => {
+    const connectionId = randomUUID();
+    const mcp = (extra: Partial<ProposedChange> = {}) =>
+      change({
+        surface: "mcp",
+        conversationId: undefined,
+        connectionId,
+        requestScope: undefined,
+        ...extra,
+      });
+    const block = mcp();
+    const id = await ended(block, "done");
+    expect(await store.propose(block, at(2_000 + UNSCOPED_RETRY_JOIN_MS - 1))).toMatchObject({
+      created: false,
+      operation: { id },
+    });
+    // Block, release, block again: the release in between makes the second block a new request.
+    await store.propose(mcp(), at(3_000));
+    expect((await store.propose(block, at(4_000))).created).toBe(true);
+    const late = mcp();
+    await ended(late, "done");
+    expect((await store.propose(late, at(2_000 + UNSCOPED_RETRY_JOIN_MS + 1))).created).toBe(true);
   });
 
   it("tells a retry about a No; asks again after an expiry or a change", async () => {
@@ -284,7 +342,7 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
             action_version, action_group, business_key, arguments, status, expires_at)
          VALUES ($1, $2, $3, 'in_app', $4, 'x', 'thread_mark_done', 1, 'ask', $5, '{}', 'pending',
                  now() + interval '1 minute')`,
-        [ORG, PROPERTY, USER, CONVERSATION, operationBusinessKey(asked)],
+        [ORG, PROPERTY, USER, asked.conversationId, operationBusinessKey(asked)],
       ),
     ).rejects.toMatchObject({ code: "23505" });
   });
@@ -306,8 +364,11 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
     });
     expect(joiner).toMatchObject({
       won: false,
-      operation: { id: operation.id, status: "running" },
+      // Only the winner holds the lease token.
+      operation: { id: operation.id, status: "running", leaseOwner: null },
     });
+    expect(winner?.operation.leaseOwner).toMatch(/^task-[ab]:[0-9a-f]{16}$/);
+    expect((await store.find(operation.id))?.leaseOwner).toBeNull();
     expect(await store.start(randomUUID(), A, at(1_000))).toBeNull();
   });
 
@@ -352,12 +413,13 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
     await expect(
       store.finish(operation.id, token, { status: "failed", errorCode: "Not A Code" }, T0),
     ).rejects.toThrow(AiOperationStoreError);
-    // An answer too large to keep is not kept; the change still counts as done.
+    // An answer too large to keep is not kept, also one that only grows too large in the table
+    // (its JSON text gains a space after every comma); the change still counts as done.
     expect(
       await store.finish(
         operation.id,
         token,
-        { status: "done", result: { text: "x".repeat(40_000) } },
+        { status: "done", result: { items: Array.from({ length: 12_000 }, () => 1) } },
         at(3_000),
       ),
     ).toBe(true);
@@ -417,6 +479,19 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
       attempts: MAX_ATTEMPTS,
       leaseOwner: null,
     });
+  });
+
+  it("tells every retry about a run that gave up: nobody knows if it changed something", async () => {
+    const asked = change();
+    const { operation } = await store.propose(asked, T0);
+    await store.start(operation.id, { holder: "task-a", ms: 1 }, T0);
+    for (let attempt = 2; attempt <= MAX_ATTEMPTS + 1; attempt++) {
+      await store.takeOverExpired({ holder: "task-b", ms: 1 }, at(attempt * 10), 500);
+    }
+    expect((await store.find(operation.id))?.errorCode).toBe("gave_up");
+    expect(
+      await store.propose({ ...asked, requestScope: "turn-9" }, at(60 * 60_000)),
+    ).toMatchObject({ created: false, operation: { id: operation.id, errorCode: "gave_up" } });
   });
 
   it("closes changes nobody answered in time", async () => {
