@@ -7,6 +7,9 @@ import {
   createHotelSetupOrdinaryLoginFixture,
   type HotelSetupOrdinaryLoginFixture,
 } from "../../hotelSetupOrdinaryLogin.fixture.js";
+import { createAiProvider } from "../provider/aiProvider.js";
+import { bedrockStream, claudeReply } from "../provider/bedrockStream.fixtures.js";
+import { runAssistantTurn, type AssistantEvent, type AssistantTool } from "./assistantTurn.js";
 import {
   ChatHistoryError,
   type ChatMessage,
@@ -30,7 +33,6 @@ const SONNET = {
 const CONTRACT = requestContract({
   route: SONNET,
   systemPrompt: "You are vayada's assistant.",
-  settings: { effort: "low" },
   tools: [
     { name: "rooms_list", description: "Lists rooms", inputSchema: {}, outputSchema: {} },
     { name: "calendar_days", description: "Reads days", inputSchema: {}, outputSchema: {} },
@@ -40,7 +42,6 @@ const CONTRACT = requestContract({
 const NEW_CONTRACT = requestContract({
   route: SONNET,
   systemPrompt: "You are vayada's assistant. Be brief.",
-  settings: { effort: "low" },
   tools: [],
 });
 
@@ -455,6 +456,90 @@ describe.skipIf(!url)("assistant conversation store on PostgreSQL (VAY-2518)", (
         before: { lastActivityAt: first[0]!.lastActivityAt, id: "x" },
       }),
     ).rejects.toThrow("cursor");
+  });
+
+  it("runs a whole turn on the real provider: what the SDK returned is stored and sent back unchanged", async () => {
+    const replies = [
+      claudeReply(
+        [
+          { type: "thinking", thinking: "Look up the rooms.", signature: "sig-pg-1" },
+          { type: "text", text: "Let me check." },
+          {
+            type: "tool_use",
+            id: "toolu_pg1",
+            name: "rooms_list",
+            input: { propertyId: property },
+          },
+        ],
+        { input_tokens: 500, output_tokens: 40 },
+      ),
+      claudeReply([{ type: "text", text: "You have one room: Deluxe." }], {
+        input_tokens: 40,
+        cache_read_input_tokens: 520,
+        output_tokens: 12,
+      }),
+    ];
+    const sent: { messages: { role: string; content: Record<string, unknown>[] }[] }[] = [];
+    const provider = createAiProvider({
+      enabledProviders: ["bedrock"],
+      budget: {
+        reserve: async () => ({ ok: true, reservationId: "res-pg" }),
+        settle: async () => undefined,
+      },
+      fetch: (async (_url: string | URL | Request, init?: RequestInit) => {
+        sent.push(JSON.parse(String(init?.body)) as (typeof sent)[number]);
+        return bedrockStream(replies.shift()!);
+      }) as typeof globalThis.fetch,
+      awsCredentials: async () => ({ accessKeyId: "AKIAFAKEFAKEFAKEFAKE", secretAccessKey: "x" }),
+    });
+    const tool: AssistantTool = {
+      definition: {
+        name: "rooms_list",
+        description: "Lists the property's rooms.",
+        inputSchema: { type: "object", properties: { propertyId: { type: "string" } } },
+        outputSchema: { type: "object" },
+      },
+      run: async () => ({ ok: true, data: { rooms: [{ name: "Deluxe" }] } }),
+    };
+    const instructions = "You are vayada's assistant for hotel staff.";
+    const events: AssistantEvent[] = [];
+    const end = await runAssistantTurn({
+      store,
+      provider,
+      owner,
+      question: "Which rooms do we have?",
+      instructions,
+      tools: [tool],
+      requestId: "req-pg",
+      emit: (event) => events.push(event),
+    });
+    expect(end).toEqual({ type: "end", status: "done", reason: null });
+    const started = events.find((event) => event.type === "turn");
+    if (started?.type !== "turn") throw new Error("no turn");
+
+    const contract = requestContract({
+      route: SONNET,
+      systemPrompt: instructions,
+      tools: [tool.definition],
+    });
+    const view = await read(started.conversationId, contract);
+    expect(view!.readOnlyReason).toBeNull();
+    expect(view!.turns).toMatchObject([{ status: "done" }]);
+    expect(view!.messages.map((row) => row.message.role)).toEqual([
+      "user",
+      "assistant",
+      "tool",
+      "assistant",
+    ]);
+    expect(JSON.stringify(view!.messages[1]!.message)).toContain("sig-pg-1");
+    // The second request carried the stored thinking and tool call exactly as Claude sent them.
+    const assistant = sent[1]!.messages.find((message) => message.role === "assistant")!;
+    expect(assistant.content[0]).toMatchObject({ type: "thinking", signature: "sig-pg-1" });
+    expect(assistant.content.at(-1)).toMatchObject({
+      type: "tool_use",
+      id: "toolu_pg1",
+      input: { propertyId: property },
+    });
   });
 
   it("deletes a conversation with its turns and messages 30 days after its last activity", async () => {

@@ -23,20 +23,18 @@ const contractOf = (overrides: Partial<Parameters<typeof requestContract>[0]> = 
   requestContract({
     route: SONNET,
     systemPrompt: "You are vayada's assistant.",
-    settings: { effort: "low", maxOutputTokens: 8_000 },
     tools: [tool("rooms_list"), tool("calendar_days")],
     ...overrides,
   });
 
 describe("request contract (VAY-2518)", () => {
-  it("names the provider, model, prompt, settings and every tool in its order", () => {
+  it("names the provider, model, prompt and every tool in its order", () => {
     const { contract, sha256 } = contractOf();
     expect(contract).toMatchObject({
       provider: "bedrock",
       region: "eu-west-1",
       model: "eu.anthropic.claude-sonnet-5-5",
       systemPromptSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
-      settings: { effort: "low", maxOutputTokens: 8_000 },
       serializationVersion: MESSAGE_SERIALIZATION_VERSION,
     });
     expect(contract.tools.map((entry) => entry.name)).toEqual(["rooms_list", "calendar_days"]);
@@ -51,16 +49,12 @@ describe("request contract (VAY-2518)", () => {
     expect(contractOf({ tools: [otherOutput, tool("calendar_days")] }).sha256).toBe(
       contractOf().sha256,
     );
-    expect(contractOf({ settings: { maxOutputTokens: 8_000, effort: "low" } }).sha256).toBe(
-      contractOf().sha256,
-    );
   });
 
   it.each([
     ["another model", { route: { ...SONNET, model: "eu.anthropic.claude-haiku-5-5" } }],
     ["another region", { route: { ...SONNET, region: "eu-central-1" } }],
     ["a changed system prompt", { systemPrompt: "You are vayada's assistant. Be brief." }],
-    ["other settings", { settings: { effort: "medium", maxOutputTokens: 8_000 } }],
     ["the tools in another order", { tools: [tool("calendar_days"), tool("rooms_list")] }],
     ["a tool fewer (a permission change)", { tools: [tool("rooms_list")] }],
     [
