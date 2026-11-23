@@ -1,9 +1,10 @@
-import type { AiActionLogRetentionStore } from "../ai/actionLog/aiActivity.js";
+import type { AiActionLogRetentionStore, AiRetentionBatch } from "../ai/actionLog/aiActivity.js";
 
 /**
  * VAY-2508: deletes AI action log rows after two years and empties Inbox assist results whose
  * 30-day retention passed (design note §7.3); VAY-2518: deletes assistant conversations 30 days
- * after their last activity. Runs every six hours, batch by batch.
+ * after their last activity; VAY-2524: deletes AI changes after 90 days. Runs every six hours,
+ * batch by batch.
  */
 export const AI_ACTION_LOG_RETENTION_BATCH_SIZE = 500;
 export const AI_ACTION_LOG_RETENTION_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -15,10 +16,7 @@ export function startAiActionLogRetentionWorker(options: {
   batchSize?: number;
   now?: () => Date;
   logger: {
-    info(
-      context: { logRows: number; assistResults: number; conversations: number },
-      message: string,
-    ): void;
+    info(context: AiRetentionBatch, message: string): void;
     error(context: { err: unknown }, message: string): void;
   };
 }): { runNow(): Promise<void>; close(): Promise<void> } {
@@ -27,19 +25,25 @@ export function startAiActionLogRetentionWorker(options: {
   let activeRun: Promise<void> | undefined;
   let closing = false;
   const drain = async (cutoff: Date) => {
-    const total = { logRows: 0, assistResults: 0, conversations: 0 };
+    const total: AiRetentionBatch = {
+      logRows: 0,
+      assistResults: 0,
+      conversations: 0,
+      operations: 0,
+    };
     for (;;) {
       const batch = await options.store.purgeExpiredBatch(cutoff, batchSize);
       total.logRows += batch.logRows;
       total.assistResults += batch.assistResults;
       total.conversations += batch.conversations;
-      const full = Math.max(batch.logRows, batch.assistResults, batch.conversations) >= batchSize;
+      total.operations += batch.operations;
+      const full = Math.max(...Object.values(batch)) >= batchSize;
       if (closing || !full) break;
     }
-    if (total.logRows + total.assistResults + total.conversations > 0)
+    if (Object.values(total).some((count) => count > 0))
       options.logger.info(
         total,
-        "Purged expired AI action log rows, Inbox assist results and assistant conversations",
+        "Purged expired AI action log rows, Inbox assist results, assistant conversations and AI changes",
       );
   };
   const runNow = (): Promise<void> => {

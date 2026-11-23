@@ -150,7 +150,8 @@ describe.skipIf(!URL)("PostgreSQL AI action log: activity list and retention", (
     const first = await retention.purgeExpiredBatch(NOW, 1_000);
     expect(first.logRows).toBeGreaterThanOrEqual(1);
     expect(first.assistResults).toBeGreaterThanOrEqual(1);
-    expect(await retention.purgeExpiredBatch(NOW, 1_000)).toEqual({
+    // Other suites' AI changes may expire in the same run (ai_operations has its own suite).
+    expect(await retention.purgeExpiredBatch(NOW, 1_000)).toMatchObject({
       logRows: 0,
       assistResults: 0,
       conversations: 0,

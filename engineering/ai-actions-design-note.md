@@ -436,6 +436,81 @@ running with an expired lease --> resumed by the recovery job (same steps, same 
 - A Yes is refused, and the row closed, when the connection was revoked, the conversation closed
   or an AI kill switch is on.
 
+**Built (VAY-2524 PR1): the record.** `platform.ai_operations` (migration 0553) and its store
+([`apps/api/src/ai/executor/operationStore.ts`](../apps/api/src/ai/executor/operationStore.ts)):
+
+- **Business key:** a hash of the account, property, user, surface, connection or conversation, the
+  action and version, and exactly the JSON of the change's arguments as stored (keys sorted). This
+  one rule covers the per-action keys of plan 3.4.0; an action can get a narrower key when one needs
+  it. Copies sent at once write one row (advisory lock on the key), and at most one row of a key is
+  pending or running (unique index).
+- **Which retries join:** a pending (until it expires) or running change always, from any turn, so
+  one change never has two live cards. A change that ended done, declined, revoked, with AI switched
+  off, or failed after it sent a request or gave up (outcome unknown) is joined only by a retry in
+  the same request scope (the in-app turn: a regenerated step stays in its turn, a new question is a
+  new turn), within 10 minutes of its end (2 minutes without a scope, i.e. MCP), and only if nothing
+  new was asked in its conversation or connection after it ended (its own turn's other changes don't
+  count). So a deliberate repeat (block, release, block again) asks again, and a resumed turn that
+  retries its two answered changes joins both. The cost on MCP: a same-arguments request within 2
+  minutes of a No gets the No back, not a new card. After an expiry or a "changed" close the same
+  request always asks again; a new preview digest (compared only when both sides bring one, so the
+  digest must cover only the preview's content) closes the old card as `changed`.
+- **States** as above, enforced by the table's checks. `start` moves a pending change to running for
+  exactly one caller; every other caller gets the row and joins the run. Each start and take-over
+  gets a new lease token, handed only to the winner or the recovery job, and only that token renews,
+  records a step (request id, key hash, status code: no answer text; a replayed step replaces its
+  record) or finishes, so a stalled worker can't write after a take-over. The recovery job takes over a run whose lease ran out, once, with the same
+  step keys (`op_<id>:<step>`, bound to the action); after 5 attempts it gives up (`failed`,
+  `gave_up`). `failed` otherwise means the change certainly did not happen; an outcome the executor
+  can't be sure of stays running for the recovery job.
+- **Expiry:** 15 minutes, or sooner when the route's own preview expires sooner; the row keeps that
+  preview's digest for the Yes. An answer after the expiry closes the row as `expired`; No, revoke,
+  AI switched off and "changed since" (a stale preview at the Yes) close it with their reason.
+- **Arguments** must be plain JSON for the change's property (no NUL, no broken characters, at most
+  16 KB of JSON text, which stays under the table's 32 KB of `jsonb` text); an answer that can't be
+  kept is dropped and the change still counts as done; database errors are rethrown without the
+  row, so the text never reaches a log. The
+  preconditions travel inside the arguments (the action's expected-version fields); the undo record
+  (VAY-2559) will point to its operation.
+- **Retention:** 90 days (plan 3.6), by the AI retention worker; with the account, the property or the
+  user the rows go at once.
+
+**Built (VAY-2524 PR2): the executor.**
+[`apps/api/src/ai/executor/executor.ts`](../apps/api/src/ai/executor/executor.ts) runs a started
+operation (the Yes's winner, or the recovery job's take-over) and is the only code that mints a
+delegation that writes:
+
+- the delegation is the user's own, resolved again at the run (a member who left, or lost the
+  property, can't change anything), narrowed to the operation's property, on the operation's channel,
+  with `op_<id>` as its tool-call and correlation id;
+- the request is `changeRequest(action, arguments, "op_<id>:<step>")`, so the route sees the key
+  `op_<id>:<step>:<action>` on every attempt. Before it goes out the lease is renewed and a "sent"
+  step (no status yet) is recorded; the lease is renewed while the request runs, and the executor
+  stops waiting before the lease could run out (the run stays running);
+- the route's answer decides the outcome. 2xx is `done` with the action's allow-listed answer. A
+  run with no recorded "sent" step never sent anything (a first attempt, or a take-over of a worker
+  that died before sending): it fails on the route's refusal (another 4xx, e.g.
+  `thread_version_conflict` after a person's edit), or before any request on an unknown action
+  (`unknown_action`), arguments that no longer fit (`invalid_input`) or a user who is no longer
+  allowed (`not_allowed`). A 5xx, a 429, a thrown request, a timeout or a
+  "try again / key already used" code (`busy_try_again`, `command_in_progress`,
+  `idempotency_conflict`, `idempotency_key_conflict`) leaves the run running for the recovery job,
+  which sends the same key again. Once a request may have gone out, only the route's success ends
+  the run: "failed" always means the change certainly did not happen, and a run that never gets a
+  success gives up after 5 attempts (`gave_up`, outcome unknown);
+- every request writes one `ai_tool_calls` row with the operation id, `op_<id>` as correlation id,
+  the key's hash (the same hash as the route's `platform.idempotency_keys` row) and, when done, the
+  records it touched, typed as the routes' own audit rows type them (`message_thread`,
+  `physical_room_unit`, `room_block`, `booking_note_private`; from the path, or from the answer where
+  the path names none). The route's own audit row carries `op_<id>` as correlation id and the logged
+  request id as causation.
+
+The recovery job (`recoveryWorker.ts`) closes unanswered changes and takes over expired runs, one
+at a time, every 30 seconds; the API wires it with the answer endpoint (PR 3), which also checks who
+answers, the kill switch and a revoked connection before it calls `startAndRun`. One known limit: the inbox routes answer
+any command error with a 500, so a rare refusal inside the command's own transaction is retried until
+the run gives up (`gave_up`, outcome unknown) instead of failing at once.
+
 ### 4.7 Ask first: the Yes/No
 
 The card is rendered by vayada from the stored operation: what will happen, to whom, the exact
@@ -589,6 +664,42 @@ Two things to know when doing this (VAY-2522):
   `lockMemberPermissions` (booking page publish,
   [`bookingPublicationCommandRepository.ts:346`](../apps/api/src/domains/bookingPublicationCommandRepository.ts#L346));
   and `lockPmsManageScope` (closures, operating calendar).
+
+**Built (VAY-2522 PR3): change actions.** `defineChangeAction`
+([`apps/api/src/ai/actions/defineChangeAction.ts`](../apps/api/src/ai/actions/defineChangeAction.ts))
+makes one change from one write route on one property (`:propertyId` is required, so an account-wide
+write can not escape a delegation narrowed to fewer properties). Beside the read fields it declares:
+
+- `body`: what the AI may send; the AI's input is one strict object of path parameters and these
+  body fields, so the route's other fields (a room's number on the room update) stay out of reach;
+- `idempotency`: where the route reads its retry key, the `Idempotency-Key` header or body fields
+  (notes and room blocks take `commandId` and `idempotencyKey`); the executor fills it, bound to the
+  action (`<key>:<action name>`), and the AI can never send it;
+- `preconditions`: body fields the route compares with the current state (expected versions); only
+  a POST declared `addsNew` (a note, a new block) has none. No read action returns these versions
+  yet: VAY-2524 decides who fills them (captured when the Ask-first card is shown, so the person's
+  Yes binds to what they saw) and, if the executor does, takes them out of the AI's input before any
+  surface offers a change; the reads that expose them come with their batch;
+- `authoritySites`: every rights check inside the transaction, from
+  [`authoritySites.ts`](../apps/api/src/ai/actions/authoritySites.ts); only checks that already take
+  the AI's limits may be listed, so a change through any other can not be registered;
+- `permission` and `alsoNeeds`: every key the route checks;
+- `group: "ask"`: every AI change asks first until Undo exists (plan row 39).
+
+`changeRequest(action, input, key)` builds the one request a change makes; the executor (VAY-2524)
+sends it with the user's change delegation. On the server, the delegation gate lets an AI write
+reach only a change's route, and the app then holds every delegated write to that change before the
+route runs (`delegatedWriteProblem`, a `preValidation` hook): no query, no field the change does not
+let the AI send, the retry key bound to the change and, for body keys, the request's own. One route
+has at most one change.
+
+The first batch (plan row 50): `booking_note_add`, `room_block_create`, `room_block_release`,
+`room_status_set`, `thread_mark_done`, `thread_follow_up`, `thread_reopen`. No surface offers them
+until the executor exists (the registry refuses one), and only the executor can mint a delegation
+that writes. `changeSafety.test.ts` runs each through its real route and the default gate: the owner's
+change delegation runs it with the AI's limits reaching the command's own check; a read delegation, a
+property outside the delegation, an assigned-only member on another property, another account, a user
+without one of the route's keys and a request that is not exactly the change are refused.
 
 ### 5.5 MCP connections
 
