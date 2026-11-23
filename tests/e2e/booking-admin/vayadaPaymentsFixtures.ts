@@ -8,6 +8,104 @@ import {
 } from "../support/bookingAdminMocks";
 
 const PAYOUT_PATH = `/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/payout-destination`;
+/** The statement route as mocked (unroute with this same pattern). */
+export const PAYOUT_STATEMENT_ROUTE = `**/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/payout-statement`;
+
+/** A hotel's payout statement (VAY-2584): made-up money, as the design shows it. */
+export const PAYOUT_STATEMENT = {
+  totals: [
+    {
+      currency: "IDR",
+      nextPayout: {
+        on: "2026-11-30",
+        cutoff: "2026-11-29",
+        amountMinor: "1845000000",
+        balanceMinor: "1845000000",
+      },
+      upcomingMinor: "720000000",
+      paidOutMinor: "3410000000",
+      firstPaidOn: "2026-11-02",
+    },
+  ],
+  account: { accountLast4: "6789", countryCode: "ID" },
+  payouts: [
+    { ...payout("p30", "300000000", "6789", "2026-11-25", "sending"), paidOn: null },
+    payout("p23", "912000000", "6789", "2026-11-23", "sent"),
+    payout("p16", "1240000000", "6789", "2026-11-16", "sent"),
+    { ...payout("p9", "800000000", "1102", "2026-11-09", "returned"), returnedOn: "2026-11-12" },
+    payout("p2", "1258000000", "1102", "2026-11-02", "sent"),
+  ],
+  lines: [
+    line("charge", "320000000", "44800000", "2026-11-24", "VAY-7KQ2C", "2026-11-28", {
+      fees: { planMinor: "25600000", vayadaMinor: "19200000", vayadaPercent: 6 },
+    }),
+    line("payout", "-912000000", "0", "2026-11-23", null, null, { payoutId: "p23" }),
+    line("refund", "-150000000", "-12000000", "2026-11-22", "VAY-5MX9P", "2026-11-25"),
+    line("dispute", "-240000000", "40500000", "2026-11-21", "VAY-3HD4K", "2026-11-19"),
+    line("dispute_fee", "0", "40500000", "2026-11-20", "VAY-1QZ8M", "2026-11-09"),
+    line("dispute_reversal", "175000000", "0", "2026-11-15", "VAY-8WE2T", "2026-11-03"),
+    line("payout_returned", "800000000", "0", "2026-11-12", null, null, { payoutId: "p9" }),
+  ],
+};
+
+function payout(
+  id: string,
+  amountMinor: string,
+  accountLast4: string,
+  day: string,
+  status: string,
+) {
+  return {
+    id,
+    currency: "IDR",
+    amountMinor,
+    accountLast4,
+    startedOn: day,
+    paidOn: day,
+    returnedOn: null,
+    status,
+  };
+}
+
+function line(
+  kind: string,
+  grossMinor: string,
+  feeMinor: string,
+  day: string,
+  bookingReference: string | null,
+  checkOut: string | null,
+  extra: Record<string, unknown> = {},
+) {
+  return {
+    id: `${kind}-${day}`,
+    kind,
+    currency: "IDR",
+    grossMinor,
+    feeMinor,
+    netMinor: String(BigInt(grossMinor) - BigInt(feeMinor)),
+    bookingReference,
+    checkOut,
+    occurredAt: `${day}T08:00:00Z`,
+    fees: null,
+    payoutId: null,
+    ...extra,
+  };
+}
+
+/** The statement route: a statement, or a refusal (403 not the owner, 404 no vayada Payment). */
+export async function mockPayoutStatement(
+  page: Page,
+  answer: typeof PAYOUT_STATEMENT | 403 | 404 = PAYOUT_STATEMENT,
+) {
+  await page.route(PAYOUT_STATEMENT_ROUTE, (route) =>
+    typeof answer === "number"
+      ? route.fulfill({
+          status: answer,
+          json: { code: answer === 403 ? "missing_permission" : "not_found" },
+        })
+      : route.fulfill({ json: answer }),
+  );
+}
 
 /** Payments with vayada Payment chosen for card (VAY-2442 P6). */
 export async function mockVayadaPayments(
@@ -18,6 +116,8 @@ export async function mockVayadaPayments(
     stopped?: boolean;
     provider?: "stripe" | "vayada";
     destination?: Record<string, unknown> | null;
+    /** The owner's statement behind the Payments link (VAY-2584); none by default. */
+    statement?: typeof PAYOUT_STATEMENT;
   },
 ) {
   await mockBookingAdminAuthenticatedSession(page);
@@ -82,6 +182,7 @@ export async function mockVayadaPayments(
     }
     await route.fulfill({ json: { destination } });
   });
+  await mockPayoutStatement(page, options.statement ?? 404);
   // Payout account writes, and the page's payment-settings saves.
   return { writes, settingsWrites };
 }

@@ -13,6 +13,7 @@ import {
 import {
   checkRedirectUri,
   parsePartnerAppRegistrationArgs,
+  refuseWebhookUntilSigning,
 } from "../platform/partnerAppRegistration.js";
 import { basicCredentials, bearerToken, registerPartnerApiRoutes } from "./partnerApi.js";
 
@@ -306,9 +307,49 @@ describe("partner app registration (VAY-2436)", () => {
       webhookUrl: "https://partner.example/hooks",
       contactEmail: null,
       termsVersion: "partner-contract-2026-10-31",
-      secretFile: null,
+      secretName: null,
       apply: true,
     });
+    expect(
+      parsePartnerAppRegistrationArgs([
+        "--name",
+        "Creator Links",
+        "--redirect-uri",
+        "http://localhost:3000/admin/connect/vayada",
+        "--redirect-uri",
+        "http://localhost:3000/hotel/connect/vayada",
+        "--secret-name",
+        "partner-apps/prod/creator-links-test",
+      ]),
+    ).toMatchObject({
+      redirectUris: [
+        "http://localhost:3000/admin/connect/vayada",
+        "http://localhost:3000/hotel/connect/vayada",
+      ],
+      secretName: "partner-apps/prod/creator-links-test",
+      apply: false,
+    });
+    for (const secretName of [
+      "creator-links",
+      "partner-apps/creator-links",
+      "other/prod/x",
+      "partner-apps/prod/X",
+    ])
+      expect(() =>
+        parsePartnerAppRegistrationArgs([
+          "--name",
+          "X",
+          "--redirect-uri",
+          "https://a.example/cb",
+          "--secret-name",
+          secretName,
+        ]),
+      ).toThrow(/--secret-name/);
+    // Until VAY-2438 derives the webhook signing secret, an app can't be registered with a webhook.
+    expect(() =>
+      refuseWebhookUntilSigning({ webhookUrl: "https://partner.example/hooks" }),
+    ).toThrow(/VAY-2438/);
+    expect(() => refuseWebhookUntilSigning({ webhookUrl: null })).not.toThrow();
     expect(checkRedirectUri("http://localhost:3000/callback")).toBe(true);
     expect(checkRedirectUri("http://partner.example/callback")).toBe(false);
     expect(checkRedirectUri("https://partner.example/callback#x")).toBe(false);
