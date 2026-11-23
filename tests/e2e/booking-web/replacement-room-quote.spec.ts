@@ -350,7 +350,6 @@ test("shows checkout in the guest's currency with cents, and the charged amount 
   await page.screenshot({ path: testInfo.outputPath("checkout-usd-1280.png"), fullPage: true });
 
   // In the hotel's own currency there's nothing to convert: no info line, no credit.
-  const nav = page.locator("nav");
   await nav.getByRole("button", { name: "USD", exact: true }).click();
   await nav.getByRole("button", { name: "€ Euro" }).click();
   await expect(orderTotal(page)).toHaveText("€315");

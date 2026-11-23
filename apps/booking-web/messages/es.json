@@ -841,8 +841,8 @@
       "pay_at_property": {
         "title": "Pagar en el hotel",
         "summary": "Nada que pagar ahora · pago al llegar",
-        "explain": "No se cobra nada ahora. Pagas {total} en el hotel al llegar. Tu reserva queda confirmada al momento.",
-        "explainRequest": "No se cobra nada ahora. Si el hotel acepta tu solicitud, pagas {total} al llegar. El hotel responde en 24 horas.",
+        "explain": "No se cobra nada ahora. Pagas en el hotel al llegar. Tu reserva queda confirmada al momento.",
+        "explainRequest": "No se cobra nada ahora. Si el hotel acepta tu solicitud, pagas al llegar. El hotel responde en 24 horas.",
         "boxNow": "A pagar ahora",
         "boxLater": "En el hotel",
         "phrase": "en el hotel"
@@ -851,10 +851,10 @@
         "title": "Pagar con tarjeta",
         "summary": "Se cobra al reservar",
         "summaryRequest": "Se cobra solo si el hotel acepta",
-        "explain": "Cargamos {now} en tu tarjeta cuando confirmes. Introduces los datos de la tarjeta en el siguiente paso.",
-        "explainSplit": "Cargamos {now} en tu tarjeta cuando confirmes y pagas el resto, {later}, en el hotel. Introduces los datos de la tarjeta en el siguiente paso.",
-        "explainRequest": "Retenemos {now} en tu tarjeta. Si el hotel rechaza o no responde en 24 horas, la retención se libera. Introduces los datos de la tarjeta en el siguiente paso.",
-        "explainRequestSplit": "Retenemos {now} en tu tarjeta y pagas el resto, {later}, en el hotel. Si el hotel rechaza o no responde en 24 horas, la retención se libera. Introduces los datos de la tarjeta en el siguiente paso.",
+        "explain": "Cargamos el total en tu tarjeta cuando confirmes. Introduces los datos de la tarjeta en el siguiente paso.",
+        "explainSplit": "Cargamos en tu tarjeta el importe que se paga ahora cuando confirmes y pagas el resto en el hotel. Introduces los datos de la tarjeta en el siguiente paso.",
+        "explainRequest": "Retenemos el total en tu tarjeta. Si el hotel rechaza o no responde en 24 horas, la retención se libera. Introduces los datos de la tarjeta en el siguiente paso.",
+        "explainRequestSplit": "Retenemos en tu tarjeta el importe que se paga ahora y pagas el resto en el hotel. Si el hotel rechaza o no responde en 24 horas, la retención se libera. Introduces los datos de la tarjeta en el siguiente paso.",
         "boxNow": "Cargo ahora",
         "boxHold": "Retención ahora",
         "boxCharged": "Cargo",
@@ -904,7 +904,8 @@
       "continueShort": "Continuar",
       "priceDetails": "Detalles del precio",
       "taxes": "Impuestos y cargos",
-      "included": "Incluidos"
+      "included": "Incluidos",
+      "chargedIn": "El hotel cobra en {currency}: <b>{amount}</b>. Los {shown} que se muestran usan el tipo de cambio de hoy."
     },
     "checkingPrice": "Comprobando el precio…",
     "busyConfirm": "Confirmando la reserva…",

@@ -3,6 +3,7 @@
 import { useId, useState } from "react";
 import { useTranslations } from "next-intl";
 import FindBookingModal from "@/components/booking/FindBookingModal";
+import { useCurrency } from "@/contexts/CurrencyContext";
 import { useHotel } from "@/contexts/HotelContext";
 import { openAnalyticsChoices } from "@/services/api/analyticsConsent";
 
@@ -17,6 +18,9 @@ export default function CheckoutFooter() {
   const ta = useTranslations("analyticsConsent");
   const [findBookingOpen, setFindBookingOpen] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
+  // VAY-2588: checkout shows converted prices, so the rates' provider is credited here too.
+  const { attribution, selectedCurrency, baseCurrency } = useCurrency();
+  const credit = attribution && selectedCurrency !== baseCurrency ? attribution : null;
   const contactId = useId();
   const { phone, whatsapp, email } = hotel.contact;
   // The stay's own contacts, as the full footer shows them, linked as the Contact menu links them
@@ -61,6 +65,11 @@ export default function CheckoutFooter() {
         >
           {ta("settings")}
         </button>
+        {credit && (
+          <a href={credit.url} target="_blank" rel="noopener noreferrer" className={link}>
+            {credit.label}
+          </a>
+        )}
       </div>
       {contactOpen && (
         <ul id={contactId} className="mt-3 space-y-1 text-[15px]">

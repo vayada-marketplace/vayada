@@ -841,8 +841,8 @@
       "pay_at_property": {
         "title": "Bayar di hotel",
         "summary": "Tidak ada pembayaran sekarang · bayar saat tiba",
-        "explain": "Tidak ada biaya yang ditagih sekarang. Anda membayar {total} di hotel saat tiba. Pemesanan Anda langsung dikonfirmasi.",
-        "explainRequest": "Tidak ada biaya sekarang. Jika hotel menerima permintaan Anda, Anda membayar {total} saat tiba. Hotel menjawab dalam 24 jam.",
+        "explain": "Tidak ada biaya yang ditagih sekarang. Anda membayar di hotel saat tiba. Pemesanan Anda langsung dikonfirmasi.",
+        "explainRequest": "Tidak ada biaya sekarang. Jika hotel menerima permintaan Anda, Anda membayar saat tiba. Hotel menjawab dalam 24 jam.",
         "boxNow": "Bayar sekarang",
         "boxLater": "Di hotel",
         "phrase": "di hotel"
@@ -851,10 +851,10 @@
         "title": "Bayar dengan kartu",
         "summary": "Ditagih saat memesan",
         "summaryRequest": "Ditagih hanya jika hotel menerima",
-        "explain": "Kami menagih {now} ke kartu Anda saat Anda mengonfirmasi. Anda memasukkan data kartu di langkah berikutnya.",
-        "explainSplit": "Kami menagih {now} ke kartu Anda saat Anda mengonfirmasi dan sisanya, {later}, Anda bayar di hotel. Anda memasukkan data kartu di langkah berikutnya.",
-        "explainRequest": "Kami menahan {now} di kartu Anda. Jika hotel menolak atau tidak menjawab dalam 24 jam, penahanan dilepas. Anda memasukkan data kartu di langkah berikutnya.",
-        "explainRequestSplit": "Kami menahan {now} di kartu Anda dan sisanya, {later}, Anda bayar di hotel. Jika hotel menolak atau tidak menjawab dalam 24 jam, penahanan dilepas. Anda memasukkan data kartu di langkah berikutnya.",
+        "explain": "Kami menagih total ke kartu Anda saat Anda mengonfirmasi. Anda memasukkan data kartu di langkah berikutnya.",
+        "explainSplit": "Kami menagih jumlah yang jatuh tempo sekarang ke kartu Anda saat Anda mengonfirmasi dan sisanya Anda bayar di hotel. Anda memasukkan data kartu di langkah berikutnya.",
+        "explainRequest": "Kami menahan total di kartu Anda. Jika hotel menolak atau tidak menjawab dalam 24 jam, penahanan dilepas. Anda memasukkan data kartu di langkah berikutnya.",
+        "explainRequestSplit": "Kami menahan jumlah yang jatuh tempo sekarang di kartu Anda dan sisanya Anda bayar di hotel. Jika hotel menolak atau tidak menjawab dalam 24 jam, penahanan dilepas. Anda memasukkan data kartu di langkah berikutnya.",
         "boxNow": "Ditagih sekarang",
         "boxHold": "Ditahan sekarang",
         "boxCharged": "Ditagih",
@@ -904,7 +904,8 @@
       "continueShort": "Lanjut",
       "priceDetails": "Rincian harga",
       "taxes": "Pajak & biaya",
-      "included": "Termasuk"
+      "included": "Termasuk",
+      "chargedIn": "Hotel menagih dalam {currency}: <b>{amount}</b>. {shown} yang ditampilkan memakai kurs hari ini."
     },
     "checkingPrice": "Memeriksa harga…",
     "busyConfirm": "Mengonfirmasi pemesanan…",

@@ -9,8 +9,10 @@ import {
   type PublicBookingQuote,
   type PublicQuoteGuestDisclosure,
 } from "@vayada/domain-booking/replacement-pricing";
+import { useCurrency } from "@/contexts/CurrencyContext";
 import { serverNow } from "@/lib/serverClock";
 import { resolveLocale } from "@/lib/utils";
+import { quoteMoneyAmount } from "@/services/api/replacementOffers";
 
 /** One booked room as the guest knows it: its name, plain choice name, photo and guests. */
 export type SummaryRoom = {
@@ -162,6 +164,19 @@ export default function StaySummary({
   const timeLeft = useTimeLeft(quote?.expiresAt);
   const currency = quote?.currency ?? "";
   const money = (minor: bigint | string) => formatMoney(String(minor), currency);
+  // VAY-2588 (Timo's board): shown in the guest's currency, the price names the charged amount
+  // once, at the summary's end.
+  const { converts, chargedPrice } = useCurrency();
+  const charged =
+    quote && converts(currency)
+      ? {
+          currency:
+            new Intl.DisplayNames([resolveLocale(locale)], { type: "currency" }).of(currency) ??
+            currency,
+          amount: chargedPrice(quoteMoneyAmount(quote.totalMinor, currency), currency),
+          shown: money(quote.totalMinor),
+        }
+      : null;
   const day = (date: string) =>
     /^\d{4}-\d{2}-\d{2}$/.test(date)
       ? new Date(`${date}T00:00:00Z`).toLocaleDateString(resolveLocale(locale), {
@@ -438,9 +453,10 @@ export default function StaySummary({
           )}
           {charges.length > 0 && <Row label={t("stay.fees")} value={money(sum(charges))} />}
           {discount > BigInt(0) && <Row label={t("stay.discount")} value={`−${money(discount)}`} />}
-          {/* The sheet says it as a line; with fees of their own, the line under the total does. */}
-          {sheet && quote && !charges.length && (
-            <div className="flex justify-between gap-4 text-[15px] text-gray-600 lg:hidden">
+          {/* Taxes and fees are a line (VAY-2588, Timo's board); with fees of their own, the line
+              under the total says so. */}
+          {quote && !charges.length && (
+            <div className="flex justify-between gap-4 text-[15px] text-gray-600">
               <span>{t("stay.taxes")}</span>
               <span>{t("stay.included")}</span>
             </div>
@@ -498,9 +514,9 @@ export default function StaySummary({
                 {icon(open ? "M19 9l-7 7-7-7" : "M5 15l7-7 7 7", "")}
               </button>
             )}
-            {quote && (
+            {quote && charges.length > 0 && (
               <p
-                className={`ml-auto text-right text-[13px] text-gray-500 ${row || (sheet && !charges.length) ? "max-lg:hidden" : ""}`}
+                className={`ml-auto text-right text-[13px] text-gray-500 ${row ? "max-lg:hidden" : ""}`}
               >
                 {t("stay.includes")}
               </p>
@@ -556,6 +572,20 @@ export default function StaySummary({
           >
             {icon("M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z", "")}
             {ranOut ? t("stay.expired") : t("stay.hold", { time: timeLeft! })}
+          </p>
+        )}
+        {charged && (
+          <p
+            data-testid="charged-currency"
+            className={`${hidden} flex items-start gap-2 border-t border-gray-200 pt-3 text-xs leading-5 text-gray-500`}
+          >
+            {icon("M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z", "mt-0.5")}
+            <span>
+              {t.rich("stay.chargedIn", {
+                ...charged,
+                b: (chunks) => <strong className="font-semibold text-gray-900">{chunks}</strong>,
+              })}
+            </span>
           </p>
         )}
       </div>

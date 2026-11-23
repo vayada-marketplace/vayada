@@ -77,7 +77,6 @@ import {
   noWayToPayReason,
   type BookingPagePayment,
 } from "@/services/api/bookingPagePaymentMethods";
-import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useAgencyPage, useHotel, useSlug, useStayPath } from "@/contexts/HotelContext";
 import { choiceKeys, choiceText, hotelToday } from "@/lib/roomChoices";
@@ -451,10 +450,11 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     slug,
     noWayToPay || guestProblems ? null : request,
   );
-  const { formatPrice } = useCurrency();
-  // The old pages' prices: the charged currency ("€410"), then any approximation.
+  const { displayExact } = useCurrency();
+  // VAY-2588: checkout's amounts in the guest's currency only, exactly ("US$346.50"); the
+  // summary's last line names the charged amount once.
   const money = (minor: string, currency: string) =>
-    formatPrice(quoteMoneyAmount(minor, currency), currency);
+    displayExact(quoteMoneyAmount(minor, currency), currency);
   // An updated price for the same choices that differs from the one the guest saw says so.
   const requestIdentity = JSON.stringify(request);
   const shownQuote = useRef<{
@@ -1631,7 +1631,6 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 )
               }
             />
-            {summaryQuote && <ApproximateAmountsNote currency={summaryQuote.currency} />}
           </CheckoutColumns>
         )}
       </div>

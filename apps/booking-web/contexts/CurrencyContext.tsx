@@ -32,6 +32,13 @@ interface CurrencyContextValue {
   /** VAY-2588: the room list's price, in the guest's currency only: converted ones in whole units
    * (for display; the charge stays in the hotel's currency), its own currency exactly. */
   displayPrice: (amount: number, fromCurrency: string) => string;
+  /** VAY-2588: checkout's amounts, in the guest's currency only: converted ones exactly, with that
+   * currency's cents; the hotel's own currency exactly. */
+  displayExact: (amount: number, fromCurrency: string) => string;
+  /** Whether amounts in this currency are shown converted into the guest's currency. */
+  converts: (fromCurrency: string) => boolean;
+  /** The amount as charged, in its own currency, with cents only when it has them. */
+  chargedPrice: (amount: number, currency: string) => string;
 }
 
 const CurrencyContext = createContext<CurrencyContextValue>({
@@ -46,6 +53,9 @@ const CurrencyContext = createContext<CurrencyContextValue>({
   approximate: () => null,
   formatPrice: (amount) => String(amount),
   displayPrice: (amount) => String(amount),
+  displayExact: (amount) => String(amount),
+  converts: () => false,
+  chargedPrice: (amount) => String(amount),
 });
 
 const STORAGE_KEY_PREFIX = "vayada-selected-currency";
@@ -199,21 +209,41 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     [approximate],
   );
 
+  const converts = useCallback(
+    (fromCurrency: string): boolean =>
+      fromCurrency !== selectedCurrency &&
+      (fromCurrency === baseCurrency || rates[fromCurrency] > 0),
+    [selectedCurrency, baseCurrency, rates],
+  );
+  const chargedPrice = useCallback((amount: number, currency: string): string => {
+    const digits = Number.isInteger(amount) ? 0 : 2;
+    return new Intl.NumberFormat("en-GB", {
+      style: "currency",
+      currency,
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    }).format(amount);
+  }, []);
   const displayPrice = useCallback(
-    (amount: number, fromCurrency: string): string => {
-      const converted =
-        fromCurrency !== selectedCurrency &&
-        (fromCurrency === baseCurrency || rates[fromCurrency] > 0);
-      const value = converted ? convertPrice(amount, fromCurrency) : amount;
-      const digits = converted || Number.isInteger(value) ? 0 : 2;
-      return new Intl.NumberFormat("en-GB", {
-        style: "currency",
-        currency: converted ? selectedCurrency : fromCurrency,
-        minimumFractionDigits: digits,
-        maximumFractionDigits: digits,
-      }).format(value);
-    },
-    [convertPrice, selectedCurrency, baseCurrency, rates],
+    (amount: number, fromCurrency: string): string =>
+      converts(fromCurrency)
+        ? new Intl.NumberFormat("en-GB", {
+            style: "currency",
+            currency: selectedCurrency,
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0,
+          }).format(convertPrice(amount, fromCurrency))
+        : chargedPrice(amount, fromCurrency),
+    [converts, convertPrice, chargedPrice, selectedCurrency],
+  );
+  const displayExact = useCallback(
+    (amount: number, fromCurrency: string): string =>
+      converts(fromCurrency)
+        ? new Intl.NumberFormat("en-GB", { style: "currency", currency: selectedCurrency }).format(
+            convertPrice(amount, fromCurrency),
+          )
+        : chargedPrice(amount, fromCurrency),
+    [converts, convertPrice, chargedPrice, selectedCurrency],
   );
 
   return (
@@ -230,6 +260,9 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
         approximate,
         formatPrice,
         displayPrice,
+        displayExact,
+        converts,
+        chargedPrice,
       }}
     >
       {children}

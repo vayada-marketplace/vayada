@@ -151,12 +151,12 @@ export default function BookShell({
       {details ? (
         <>
           <div className="max-lg:hidden">
-            <BookingFooter />
+            <BookingFooter rateCredit />
           </div>
           <CheckoutFooter />
         </>
       ) : (
-        <BookingFooter />
+        <BookingFooter rateCredit />
       )}
     </div>
   );
