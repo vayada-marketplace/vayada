@@ -5,6 +5,7 @@ import ts from "typescript";
 import { SUPPORTED_LANGUAGES } from "./languages";
 import { SEARCH_ENTRIES } from "../../components/layout/navigationSearchEntries";
 import { nearbyPlacesEnglish } from "@vayada/product-onboarding/nearbyPlacesMessages";
+import { locationChangeConfirmEnglish } from "@vayada/product-onboarding/LocationChangeConfirmDialog";
 import en from "../../messages/en.json";
 
 const root = resolve(import.meta.dirname, "../../..");
@@ -65,6 +66,16 @@ describe("admin translation catalogs", () => {
       expect((en as Record<string, string>)[key], key).toBe(text);
   });
 
+  it("asks a live hotel's location question as the PMS does, pointing to the PMS calendar (VAY-2586)", () => {
+    for (const [key, text] of Object.entries(locationChangeConfirmEnglish))
+      expect((en as Record<string, string>)[key], key).toBe(
+        // Booking Admin has no Settings › Calendar: the calendar is saved in the PMS.
+        key === "locationConfirm.pausesBookingPage"
+          ? text.replace("Settings › Calendar", "PMS → Settings → Calendar")
+          : text,
+      );
+  });
+
   it("covers literal translation keys in active admin and shared components", () => {
     const files: string[] = [];
     function walk(dir: string) {
@@ -87,6 +98,7 @@ describe("admin translation catalogs", () => {
       "product-onboarding/src/NearbyPlacesEditor.tsx",
       "product-onboarding/src/NearbyPlacesMap.tsx",
       "product-onboarding/src/NearbyAreaSearch.tsx",
+      "product-onboarding/src/LocationChangeConfirmDialog.tsx",
     ]) {
       files.push(resolve(root, "../packages", file));
     }

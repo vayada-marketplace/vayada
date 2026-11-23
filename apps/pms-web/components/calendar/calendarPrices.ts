@@ -94,7 +94,7 @@ export function stayTotals(
     .sort(byPrice);
 }
 
-/** The calendar's rates by name, as the Prices tab words them ("Free cancellation", "Non-refundable"): from each
+/** The calendar's rates by name, as the Prices tab words them ("Flexible rate", "Non-refundable"): from each
  * rate's meal plan and cancellation terms. A rate without readable terms is left out. */
 export function calendarRateNames(
   room: PricingConfiguration,

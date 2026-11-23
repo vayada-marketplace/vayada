@@ -143,7 +143,8 @@ for (const width of [1440, 390]) {
     await expect(choices.nth(0)).toContainText("€268");
     await expect(choices.nth(0)).toContainText("€134 / per night");
     await expect(choices.nth(0)).toHaveAttribute("aria-pressed", "true");
-    await expect(choices.nth(1)).toContainText("Free cancellation");
+    // VAY-2587: the Flexible rate goes by the PMS's name, its deadline under it.
+    await expect(choices.nth(1)).toContainText("Flexible rate");
     await expect(choices.nth(1)).toContainText(/Free cancellation until 3 Nov/);
     await expect(choices.nth(2)).toContainText("Breakfast included");
     await expect(choices.nth(2)).toContainText("Breakfast every morning");
@@ -223,7 +224,7 @@ for (const width of [1440, 390]) {
 }
 
 for (const width of [1440, 390]) {
-  test(`names free cancellation non-refundable once its last day has passed at ${width}px (VAY-2392)`, async ({
+  test(`keeps the Flexible rate's name once its free cancellation has passed at ${width}px (VAY-2587)`, async ({
     page,
   }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
@@ -237,28 +238,36 @@ for (const width of [1440, 390]) {
       { slug: SEEDED_BOOKING_SLUG, version: CONSENT },
     );
     await mockBookingApis(page);
-    // The Garden Suite's one choice is free cancellation until 3 days before arrival.
+    // The Garden Suite's one choice is the Flexible rate, free until 3 days before arrival.
     await mockRooms(page, undefined, { kind: "free_until_days_before_arrival", days: 3 });
+    await mockAnyPrice(page);
     // 4 Nov: for a stay from 6 Nov, free cancellation ended with 3 Nov.
     await page.clock.setFixedTime(new Date("2026-11-04T08:00:00Z"));
     await page.goto(STAY);
 
-    // Free cancellation now has the same terms as non-refundable at a higher price: only the
-    // cheaper one shows, with its saving.
-    const deluxe = page.getByTestId("room-card-deluxe").locator("[data-offer-key]");
+    // With both rates on, the Flexible rate now has the same terms as the Non-refundable one at a
+    // higher price: only the cheaper one shows, with its saving, and only it says "Non-refundable".
+    const deluxeCard = page.getByTestId("room-card-deluxe");
+    const deluxe = deluxeCard.locator("[data-offer-key]");
     await expect(deluxe).toHaveCount(2);
     await expect(deluxe.nth(0)).toContainText("Non-refundable");
     await expect(deluxe.nth(0)).toContainText("-10% OFF");
-    await expect(deluxe.nth(1)).toContainText("Breakfast included, non-refundable");
+    await expect(deluxe.nth(1)).toContainText("Breakfast included");
     await expect(deluxe.nth(1)).toContainText(
-      "Free cancellation ends 3 days before arrival. For these dates, no refund if you cancel or don't arrive",
+      "Breakfast every morning · No free cancellation for these dates",
     );
+    await expect(deluxe.nth(1)).not.toContainText(/non-refundable/i);
     await expect(deluxe.nth(1)).not.toContainText("OFF");
-    // A room whose one choice is free cancellation reads non-refundable, never "Room only".
-    const garden = page.getByTestId("room-card-garden").locator("[data-offer-key]");
+    await expect(deluxe.filter({ hasText: /non-refundable/i })).toHaveCount(1);
+    // VAY-2587: a hotel with only the Flexible rate still shows it as the Flexible rate, with a
+    // short note, never as "Non-refundable" or "Room only".
+    const gardenCard = page.getByTestId("room-card-garden");
+    const garden = gardenCard.locator("[data-offer-key]");
     await expect(garden).toHaveCount(1);
-    await expect(garden).toContainText("Non-refundable");
-    await expect(garden).toContainText("Free cancellation ends 3 days before arrival.");
+    await expect(garden).toContainText("Flexible rate");
+    await expect(garden).toContainText("No free cancellation for these dates");
+    await expect(garden).not.toContainText(/non-refundable/i);
+    await expect(garden).not.toContainText("For these dates, no refund");
     await expect(garden).not.toContainText("Room only");
     await expect(garden).not.toContainText("OFF");
     await page.screenshot({
@@ -266,10 +275,17 @@ for (const width of [1440, 390]) {
       fullPage: true,
       animations: "disabled",
     });
+
+    // Checkout's summary names it the same.
+    await page.getByTestId("select-rate-garden").click();
+    await expect(page).toHaveURL(/\/(en\/)?book\?/);
+    const summary = page.getByRole("complementary", { name: "Your stay" });
+    await expect(summary).toContainText(/Flexible rate · 2 adults/i);
+    await expect(summary).not.toContainText(/Non-refundable · 2 adults/i);
     await assertHealthy();
   });
 
-  test(`names a partial refund non-refundable once its last refund day has passed at ${width}px (VAY-2406)`, async ({
+  test(`keeps a partial refund's name once its last refund day has passed at ${width}px (VAY-2587)`, async ({
     page,
   }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
@@ -300,14 +316,12 @@ for (const width of [1440, 390]) {
     await expect(deluxe.nth(1)).toContainText("Breakfast included");
     await expect(deluxe.nth(1)).toContainText("Free cancellation until 3 Nov");
     await expect(page.getByTestId("room-card-deluxe")).not.toContainText("Partial refund");
-    // A room whose one choice is that partial refund reads non-refundable, with the reason.
+    // A room whose one choice is that partial refund keeps its name, with a short note.
     const garden = page.getByTestId("room-card-garden").locator("[data-offer-key]");
     await expect(garden).toHaveCount(1);
-    await expect(garden).toContainText("Non-refundable");
-    await expect(garden).toContainText(
-      "Refunds end 7 days before arrival. For these dates, no refund if you cancel or don't arrive",
-    );
-    await expect(garden).not.toContainText("Partial refund");
+    await expect(garden).toContainText("Partial refund");
+    await expect(garden).toContainText("No refund for these dates");
+    await expect(garden).not.toContainText(/non-refundable/i);
     await expect(garden).not.toContainText("OFF");
     await page.screenshot({
       path: testInfo.outputPath(`room-cards-refunds-passed-${width}.png`),

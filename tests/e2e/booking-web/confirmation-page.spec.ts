@@ -192,12 +192,14 @@ for (const width of [1440, 390]) {
     await expect(line).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath(`confirmation-late-${width}.png`) });
     await expect(line).toContainText(
-      "Non-refundable: booked less than 14 days before arrival. If you cancel or don't arrive, you pay the full amount (€200",
+      "No free cancellation: booked less than 14 days before arrival. If you cancel or don't arrive, you pay the full amount (€200",
     );
     await expect(line).not.toContainText("Free cancellation ended");
     await line.getByRole("button", { name: "Full policy" }).click();
     const dialog = page.getByRole("dialog", { name: "Cancellation policy" });
-    await expect(dialog).toContainText("Non-refundable");
+    // VAY-2587: the Flexible rate booked late has no free cancellation; it isn't "Non-refundable".
+    await expect(dialog).toContainText("No free cancellation");
+    await expect(dialog).not.toContainText("Non-refundable");
     await expect(dialog).toContainText(
       "You’re booking less than 14 days before arrival, so this booking can’t be cancelled for free.",
     );

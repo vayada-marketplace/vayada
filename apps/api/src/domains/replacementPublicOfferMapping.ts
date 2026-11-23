@@ -73,7 +73,7 @@ export function publicOfferMealDescriptions(owner: Owner): ReadonlyMap<string, s
 }
 
 /** Each offer's cancellation as guests may see it before a quote, by public offer key, so the booking page can name
- * options "Free cancellation" or "Non-refundable" (VAY-2188). A partial refund adds its last refund day, so a stay
+ * options "Flexible rate" or "Non-refundable" (VAY-2188). A partial refund adds its last refund day, so a stay
  * past it reads as no refund (VAY-2406). An offer without its exact terms has no entry. */
 export function publicOfferCancellations(
   owner: Owner,
