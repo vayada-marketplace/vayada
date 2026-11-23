@@ -13,8 +13,6 @@ export interface DashboardStats {
   other_currency_bookings_previous: number;
   bookings: number;
   bookings_previous: number;
-  avg_nightly_rate: number;
-  avg_nightly_rate_previous: number;
   page_views: number;
   page_views_previous: number;
   next_arrival: string | null;
@@ -49,7 +47,6 @@ export interface ConversionFunnel {
 export interface Sparklines {
   revenue: number[];
   bookings: number[];
-  avg_rate: number[];
   page_views: number[];
 }
 
@@ -71,14 +68,29 @@ export interface PageViewsTimeline {
   has_previous_data: boolean;
 }
 
-export type TimeRange = "today" | "week" | "month";
+/** Today, the last 7, 30 or 90 days, each ending today in the property's time zone. */
+export type TimeRange = "today" | "week" | "month" | "quarter";
+
+/** The Dashboard opens on the last 30 days (VAY-2594). */
+export const DEFAULT_TIME_RANGE: TimeRange = "month";
 
 /** Ranges in display order with their label keys; the page tabs and the funnel menu share them. */
 export const TIME_RANGES: [TimeRange, string][] = [
   ["today", "dashboard.timeRange.today"],
   ["week", "dashboard.timeRange.week"],
   ["month", "dashboard.timeRange.month"],
+  ["quarter", "dashboard.timeRange.quarter"],
 ];
+
+/** The range spelled out, as the header strip names it ("Last 30 days"). */
+export const TIME_RANGE_NAMES: Record<TimeRange, string> = {
+  today: "dashboard.rangeLabel.today",
+  week: "dashboard.rangeLabel.week",
+  month: "dashboard.rangeLabel.month",
+  quarter: "dashboard.rangeLabel.quarter",
+};
+
+const RANGE_DAYS: Record<TimeRange, number> = { today: 1, week: 7, month: 30, quarter: 90 };
 
 type Money = {
   amountDecimal: string;
@@ -182,10 +194,10 @@ export function rangeQuery(
   previousEnd: string;
 } {
   const currentEnd = dateInTimeZone(new Date(), timeZone);
-  const days = range === "today" ? 1 : range === "week" ? 7 : 30;
+  const days = RANGE_DAYS[range];
   const currentStart = shiftIsoDate(currentEnd, -(days - 1));
-  // Today compares with the same weekday last week, which evens out weekly booking patterns.
-  const previousEnd = shiftIsoDate(currentStart, range === "today" ? -7 : -1);
+  // Compared with the period of the same length right before it; Today with yesterday (VAY-2594).
+  const previousEnd = shiftIsoDate(currentStart, -1);
   const previousStart = shiftIsoDate(previousEnd, -(days - 1));
   return {
     currentStart,
@@ -227,8 +239,6 @@ export const dashboardService = {
       other_currency_bookings_previous: response.metrics.previous.otherCurrencyBookingCount ?? 0,
       bookings: response.metrics.current.bookingCount,
       bookings_previous: response.metrics.previous.bookingCount,
-      avg_nightly_rate: amount(response.metrics.current.avgNightlyRate),
-      avg_nightly_rate_previous: amount(response.metrics.previous.avgNightlyRate),
       page_views: response.metrics.current.pageViewCount,
       page_views_previous: response.metrics.previous.pageViewCount,
       next_arrival: response.metrics.nextArrivalDate,
@@ -254,11 +264,23 @@ export const dashboardService = {
     };
   },
 
-  getConversionFunnel: async (range: TimeRange, timeZone: string): Promise<ConversionFunnel> => {
+  /**
+   * The funnel for the range, or for the period right before it: the funnel's previousCount is
+   * the step before, not the previous period (VAY-2594 compares conversion between periods).
+   */
+  getConversionFunnel: async (
+    range: TimeRange,
+    timeZone: string,
+    period: "current" | "previous" = "current",
+  ): Promise<ConversionFunnel> => {
     const basePath = requireDashboardBasePath();
     const query = rangeQuery(range, timeZone);
+    const [start, end] =
+      period === "current"
+        ? [query.currentStart, query.currentEnd]
+        : [query.previousStart, query.previousEnd];
     const response = await apiClient.get<{ funnel: ConversionFunnel }>(
-      `${basePath}/conversion-funnel?windowStart=${query.currentStart}&windowEnd=${query.currentEnd}`,
+      `${basePath}/conversion-funnel?windowStart=${start}&windowEnd=${end}`,
     );
     return response.funnel;
   },
@@ -274,7 +296,6 @@ export const dashboardService = {
     return {
       revenue: response.sparklines.points.map((point) => amount(point.revenue)),
       bookings: response.sparklines.points.map((point) => point.bookingCount),
-      avg_rate: response.sparklines.points.map((point) => amount(point.avgNightlyRate)),
       page_views: response.sparklines.points.map((point) => point.pageViewCount),
     };
   },

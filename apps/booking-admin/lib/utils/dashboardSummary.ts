@@ -14,23 +14,36 @@ export function compareSummary(current: number, previous: number): SummaryCompar
   };
 }
 
-/** A period without bookings has no nightly rate rather than a rate of 0. */
-export function compareRate(
-  current: { rate: number; bookings: number },
-  previous: { rate: number; bookings: number },
-): SummaryComparison | null {
-  if (current.bookings === 0) return { kind: "noData" };
-  if (previous.bookings === 0) return null;
-  return compareSummary(Math.round(current.rate), Math.round(previous.rate));
+/**
+ * Conversion rate in %: confirmed bookings ÷ visitors, both from one period's funnel, so the card
+ * and the funnel agree (VAY-2594). Null without visitors.
+ */
+export function conversionRate(steps: readonly { stage: string; count: number }[]): number | null {
+  const visits = steps.find(({ stage }) => stage === "page_visit")?.count ?? 0;
+  const bookings = steps.find(({ stage }) => stage === "booking_completed")?.count ?? 0;
+  return visits > 0 ? (bookings / visits) * 100 : null;
 }
 
-export type SparklineShape = { line: string; area: string } | null;
+/**
+ * Compares two conversion rates in hundredths of a percent. No comparison without a previous
+ * rate (no visitors then), and "No data yet" without a current one.
+ */
+export function compareConversion(
+  current: number | null,
+  previous: number | null,
+): SummaryComparison | null {
+  if (current === null) return { kind: "noData" };
+  if (previous === null) return null;
+  const now = Math.round(current * 100);
+  const before = Math.round(previous * 100);
+  return now === before ? { kind: "unchanged" } : compareSummary(now, before);
+}
 
 /**
- * Line and filled-area paths in a 100 x 32 box. Returns null (flat grey line) until at
- * least two points exist and one of them is nonzero; a flat nonzero series sits mid-box.
+ * The trend line in a 100 x 32 box. Null (a flat grey line) until at least two points exist and
+ * one of them is nonzero; a flat nonzero series sits mid-box.
  */
-export function sparklineShape(values: number[]): SparklineShape {
+export function sparklinePath(values: number[]): string | null {
   if (values.length < 2 || values.every((value) => value === 0)) return null;
   const min = Math.min(...values);
   const range = Math.max(...values) - min;
@@ -39,6 +52,5 @@ export function sparklineShape(values: number[]): SparklineShape {
     const y = range ? 30 - ((value - min) / range) * 28 : 16;
     return `${x.toFixed(2)},${y.toFixed(2)}`;
   });
-  const line = `M${points.join(" L")}`;
-  return { line, area: `${line} L100,32 L0,32 Z` };
+  return `M${points.join(" L")}`;
 }
