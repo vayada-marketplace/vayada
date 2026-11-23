@@ -488,10 +488,11 @@ delegation that writes:
   step (no status yet) is recorded; the lease is renewed while the request runs, and the executor
   stops waiting before the lease could run out (the run stays running);
 - the route's answer decides the outcome. 2xx is `done` with the action's allow-listed answer. A
-  first attempt that sent nothing before (no take-over, no recorded step) fails on the route's
-  refusal (another 4xx, e.g. `thread_version_conflict` after a person's edit), or before any
-  request on an unknown action (`unknown_action`), arguments that no longer fit (`invalid_input`) or
-  a user who is no longer allowed (`not_allowed`). A 5xx, a 429, a thrown request, a timeout or a
+  run with no recorded "sent" step never sent anything (a first attempt, or a take-over of a worker
+  that died before sending): it fails on the route's refusal (another 4xx, e.g.
+  `thread_version_conflict` after a person's edit), or before any request on an unknown action
+  (`unknown_action`), arguments that no longer fit (`invalid_input`) or a user who is no longer
+  allowed (`not_allowed`). A 5xx, a 429, a thrown request, a timeout or a
   "try again / key already used" code (`busy_try_again`, `command_in_progress`,
   `idempotency_conflict`, `idempotency_key_conflict`) leaves the run running for the recovery job,
   which sends the same key again. Once a request may have gone out, only the route's success ends
@@ -499,8 +500,10 @@ delegation that writes:
   success gives up after 5 attempts (`gave_up`, outcome unknown);
 - every request writes one `ai_tool_calls` row with the operation id, `op_<id>` as correlation id,
   the key's hash (the same hash as the route's `platform.idempotency_keys` row) and, when done, the
-  records its path names (`threadId` -> a `thread`). The route's own audit row carries `op_<id>` as
-  correlation id and the logged request id as causation.
+  records it touched, typed as the routes' own audit rows type them (`message_thread`,
+  `physical_room_unit`, `room_block`, `booking_note_private`; from the path, or from the answer where
+  the path names none). The route's own audit row carries `op_<id>` as correlation id and the logged
+  request id as causation.
 
 The recovery job (`recoveryWorker.ts`) closes unanswered changes and takes over expired runs, one
 at a time, every 30 seconds; the API wires it with the answer endpoint (PR 3), which also checks who

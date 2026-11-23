@@ -369,7 +369,32 @@ describe.skipIf(!url)("the executor of AI changes on PostgreSQL (VAY-2524)", () 
       await expireLease(operation.id);
       ids.push(operation.id);
     }
-    expect(await executor("recovery").recover(50)).toBeGreaterThanOrEqual(2);
+    // Each take-over takes one run and runs it before it takes the next.
+    const events: string[] = [];
+    const watched = {
+      ...store,
+      takeOverExpired: (...args: Parameters<typeof store.takeOverExpired>) => {
+        events.push(`take ${args[2]}`);
+        return store.takeOverExpired(...args);
+      },
+      recordStep: (...args: Parameters<typeof store.recordStep>) => {
+        events.push("step");
+        return store.recordStep(...args);
+      },
+    };
+    const recovery = createAiChangeExecutor({
+      app,
+      store: watched,
+      identity,
+      authorizationResolver,
+      log,
+      holder: "recovery",
+      onLogFailure: (error) => runFailures.push(error),
+      onRunFailure: (error) => runFailures.push(error),
+    });
+    expect(await recovery.recover(50)).toBeGreaterThanOrEqual(2);
+    expect(events.filter((event) => event.startsWith("take"))).not.toContain("take 50");
+    expect(events.slice(0, 4)).toEqual(["take 1", "step", "step", "take 1"]);
     for (const id of ids) expect((await store.find(id))?.status).toBe("done");
     for (const threadId of threads) {
       expect(await thread(threadId)).toEqual({ attentionState: "done", version: "5" });
@@ -395,13 +420,13 @@ describe.skipIf(!url)("the executor of AI changes on PostgreSQL (VAY-2524)", () 
       authorizationResolver,
       log,
       holder: "slow",
-      leaseMs: 900,
+      leaseMs: 1_500,
       onLogFailure: (error) => runFailures.push(error),
       onRunFailure: (error) => runFailures.push(error),
     });
-    delayNextMs = 500;
+    delayNextMs = 700;
     expect(await patient.startAndRun(slow.operation.id)).toMatchObject({ status: "done" });
-    // Once right before sending, then every 300 ms while the request ran.
+    // Once right before sending, then every 500 ms while the request ran.
     expect(renewals).toBeGreaterThanOrEqual(2);
 
     // Too slow: the run stops waiting and stays running; the recovery job finishes it.
