@@ -3257,9 +3257,15 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         {isPending && booking.hostResponseDeadline && (
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
             <p className="mb-2 text-xs text-gray-500">
+              {/* VAY-2099: a booking-page request (pay at property, or a card the guest authorised)
+                  waits for the hotel's answer, not for a payment. */}
               {booking.awaitingPaymentConfirmation
                 ? t("bookings.detail.confirmManualPaymentReceipt")
-                : t("bookings.detail.reviewManualPayment")}
+                : booking.paymentMethod === "pay_at_property"
+                  ? t("bookings.detail.acceptAtPropertyRequest")
+                  : booking.paymentMethod === "card"
+                    ? t("bookings.detail.acceptCardRequest")
+                    : t("bookings.detail.reviewManualPayment")}
             </p>
             <div className="flex flex-wrap gap-3">
               {(booking.paymentMethod === "paypal" || booking.awaitingPaymentConfirmation) &&
