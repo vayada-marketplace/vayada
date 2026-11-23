@@ -5,6 +5,12 @@ import {
   mockBookingAdminShellRoutes,
 } from "../support/bookingAdminMocks";
 
+// The dashboard also reads the funnel for the period before, for the conversion card's change
+// (VAY-2594); these specs follow the range's own read, which ends today in the property's zone.
+const ENDS_TODAY = (url: string) =>
+  new URL(url).searchParams.get("windowEnd") ===
+  new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" }).format(new Date());
+
 test("shows inline drop-offs, the card branch, CSV export and recomputes all time tabs", async ({
   page,
 }, testInfo) => {
@@ -14,7 +20,7 @@ test("shows inline drop-offs, the card branch, CSV export and recomputes all tim
   const windows: string[] = [];
   let empty = false;
   await page.route("**/dashboard/conversion-funnel?**", (route) => {
-    windows.push(route.request().url());
+    if (ENDS_TODAY(route.request().url())) windows.push(route.request().url());
     return route.fulfill({
       json: {
         funnel: {
@@ -94,10 +100,10 @@ test("shows inline drop-offs, the card branch, CSV export and recomputes all tim
 
   await page.getByRole("button", { name: "Today", exact: true }).click();
   await expect(card.getByText("Authorized payment (card only) · 10")).toBeVisible();
-  await page.getByRole("button", { name: "This week", exact: true }).click();
-  await expect.poll(() => windows.length).toBeGreaterThanOrEqual(2);
-  await page.getByRole("button", { name: "Last 30 days", exact: true }).click();
+  await page.getByRole("button", { name: "7 days", exact: true }).click();
   await expect.poll(() => windows.length).toBeGreaterThanOrEqual(3);
+  await page.getByRole("button", { name: "30 days", exact: true }).click();
+  await expect.poll(() => windows.length).toBeGreaterThanOrEqual(4);
   empty = true;
   await page.getByRole("button", { name: "Today", exact: true }).click();
   await expect(card.getByText("No booking data for this period")).toBeVisible();
@@ -110,7 +116,8 @@ test("the funnel options and the page tabs share one time range", async ({ page 
   await mockBookingAdminShellRoutes(page);
   const windowStarts: string[] = [];
   await page.route("**/dashboard/conversion-funnel?**", (route) => {
-    windowStarts.push(new URL(route.request().url()).searchParams.get("windowStart") ?? "");
+    if (ENDS_TODAY(route.request().url()))
+      windowStarts.push(new URL(route.request().url()).searchParams.get("windowStart") ?? "");
     return route.fulfill({
       json: {
         funnel: {
@@ -134,8 +141,9 @@ test("the funnel options and the page tabs share one time range", async ({ page 
   const distinctWindows = () => new Set(windowStarts).size;
   await expect.poll(distinctWindows).toBe(1);
 
+  // The page opens on the last 30 days (VAY-2594), and the funnel's options say so.
   await options.click();
-  await expect(card.getByRole("button", { name: "Today", exact: true })).toHaveAttribute(
+  await expect(card.getByRole("button", { name: "30 days", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
@@ -143,20 +151,20 @@ test("the funnel options and the page tabs share one time range", async ({ page 
     path: testInfo.outputPath("conversion-funnel-options.png"),
     animations: "disabled",
   });
-  await card.getByRole("button", { name: "Last 30 days", exact: true }).click();
+  await card.getByRole("button", { name: "Today", exact: true }).click();
   await expect(card.getByRole("button", { name: "Export CSV" })).toHaveCount(0);
-  await expect(tab("Last 30 days")).toHaveAttribute("aria-pressed", "true");
-  await expect(tab("Today")).toHaveAttribute("aria-pressed", "false");
+  await expect(tab("Today")).toHaveAttribute("aria-pressed", "true");
+  await expect(tab("30 days")).toHaveAttribute("aria-pressed", "false");
   await expect.poll(distinctWindows).toBe(2);
 
-  await tab("This week").click();
+  await tab("7 days").click();
   await expect.poll(distinctWindows).toBe(3);
   await options.click();
-  await expect(card.getByRole("button", { name: "This week", exact: true })).toHaveAttribute(
+  await expect(card.getByRole("button", { name: "7 days", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
-  await expect(card.getByRole("button", { name: "Last 30 days", exact: true })).toHaveAttribute(
+  await expect(card.getByRole("button", { name: "30 days", exact: true })).toHaveAttribute(
     "aria-pressed",
     "false",
   );
