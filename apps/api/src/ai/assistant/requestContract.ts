@@ -8,7 +8,8 @@ import type { ModelRoute } from "../provider/catalog.js";
  * conversation (system prompt, tool definitions and their order, every earlier message), and a
  * cache only hits on an identical prefix. So each conversation stores what its requests are made
  * of; when a deploy or a permission change would make the next request differ, the conversation
- * is read-only and the next question starts a new one.
+ * is read-only and the next question starts a new one. Call settings (effort, output limit) are
+ * not part of it: changing them keeps Claude's thinking replay valid.
  */
 
 /** Bump when the way stored messages are turned into a request changes. */
@@ -19,8 +20,6 @@ export type RequestContract = {
   region: string;
   model: string;
   systemPromptSha256: string;
-  /** Call settings that shape the request, e.g. effort and output limit. */
-  settings: Record<string, unknown>;
   serializationVersion: number;
   /** In the order they are sent; each as the model sees it (name, description, input schema). */
   tools: { name: string; sha256: string }[];
@@ -31,7 +30,6 @@ export type SealedRequestContract = { contract: RequestContract; sha256: string 
 export function requestContract(input: {
   route: ModelRoute;
   systemPrompt: string;
-  settings: Record<string, unknown>;
   tools: readonly ToolDefinition[];
 }): SealedRequestContract {
   const contract: RequestContract = {
@@ -39,7 +37,6 @@ export function requestContract(input: {
     region: input.route.region,
     model: input.route.model,
     systemPromptSha256: sha256(input.systemPrompt),
-    settings: input.settings,
     serializationVersion: MESSAGE_SERIALIZATION_VERSION,
     // Key order kept: it is part of the bytes sent, so of the cached prefix.
     tools: input.tools.map(({ name, description, inputSchema }) => ({

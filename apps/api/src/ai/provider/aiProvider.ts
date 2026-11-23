@@ -2,12 +2,24 @@
  * The one way vayada calls an AI model (VAY-2504, plan 3.11, design note §8.3). Every AI feature
  * (Inbox buttons, the in-app assistant, Concierge, the model test) goes through `run`, so the
  * model per job, the EU-only rule, prices, the budget and the limits live in one place.
- * Only this folder imports the AI SDK (see importBoundary.test.ts); Mastra joins with the
- * in-app assistant (VAY-2518).
+ * Only this folder imports the AI SDK (see importBoundary.test.ts). The in-app assistant
+ * (VAY-2518) calls `step`: one streamed model call that may ask for tools but never runs them;
+ * its loop, in ai/assistant, runs them through the action registry. Mastra can replace that loop
+ * later behind the same two calls, once its licence is settled.
  */
 import { createAmazonBedrockAnthropic } from "@ai-sdk/amazon-bedrock/anthropic";
 import { defaultProvider } from "@aws-sdk/credential-provider-node";
-import { generateText, type LanguageModel, type LanguageModelUsage } from "ai";
+import {
+  generateText,
+  jsonSchema,
+  streamText,
+  tool,
+  type JSONSchema7,
+  type LanguageModel,
+  type LanguageModelUsage,
+  type ModelMessage,
+  type Tool,
+} from "ai";
 
 import { createCallLimit } from "./callLimit.js";
 
@@ -101,8 +113,49 @@ export type AiBudget = {
   settle(reservationId: string, settlement: AiSettlement): Promise<void>;
 };
 
+/** A conversation message as the assistant stores it: the AI SDK's ModelMessage, plain JSON. */
+export type AiMessage = {
+  role: "user" | "assistant" | "tool";
+  content: unknown;
+  providerOptions?: unknown;
+};
+
+/** A tool the model may ask for; the loop runs it, never the SDK. */
+export type AiToolDefinition = {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+};
+
+export type AiStepInput = {
+  instructions: string;
+  /** The whole history so far, exactly as stored. */
+  messages: readonly AiMessage[];
+  /** In the order they are sent, which is part of the cached prefix. */
+  tools: readonly AiToolDefinition[];
+};
+
+export type AiStepOptions = AiRunOptions & {
+  /** Each piece of answer text as it arrives. */
+  onTextDelta?: (text: string) => void;
+};
+
+export type AiStepResult =
+  /**
+   * "stop": the answer is complete. "tool-calls": the model asks for the tool calls in its
+   * message; the caller runs them and calls `step` again with their results.
+   */
+  | ({ ok: true; finishReason: "stop" | "tool-calls"; messages: AiMessage[] } & AiCallRecord)
+  /** Billed, but nothing to keep: a refusal, or an answer cut off at the output limit. */
+  | ({ ok: false; reason: "refused" | "truncated" } & AiCallRecord)
+  | { ok: false; reason: "unavailable" | "allowance_used_up" | "busy" | "failed" };
+
 export type AiProvider = {
   run(task: AiTask, input: AiRunInput, options: AiRunOptions): Promise<AiRunResult>;
+  /** The route a task's next call would use; undefined while no allowed route is switched on. */
+  routeFor(task: AiTask, options?: Pick<AiRunOptions, "data" | "route">): ModelRoute | undefined;
+  /** One streamed model call with tools (the in-app assistant's loop step). */
+  step(task: AiTask, input: AiStepInput, options: AiStepOptions): Promise<AiStepResult>;
 };
 
 type Log = { warn(fields: object, message: string): void };
@@ -123,6 +176,8 @@ export type AiProviderConfig = {
   awsCredentials?: () => Promise<AwsCredentials>;
   tasks?: Readonly<Record<AiTask, TaskSetting>>;
   timeoutMs?: number;
+  /** For one streamed assistant step; the answer streams, so it may take longer than `run`. */
+  stepTimeoutMs?: number;
   now?: () => number;
 };
 
@@ -130,6 +185,15 @@ export type AiProviderConfig = {
 const DEFAULT_TIMEOUT_MS = 45_000;
 const DEFAULT_MAX_CONCURRENT_CALLS = 8;
 const DEFAULT_CALL_WAIT_MS = 5_000;
+const DEFAULT_STEP_TIMEOUT_MS = 120_000;
+/**
+ * Prompt-cache breakpoints for the assistant (plan 3.9): one after the tools and the system
+ * prompt, two in the history (see withBreakpointOnLast), so each step reads everything before
+ * it from the cache.
+ * One hour, as priced in the catalog. The markers may move between requests without breaking
+ * Claude's thinking replay; the history itself is never changed.
+ */
+const CACHE_BREAKPOINT = { anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } } } as const;
 /** A reservation stops counting as running this long after the call's own timeout. */
 const HOLD_MARGIN_MS = 15_000;
 /** Tokens the request format adds around the text, per message and once (generous). */
@@ -153,6 +217,7 @@ export function createAiProvider(config: AiProviderConfig): AiProvider {
   const tasks = config.tasks ?? TASK_SETTINGS;
   const now = config.now ?? Date.now;
   const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const stepTimeoutMs = config.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
   const callLimit = createCallLimit(
     config.maxConcurrentCalls ?? DEFAULT_MAX_CONCURRENT_CALLS,
     config.callWaitMs ?? DEFAULT_CALL_WAIT_MS,
@@ -190,70 +255,126 @@ export function createAiProvider(config: AiProviderConfig): AiProvider {
     })(route.model);
   }
 
-  return {
-    async run(task, input, options) {
-      const setting = tasks[task] as TaskSetting | undefined;
-      const route = options.route ?? setting?.routes.find((each) => enabled.has(each.provider));
-      const fields = {
-        task,
-        surface: options.context.surface,
-        requestId: options.context.requestId,
-        route: route ? routeKey(route) : null,
-      };
-      if (!setting || !route || !enabled.has(route.provider))
-        return { ok: false, reason: "unavailable" };
-      if ((options.data ?? "customer") === "customer" && !allowed.has(routeKey(route))) {
-        config.log?.warn(fields, "AI route is not cleared for customer data");
-        return { ok: false, reason: "unavailable" };
-      }
-      const reservedMicroUsd = maxCostMicroUsd(
-        route,
-        inputTokenBound(input),
-        setting.maxOutputTokens,
-      );
-      if (reservedMicroUsd === null) {
-        config.log?.warn(fields, "AI route has no price");
-        return { ok: false, reason: "unavailable" };
-      }
+  type Prepared = {
+    setting: TaskSetting;
+    route: ModelRoute;
+    fields: object;
+    reservedMicroUsd: number;
+  };
+  type RouteOptions = Pick<AiRunOptions, "data" | "route">;
 
-      const release = await callLimit.acquire();
-      if (!release) {
-        config.log?.warn(fields, "AI provider-call limit is full");
-        return { ok: false, reason: "busy" };
-      }
+  /** The task's setting and route, when the route's provider is switched on. */
+  function selected(task: AiTask, options: RouteOptions) {
+    const setting = tasks[task] as TaskSetting | undefined;
+    const route = options.route ?? setting?.routes.find((each) => enabled.has(each.provider));
+    return setting && route && enabled.has(route.provider) ? { setting, route } : undefined;
+  }
+  const cleared = (route: ModelRoute, options: RouteOptions) =>
+    (options.data ?? "customer") !== "customer" || allowed.has(routeKey(route));
+
+  function routeFor(task: AiTask, options: RouteOptions = {}): ModelRoute | undefined {
+    const chosen = selected(task, options);
+    const usable =
+      chosen && cleared(chosen.route, options) && maxCostMicroUsd(chosen.route, 0, 0) !== null;
+    return usable ? chosen.route : undefined;
+  }
+
+  /** The route, its setting and the most the call can cost; or why no model may be called. */
+  function prepare(
+    task: AiTask,
+    options: AiRunOptions,
+    maxInputTokens: number,
+  ): Prepared | { ok: false; reason: "unavailable" } {
+    const chosen = selected(task, options);
+    if (!chosen) return { ok: false, reason: "unavailable" };
+    const { setting, route } = chosen;
+    const fields = {
+      task,
+      surface: options.context.surface,
+      requestId: options.context.requestId,
+      route: routeKey(route),
+    };
+    if (!cleared(route, options)) {
+      config.log?.warn(fields, "AI route is not cleared for customer data");
+      return { ok: false, reason: "unavailable" };
+    }
+    const reservedMicroUsd = maxCostMicroUsd(route, maxInputTokens, setting.maxOutputTokens);
+    if (reservedMicroUsd === null) {
+      config.log?.warn(fields, "AI route has no price");
+      return { ok: false, reason: "unavailable" };
+    }
+    return { setting, route, fields, reservedMicroUsd };
+  }
+
+  /**
+   * Waits for a place under the provider-call limit, reserves the call's highest cost against the
+   * account's budget, makes the call and settles it with what it really cost.
+   */
+  async function reserveAndCall<R>(
+    task: AiTask,
+    options: AiRunOptions,
+    prepared: Prepared,
+    holdMs: number,
+    call: () => Promise<{ result: R; settlement: AiSettlement | null }>,
+  ): Promise<R | { ok: false; reason: "unavailable" | "allowance_used_up" | "busy" }> {
+    const { route, fields, reservedMicroUsd } = prepared;
+    const release = await callLimit.acquire();
+    if (!release) {
+      config.log?.warn(fields, "AI provider-call limit is full");
+      return { ok: false, reason: "busy" };
+    }
+    try {
+      let reservation: AiReservation;
       try {
-        let reservation: AiReservation;
-        try {
-          reservation = await config.budget.reserve({
-            task,
-            context: options.context,
-            route,
-            priceTableVersion: PRICE_TABLE_VERSION,
-            reservedMicroUsd,
-            holdMs: timeoutMs + HOLD_MARGIN_MS,
-          });
-        } catch (error) {
-          config.log?.warn({ ...fields, error: errorSummary(error) }, "AI budget check failed");
-          return { ok: false, reason: "unavailable" };
-        }
-        if (!reservation.ok) return { ok: false, reason: reservation.reason };
-
-        const { result, settlement } = await call(task, route, setting, input, options, fields);
-        const settleAs =
-          settlement ?? ({ status: "failed", costMicroUsd: reservedMicroUsd } as const);
-        try {
-          await config.budget.settle(reservation.reservationId, settleAs);
-        } catch (error) {
-          // The reservation keeps counting at its full amount, so the budget still holds.
-          config.log?.warn(
-            { ...fields, reservationId: reservation.reservationId, error: errorSummary(error) },
-            "AI usage could not be recorded",
-          );
-        }
-        return result;
-      } finally {
-        release();
+        reservation = await config.budget.reserve({
+          task,
+          context: options.context,
+          route,
+          priceTableVersion: PRICE_TABLE_VERSION,
+          reservedMicroUsd,
+          holdMs,
+        });
+      } catch (error) {
+        config.log?.warn({ ...fields, error: errorSummary(error) }, "AI budget check failed");
+        return { ok: false, reason: "unavailable" };
       }
+      if (!reservation.ok) return { ok: false, reason: reservation.reason };
+
+      const { result, settlement } = await call();
+      const settleAs =
+        settlement ?? ({ status: "failed", costMicroUsd: reservedMicroUsd } as const);
+      try {
+        await config.budget.settle(reservation.reservationId, settleAs);
+      } catch (error) {
+        // The reservation keeps counting at its full amount, so the budget still holds.
+        config.log?.warn(
+          { ...fields, reservationId: reservation.reservationId, error: errorSummary(error) },
+          "AI usage could not be recorded",
+        );
+      }
+      return result;
+    } finally {
+      release();
+    }
+  }
+
+  return {
+    routeFor,
+
+    async run(task, input, options) {
+      const prepared = prepare(task, options, inputTokenBound(input));
+      if (!("setting" in prepared)) return prepared;
+      return reserveAndCall(task, options, prepared, timeoutMs + HOLD_MARGIN_MS, () =>
+        call(task, prepared.route, prepared.setting, input, options, prepared.fields),
+      );
+    },
+
+    async step(task, input, options) {
+      const prepared = prepare(task, options, stepInputTokenBound(input));
+      if (!("setting" in prepared)) return prepared;
+      return reserveAndCall(task, options, prepared, stepTimeoutMs + HOLD_MARGIN_MS, () =>
+        streamStep(task, prepared, input, options),
+      );
     },
   };
 
@@ -323,6 +444,171 @@ export function createAiProvider(config: AiProviderConfig): AiProvider {
       };
     }
   }
+
+  /**
+   * One streamed assistant step. The tools have no `execute`: the SDK hands their calls back
+   * and stops, and the assistant's loop runs them, so no framework ever runs an action itself.
+   */
+  async function streamStep(
+    task: AiTask,
+    prepared: Prepared,
+    input: AiStepInput,
+    options: AiStepOptions,
+  ): Promise<{ result: AiStepResult; settlement: AiSettlement | null }> {
+    const { route, setting, fields } = prepared;
+    const started = now();
+    const timeout = AbortSignal.timeout(stepTimeoutMs);
+    const trace = { maybeBilled: false };
+    let streamError: unknown;
+    // The input as Claude counted it when the answer started streaming.
+    let counted: TokenUsage | undefined;
+    try {
+      const tools: Record<string, Tool> = {};
+      for (const definition of input.tools)
+        tools[definition.name] = tool({
+          description: definition.description,
+          inputSchema: jsonSchema(definition.inputSchema as JSONSchema7),
+        });
+      const result = streamText({
+        model: languageModel(route, trace),
+        instructions: {
+          role: "system",
+          content: input.instructions,
+          providerOptions: CACHE_BREAKPOINT,
+        },
+        messages: withBreakpointOnLast(input.messages),
+        tools,
+        // Otherwise the SDK sorts them by name; the order is part of the cached prefix.
+        toolOrder: input.tools.map((definition) => definition.name),
+        // Claude 5.5 refuses forced tool use.
+        toolChoice: "auto",
+        maxOutputTokens: setting.maxOutputTokens,
+        maxRetries: 1,
+        abortSignal: options.abortSignal
+          ? AbortSignal.any([options.abortSignal, timeout])
+          : timeout,
+        providerOptions: { anthropic: { effort: setting.effort } },
+        // Guest data must never reach traces.
+        telemetry: { recordInputs: false, recordOutputs: false, functionId: `ai.${task}` },
+        // The SDK's default prints the error, and a provider error can quote the whole request.
+        onError: ({ error }) => {
+          streamError ??= error;
+        },
+      });
+      for await (const part of result.fullStream) {
+        if (part.type === "text-delta") options.onTextDelta?.(part.text);
+        else if (part.type === "error") streamError ??= part.error;
+        else if (part.type === "abort") streamError ??= new Error("The step was stopped");
+        else if (part.type === "custom" && part.kind === "anthropic.message_start")
+          counted = startUsage(part.providerMetadata);
+      }
+      if (streamError !== undefined) throw streamError;
+      const [finishReason, totalUsage, responseMessages] = await Promise.all([
+        result.finishReason,
+        result.totalUsage,
+        result.responseMessages,
+      ]);
+      const usage = tokenUsage(totalUsage);
+      const record: AiCallRecord = {
+        route: { ...route },
+        usage,
+        costMicroUsd: costMicroUsd(route, usage) ?? 0,
+        priceTableVersion: PRICE_TABLE_VERSION,
+        latencyMs: now() - started,
+      };
+      const settlement: AiSettlement = {
+        status: "completed",
+        costMicroUsd: record.costMicroUsd,
+        usage,
+      };
+      if (finishReason === "content-filter")
+        return { result: { ok: false, reason: "refused", ...record }, settlement };
+      if (finishReason === "length")
+        return { result: { ok: false, reason: "truncated", ...record }, settlement };
+      const messages = keepableMessages(responseMessages);
+      if ((finishReason !== "stop" && finishReason !== "tool-calls") || !messages.length) {
+        config.log?.warn({ ...fields, finishReason }, "AI step was not usable");
+        return { result: { ok: false, reason: "failed" }, settlement };
+      }
+      return { result: { ok: true, finishReason, messages, ...record }, settlement };
+    } catch (error) {
+      config.log?.warn({ ...fields, error: errorSummary(error) }, "AI provider step failed");
+      // Stopped or broken after Claude counted the input: that, plus at most the output limit,
+      // instead of the whole reservation (whose input bound counts every byte as a token).
+      const atMost = counted
+        ? costMicroUsd(route, { ...counted, outputTokens: setting.maxOutputTokens })
+        : null;
+      const settlement: AiSettlement | null = !trace.maybeBilled
+        ? { status: "failed", costMicroUsd: 0 }
+        : atMost === null
+          ? null
+          : { status: "failed", costMicroUsd: Math.min(atMost, prepared.reservedMicroUsd) };
+      return { result: { ok: false, reason: "failed" }, settlement };
+    }
+  }
+}
+
+/** As `inputTokenBound`, for a whole conversation with its tool definitions. */
+function stepInputTokenBound(input: AiStepInput): number {
+  const bytes =
+    Buffer.byteLength(input.instructions) +
+    Buffer.byteLength(JSON.stringify(input.messages)) +
+    Buffer.byteLength(JSON.stringify(input.tools));
+  return bytes + FORMAT_TOKENS * (input.messages.length + input.tools.length + 1);
+}
+
+/** The input tokens Claude reports when a streamed answer starts (its message_start event). */
+function startUsage(metadata: unknown): TokenUsage | undefined {
+  const usage = (metadata as { anthropic?: { usage?: Record<string, unknown> } } | undefined)
+    ?.anthropic?.usage;
+  const count = (key: string) => (typeof usage?.[key] === "number" ? (usage[key] as number) : 0);
+  if (typeof usage?.["input_tokens"] !== "number") return undefined;
+  return {
+    inputTokens: count("input_tokens"),
+    cacheReadTokens: count("cache_read_input_tokens"),
+    cacheWriteTokens: count("cache_creation_input_tokens"),
+    outputTokens: 0,
+  };
+}
+
+/**
+ * Cache breakpoints on the messages, the stored messages unchanged: on the last one, and on the
+ * last one of the previous request (the one before the latest answer), where that request's
+ * cache entry ends. Claude looks back only about 20 blocks for an entry, and a step with many
+ * tool calls adds more than that.
+ */
+function withBreakpointOnLast(messages: readonly AiMessage[]): ModelMessage[] {
+  const lastAnswer = messages.map((message) => message.role).lastIndexOf("assistant");
+  return messages.map((message, index) => {
+    if (index !== messages.length - 1 && index !== lastAnswer - 1) return message;
+    const options = (message.providerOptions ?? {}) as Record<string, Record<string, unknown>>;
+    return {
+      ...message,
+      providerOptions: {
+        ...options,
+        anthropic: { ...options["anthropic"], ...CACHE_BREAKPOINT.anthropic },
+      },
+    };
+  }) as ModelMessage[];
+}
+
+/**
+ * The step's messages as plain JSON, as the assistant stores and replays them. Blank text parts
+ * are dropped (Claude refuses them when they are sent back), and so is an answer left with
+ * neither text nor a tool call.
+ */
+function keepableMessages(messages: readonly unknown[]): AiMessage[] {
+  const plain = JSON.parse(JSON.stringify(messages)) as AiMessage[];
+  return plain.flatMap((message) => {
+    if (message.role !== "assistant") return [message];
+    if (typeof message.content === "string") return message.content.trim() ? [message] : [];
+    const parts = (Array.isArray(message.content) ? message.content : []).filter(
+      (part: { type?: unknown; text?: unknown }) =>
+        part.type !== "text" || (typeof part.text === "string" && part.text.trim() !== ""),
+    ) as { type?: unknown }[];
+    const says = parts.some((part) => part.type === "text" || part.type === "tool-call");
+    return says ? [{ ...message, content: parts }] : [];
+  });
 }
 
 /**
