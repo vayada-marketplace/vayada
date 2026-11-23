@@ -11,7 +11,9 @@
 //   expire after DELEGATED_CONTEXT_MAX_AGE_MS so a cached one stops working;
 // - narrowed to the member's own properties (VAY-2567 rank 1a): the delegated context keeps only the
 //   links of the properties this member may use, on top of the routes' own member check (VAY-2574),
-//   and can narrow further to the action's properties. Narrowing can only take rights away.
+//   and can narrow further to the action's properties. Narrowing can only take rights away;
+// - read-only unless it came from resolveDelegatedChangeContext (VAY-2522): every tool call gets a
+//   "read" delegation, and only the one executor of AI changes (VAY-2524) mints a "change" one.
 import { randomUUID } from "node:crypto";
 
 import { AuthError, DelegationRefusedError } from "./errors.js";
@@ -50,7 +52,8 @@ export type DelegatedContextInput = {
   userId: string;
   /** Internal organization id; for MCP it comes from the connection row, never from a token. */
   organizationId: string;
-  delegation: RequestDelegation;
+  /** Where the call came from. Its access is set by the resolver, never by the caller. */
+  delegation: Omit<RequestDelegation, "access">;
   /** Narrows the delegation to these properties. It can never add one. */
   propertyIds?: readonly string[];
   locale?: string;
@@ -64,15 +67,38 @@ export type DelegatedContextOptions = {
 };
 
 /**
- * Resolves the narrowed RequestContext of an AI tool call that acts as `userId` in
+ * Resolves the narrowed, read-only RequestContext of an AI tool call that acts as `userId` in
  * `organizationId`. Throws AuthError when the user, account or membership is missing or not
  * active, and DelegationRefusedError for platform accounts or malformed input.
  */
-export async function resolveDelegatedContext(
+export function resolveDelegatedContext(
   repo: IdentityRepository,
   input: DelegatedContextInput,
   options: DelegatedContextOptions,
 ): Promise<RequestContext> {
+  return resolveDelegated(repo, input, options, "read");
+}
+
+/**
+ * The same context with "change" access: it may also run write routes. Only the one executor of
+ * AI changes may call this (VAY-2524; enforced by apps/api's delegation boundary test). It runs a
+ * change the person already confirmed, or one that needs no confirmation, never a model's wish.
+ */
+export function resolveDelegatedChangeContext(
+  repo: IdentityRepository,
+  input: DelegatedContextInput,
+  options: DelegatedContextOptions,
+): Promise<RequestContext> {
+  return resolveDelegated(repo, input, options, "change");
+}
+
+async function resolveDelegated(
+  repo: IdentityRepository,
+  given: DelegatedContextInput,
+  options: DelegatedContextOptions,
+  access: RequestDelegation["access"],
+): Promise<RequestContext> {
+  const input = snapshotInput(given);
   assertDelegatedInput(input);
   if (!repo.findUserById || !repo.findOrganizationById) {
     throw new Error("The identity repository cannot resolve delegated contexts.");
@@ -154,12 +180,13 @@ export async function resolveDelegatedContext(
       source: "agent",
       receivedAt: (options.now?.() ?? new Date()).toISOString(),
     },
-    delegation: { ...input.delegation },
   };
 
   const authorization = await options.authorizationResolver(base);
   const resolved: RequestContext = {
     ...base,
+    // Set after the resolver ran, so nothing it does can touch the access (VAY-2522 review).
+    delegation: { ...input.delegation, access },
     membership: {
       ...base.membership,
       permissions: [...authorization.permissions],
@@ -256,6 +283,7 @@ export function isDelegatedContext(context: RequestContext): boolean {
     context.audit.source !== "agent" ||
     !context.delegation ||
     context.delegation.toolCallId !== context.audit.correlationId ||
+    (context.delegation.access !== "read" && context.delegation.access !== "change") ||
     context.actor.providerIdentity.sessionId !== undefined ||
     context.actor.status !== "active" ||
     context.selectedOrganization.kind !== "hotel_group" ||
@@ -279,13 +307,47 @@ function keepsEntitlement(entitlement: ProductEntitlement, allowed: ReadonlySet<
   );
 }
 
+/**
+ * A plain copy that reads every field once and keeps only the known delegation fields, so a getter
+ * or Proxy can't change what was checked (VAY-2522 review M1).
+ */
+function snapshotInput(input: DelegatedContextInput): DelegatedContextInput {
+  const { userId, organizationId, delegation, propertyIds, locale, currency } = input;
+  if (typeof delegation !== "object" || delegation === null) {
+    throw new DelegationRefusedError("a delegation is required");
+  }
+  // The access comes from which resolver was called, never from the input (VAY-2522).
+  if ("access" in delegation) throw new DelegationRefusedError("the caller may not set access");
+  const { channel, connectionId, conversationId, toolCallId } = delegation;
+  if (propertyIds !== undefined && !Array.isArray(propertyIds)) {
+    throw new DelegationRefusedError("malformed property id");
+  }
+  return {
+    userId,
+    organizationId,
+    delegation: {
+      channel,
+      ...(connectionId !== undefined ? { connectionId } : {}),
+      ...(conversationId !== undefined ? { conversationId } : {}),
+      toolCallId,
+    },
+    ...(propertyIds !== undefined ? { propertyIds: [...propertyIds] } : {}),
+    ...(locale !== undefined ? { locale } : {}),
+    ...(currency !== undefined ? { currency } : {}),
+  };
+}
+
+/** RegExp.test turns any value into a string (undefined, or an object's own toString): strings only. */
+const matches = (pattern: RegExp, value: unknown): value is string =>
+  typeof value === "string" && pattern.test(value);
+
 function assertDelegatedInput(input: DelegatedContextInput): void {
-  if (!UUID.test(input.userId)) throw new DelegationRefusedError("malformed user id");
-  if (!UUID.test(input.organizationId)) {
+  if (!matches(UUID, input.userId)) throw new DelegationRefusedError("malformed user id");
+  if (!matches(UUID, input.organizationId)) {
     throw new DelegationRefusedError("malformed organization id");
   }
   const { delegation } = input;
-  if (!TOOL_CALL_ID.test(delegation.toolCallId)) {
+  if (!matches(TOOL_CALL_ID, delegation.toolCallId)) {
     throw new DelegationRefusedError("malformed tool-call id");
   }
   const origin =
@@ -294,16 +356,16 @@ function assertDelegatedInput(input: DelegatedContextInput): void {
       : delegation.channel === "in_app"
         ? { id: delegation.conversationId, other: delegation.connectionId }
         : null;
-  if (!origin || !origin.id || !UUID.test(origin.id) || origin.other !== undefined) {
+  if (!origin || !matches(UUID, origin.id) || origin.other !== undefined) {
     throw new DelegationRefusedError("a delegation needs exactly its connection or conversation");
   }
-  if (input.propertyIds && !input.propertyIds.every((id) => UUID.test(id))) {
+  if (input.propertyIds && !input.propertyIds.every((id) => matches(UUID, id))) {
     throw new DelegationRefusedError("malformed property id");
   }
-  if (input.locale !== undefined && !LOCALE.test(input.locale)) {
+  if (input.locale !== undefined && !matches(LOCALE, input.locale)) {
     throw new DelegationRefusedError("malformed locale");
   }
-  if (input.currency !== undefined && !CURRENCY.test(input.currency)) {
+  if (input.currency !== undefined && !matches(CURRENCY, input.currency)) {
     throw new DelegationRefusedError("malformed currency");
   }
 }

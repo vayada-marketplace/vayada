@@ -6,6 +6,7 @@ import {
   isDelegatedContext,
   isMintedDelegatedContext,
   narrowDelegatedContext,
+  resolveDelegatedChangeContext,
   resolveDelegatedContext,
   type DelegatedContextInput,
 } from "./delegatedContext.js";
@@ -234,6 +235,7 @@ describe("resolveDelegatedContext (VAY-2506)", () => {
       channel: "in_app",
       conversationId: CONVERSATION,
       toolCallId: "call_1",
+      access: "read",
     });
     expect(context.membership.permissions).toEqual(["pms.reservation.read", "pms.calendar.read"]);
     expect(isDelegatedContext(context)).toBe(true);
@@ -403,6 +405,63 @@ describe("resolveDelegatedContext (VAY-2506)", () => {
     await expect(resolve(overrides)).rejects.toThrow(DelegationRefusedError);
   });
 
+  it("never takes its access from the caller (VAY-2522)", async () => {
+    const smuggled = {
+      delegation: { ...input().delegation, access: "change" },
+    } as unknown as Partial<DelegatedContextInput>;
+    await expect(resolve(smuggled)).rejects.toThrow(/may not set access/);
+    await expect(
+      resolveDelegatedChangeContext(repository(), input(smuggled), { authorizationResolver }),
+    ).rejects.toThrow(/may not set access/);
+  });
+
+  it("reads its input once: a getter can't add access or change the call after the checks", async () => {
+    let reads = 0;
+    const given = {
+      ...input(),
+      get delegation() {
+        reads += 1;
+        return reads === 1
+          ? { channel: "in_app" as const, conversationId: CONVERSATION, toolCallId: "call_1" }
+          : ({
+              channel: "mcp",
+              connectionId: CONVERSATION,
+              toolCallId: "x",
+              access: "change",
+            } as never);
+      },
+    };
+    const context = await resolveDelegatedContext(repository(), given, { authorizationResolver });
+    expect(reads).toBe(1);
+    expect(context.delegation).toEqual({
+      channel: "in_app",
+      conversationId: CONVERSATION,
+      toolCallId: "call_1",
+      access: "read",
+    });
+  });
+
+  it.each([
+    ["no delegation", { delegation: undefined }],
+    ["a delegation that is not an object", { delegation: "in_app" }],
+    ["a missing tool-call id", { delegation: { channel: "in_app", conversationId: CONVERSATION } }],
+    // RegExp.test calls toString: an object that says it is a UUID is not one (review N1).
+    ["a user id that only says it is a UUID", { userId: { toString: (): string => USER } }],
+    [
+      "a conversation id that only says it is a UUID",
+      {
+        delegation: {
+          channel: "in_app",
+          conversationId: { toString: (): string => CONVERSATION },
+          toolCallId: "c",
+        },
+      },
+    ],
+    ["a locale that only says it is one", { locale: { toString: (): string => "en" } }],
+  ])("refuses %s", async (_label, overrides) => {
+    await expect(resolve(overrides as never)).rejects.toThrow(DelegationRefusedError);
+  });
+
   it("needs the by-id lookups", async () => {
     await expect(resolve({}, { byIdLookups: false })).rejects.toThrow(/cannot resolve/);
   });
@@ -413,6 +472,25 @@ describe("resolveDelegatedContext (VAY-2506)", () => {
     });
     expect(context.linkedResources).toEqual([]);
     expect(context.membership.permissions).toEqual([]);
+  });
+});
+
+describe("resolveDelegatedChangeContext (VAY-2522)", () => {
+  it("is the same narrowed context with change access, minted like a read one", async () => {
+    const read = await resolve();
+    const change = await resolveDelegatedChangeContext(repository(), input(), {
+      authorizationResolver,
+      now: () => new Date("2026-11-20T12:00:00Z"),
+    });
+    expect(change.delegation?.access).toBe("change");
+    const { delegation: readDelegation, audit: readAudit, ...readRest } = read;
+    const { delegation: changeDelegation, audit: changeAudit, ...changeRest } = change;
+    expect(changeRest).toEqual(readRest);
+    expect({ ...changeDelegation, access: "read" }).toEqual(readDelegation);
+    expect({ ...changeAudit, requestId: readAudit.requestId }).toEqual(readAudit);
+    expect(isDelegatedContext(change)).toBe(true);
+    expect(isMintedDelegatedContext(change)).toBe(true);
+    expect(Object.isFrozen(change.delegation)).toBe(true);
   });
 });
 
@@ -455,6 +533,8 @@ describe("minted delegated contexts", () => {
         ],
       },
       { ...base, delegation: undefined },
+      { ...base, delegation: { ...base.delegation!, access: "write" as "change" } },
+      { ...base, delegation: { ...base.delegation!, access: undefined as unknown as "read" } },
     ];
     expect(isDelegatedContext(base)).toBe(true);
     for (const variant of variants) expect(isDelegatedContext(variant)).toBe(false);

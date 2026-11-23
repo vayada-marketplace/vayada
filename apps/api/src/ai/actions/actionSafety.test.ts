@@ -5,7 +5,11 @@
 //   - no permission is skipped (without the declared key the route itself refuses);
 //   - no other hotel: other property of the account for an assigned-only member, other account;
 //   - every surface the action lists works, through the app's default delegation gate.
-import { injectAsDelegate, type PermissionKey } from "@vayada/backend-auth";
+import {
+  injectAsDelegate,
+  resolveDelegatedChangeContext,
+  type PermissionKey,
+} from "@vayada/backend-auth";
 import type { LightMyRequestResponse } from "fastify";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -13,7 +17,13 @@ import { buildApp } from "../../app.js";
 import { memoryAiActionLog } from "../actionLog/memoryActionLog.fixtures.js";
 import { runDelegatedRead } from "../delegatedRead.js";
 import { ACTION_FIXTURES, type ActionFixture } from "./actionFixtures.fixtures.js";
-import { FORBIDDEN, WORLD, worldAuthorization, worldContext } from "./actionTestWorld.fixtures.js";
+import {
+  FORBIDDEN,
+  WORLD,
+  worldAuthorization,
+  worldContext,
+  worldIdentity,
+} from "./actionTestWorld.fixtures.js";
 import { allowListPaths, type RouteAction } from "./defineRouteAction.js";
 import { AI_ACTIONS } from "./registry.js";
 import { runRouteAction } from "./runRouteAction.js";
@@ -233,6 +243,49 @@ describe("the app's default delegation gate", () => {
     expect(response.json()).toMatchObject({
       code: "delegation_refused",
       message: expect.stringContaining("not delegable"),
+    });
+  });
+
+  it("refuses a mounted write route even to an owner's change delegation (VAY-2522)", async () => {
+    const fixture = ACTION_FIXTURES.find((f) => f.action === "rooms_list@1")!;
+    const permissions: PermissionKey[] = ["pms.inbox.read", "pms.inbox.reply"];
+    const app = buildApp({
+      logger: false,
+      ...fixture.appOptions(),
+      auth: worldAuthorization(permissions).auth,
+    });
+    apps.push(app);
+    // Marking an inbox thread read: a write route that is always mounted, and not an action.
+    const routeUrl = "/api/pms/properties/:propertyId/messaging/threads/:threadId/read";
+    const url = routeUrl
+      .replace(":propertyId", WORLD.P1)
+      .replace(":threadId", "44444444-4444-4444-8444-444444444444");
+    expect((await app.inject({ method: "POST", url, payload: {} })).statusCode).not.toBe(404);
+    const context = await resolveDelegatedChangeContext(
+      worldIdentity,
+      {
+        userId: WORLD.OWNER,
+        organizationId: WORLD.ORG_A,
+        delegation: {
+          channel: "in_app",
+          conversationId: WORLD.CONVERSATION,
+          toolCallId: "call_change_gate",
+        },
+      },
+      { authorizationResolver: worldAuthorization(permissions).resolver },
+    );
+    const response = await injectAsDelegate(app, {
+      context,
+      method: "POST",
+      routeUrl,
+      url,
+      body: {},
+      idempotencyKey: "op_change_gate:1",
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({
+      code: "delegation_refused",
+      message: expect.stringContaining("not delegable (POST"),
     });
   });
 });

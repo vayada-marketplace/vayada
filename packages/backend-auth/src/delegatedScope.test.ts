@@ -9,8 +9,13 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { randomUUID } from "node:crypto";
 
-import { resolveDelegatedContext } from "./delegatedContext.js";
-import { injectAsDelegate, type DelegatedRouteGate } from "./delegatedScope.js";
+import { resolveDelegatedChangeContext, resolveDelegatedContext } from "./delegatedContext.js";
+import {
+  DELEGATED_BODY_MAX_BYTES,
+  injectAsDelegate,
+  type DelegatedMethod,
+  type DelegatedRouteGate,
+} from "./delegatedScope.js";
 import { DelegationRefusedError } from "./errors.js";
 import { backendAuthPlugin, requireAuthContext } from "./plugin.js";
 import type { IdentityRepository } from "./repository.js";
@@ -72,8 +77,13 @@ const mintingRepository: IdentityRepository = {
 };
 
 /** A context exactly as the AI layer gets it: resolved per tool call by resolveDelegatedContext. */
-function mint(label: string, options: { resolvedAt?: Date } = {}): Promise<RequestContext> {
-  return resolveDelegatedContext(
+function mint(
+  label: string,
+  options: { resolvedAt?: Date; access?: "read" | "change" } = {},
+): Promise<RequestContext> {
+  const resolver =
+    options.access === "change" ? resolveDelegatedChangeContext : resolveDelegatedContext;
+  return resolver(
     mintingRepository,
     {
       userId: uid(label),
@@ -126,6 +136,7 @@ function whoami(request: FastifyRequest) {
     source: ctx.audit.source,
     sessionId: ctx.actor.providerIdentity.sessionId ?? null,
     toolCallId: ctx.delegation?.toolCallId ?? null,
+    access: ctx.delegation?.access ?? null,
     requestId: ctx.audit.requestId,
     correlationId: ctx.audit.correlationId ?? null,
   };
@@ -171,6 +182,22 @@ async function buildTestApp(
     return { ok: true };
   });
   instance.post("/api/test/whoami", async (request) => whoami(request));
+  // What a write route receives: its body, the one Idempotency-Key, and who it runs as.
+  const echo = async (request: FastifyRequest) => ({
+    ...whoami(request),
+    method: request.method,
+    body: request.body ?? null,
+    contentType: request.headers["content-type"] ?? null,
+    idempotencyKey: request.headers["idempotency-key"] ?? null,
+    idempotencyKeyHeaders: request.raw.rawHeaders.filter(
+      (value, index) => index % 2 === 0 && value.toLowerCase() === "idempotency-key",
+    ).length,
+    nonce: request.headers["x-vayada-delegation-nonce"] ?? null,
+  });
+  instance.post("/api/test/echo", echo);
+  instance.put("/api/test/echo", echo);
+  instance.patch("/api/test/echo", echo);
+  instance.delete("/api/test/echo", echo);
   instance.get("/partner/v1/hotel", async (request) => ({ context: request.authContext !== null }));
   instance.get("/api/test/slow/:ms", async (request) => {
     await sleep(Number((request.params as { ms: string }).ms));
@@ -255,6 +282,7 @@ describe("delegated scope (VAY-2506)", () => {
       source: "agent",
       sessionId: null,
       toolCallId: "tool_call_u_1",
+      access: "read",
       requestId: expect.stringMatching(/^[0-9a-f-]{36}$/),
       correlationId: "tool_call_u_1",
     });
@@ -290,6 +318,10 @@ describe("delegated scope (VAY-2506)", () => {
       });
     expect((await (await call(requestId)).json()).requestId).toBe(requestId);
     await expect(call("tool_call_u_1")).rejects.toThrow(DelegationRefusedError);
+    // An object whose toString says a UUID is still not one (VAY-2522 review N1).
+    await expect(call({ toString: () => requestId } as unknown as string)).rejects.toThrow(
+      /request id must be a UUID/,
+    );
   });
 
   it("is never visible to an outside request, before, during or after", async () => {
@@ -367,7 +399,7 @@ describe("delegated scope (VAY-2506)", () => {
     expect(res.json().message).toContain("bearer token");
   });
 
-  it("only takes GET, only a context resolveDelegatedContext returned, and only while fresh", async () => {
+  it("only takes a context resolveDelegatedContext returned, and only while fresh", async () => {
     const instance = await buildTestApp();
     const call = (context: RequestContext, method = "GET", url = "/api/test/whoami") =>
       injectAsDelegate(instance, {
@@ -378,7 +410,8 @@ describe("delegated scope (VAY-2506)", () => {
       });
     const minted = await mint("u_1");
     expect((await call(minted)).statusCode).toBe(200);
-    await expect(call(minted, "POST")).rejects.toThrow(/only GET/);
+    await expect(call(minted, "POST")).rejects.toThrow(/may only read/);
+    await expect(call(minted, "OPTIONS")).rejects.toThrow(/unsupported method/);
     // A copy with exactly the same content was not minted, so it is refused (review M1).
     await expect(call(structuredClone(minted))).rejects.toThrow(/resolveDelegatedContext/);
     await expect(call({ ...minted })).rejects.toThrow(/resolveDelegatedContext/);
@@ -466,5 +499,194 @@ describe("delegated scope (VAY-2506)", () => {
       expect(r.status).toBe(200);
       expect(r.userId).toBe(uid(`u_${r.i}`));
     }
+  });
+});
+
+describe("write delegation (VAY-2522)", () => {
+  const KEY = "op_2522-0001:1";
+  const write = async (
+    instance: FastifyInstance,
+    options: {
+      method?: DelegatedMethod;
+      access?: "read" | "change";
+      routeUrl?: string;
+      url?: string;
+      body?: unknown;
+      idempotencyKey?: string | null;
+    } = {},
+  ) =>
+    injectAsDelegate(instance, {
+      context: await mint("u_1", { access: options.access ?? "change" }),
+      method: options.method ?? "POST",
+      routeUrl: options.routeUrl ?? "/api/test/echo",
+      url: options.url ?? options.routeUrl ?? "/api/test/echo",
+      ...(options.body === undefined ? {} : { body: options.body }),
+      ...(options.idempotencyKey === null ? {} : { idempotencyKey: options.idempotencyKey ?? KEY }),
+    });
+
+  it("refuses every write on a read delegation, before the route runs", async () => {
+    const instance = await buildTestApp();
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"] as const) {
+      await expect(write(instance, { method, access: "read" })).rejects.toThrow(/may only read/);
+    }
+  });
+
+  it.each(["POST", "PUT", "PATCH", "DELETE"] as const)(
+    "runs a %s on a change delegation with its JSON body and exactly one Idempotency-Key",
+    async (method) => {
+      const instance = await buildTestApp();
+      const res = await write(instance, { method, body: { note: "Late arrival", nights: 2 } });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        userId: uid("u_1"),
+        source: "agent",
+        sessionId: null,
+        access: "change",
+        method,
+        body: { note: "Late arrival", nights: 2 },
+        contentType: "application/json",
+        idempotencyKey: KEY,
+        idempotencyKeyHeaders: 1,
+        nonce: null,
+      });
+    },
+  );
+
+  it("sends no body and no content type when the change has none", async () => {
+    const instance = await buildTestApp();
+    const res = await write(instance, { method: "DELETE" });
+    expect(res.json()).toMatchObject({ body: null, contentType: null, idempotencyKey: KEY });
+  });
+
+  it.each([
+    ["no key", null],
+    ["a key too short", "op_2522"],
+    ["a key too long", "k".repeat(129)],
+    ["a key with spaces", "op 2522 0001"],
+    ["a key with a line break", "op_2522\r\nx-evil: 1"],
+  ])("refuses a change with %s", async (_label, idempotencyKey) => {
+    const instance = await buildTestApp();
+    await expect(write(instance, { idempotencyKey })).rejects.toThrow(/Idempotency-Key/);
+  });
+
+  it("refuses a read that sends a body or an Idempotency-Key, also on a change delegation", async () => {
+    const instance = await buildTestApp();
+    const read = async (extra: { body?: unknown; idempotencyKey?: string }) =>
+      injectAsDelegate(instance, {
+        context: await mint("u_1", { access: "change" }),
+        method: "GET",
+        routeUrl: "/api/test/whoami",
+        url: "/api/test/whoami",
+        ...extra,
+      });
+    await expect(read({ body: {} })).rejects.toThrow(/no body/);
+    await expect(read({ idempotencyKey: KEY })).rejects.toThrow(/no body/);
+    expect((await read({})).json()).toMatchObject({ access: "change" });
+  });
+
+  it("takes Idempotency-Keys of 8 to 128 characters", async () => {
+    const instance = await buildTestApp();
+    for (const key of ["op_25221", "k".repeat(128)]) {
+      expect((await write(instance, { idempotencyKey: key })).json().idempotencyKey).toBe(key);
+    }
+  });
+
+  it("takes only a plain JSON object or array as the body", async () => {
+    const instance = await buildTestApp();
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    for (const body of [
+      cyclic,
+      { n: BigInt(1) },
+      () => 1,
+      null,
+      "text",
+      42,
+      new Map([["a", 1]]),
+      new Date(0),
+      { toJSON: () => "text" },
+    ]) {
+      await expect(write(instance, { body })).rejects.toThrow(/JSON object or array/);
+    }
+    expect((await write(instance, { body: [{ id: 1 }] })).json().body).toEqual([{ id: 1 }]);
+  });
+
+  it("counts the body's UTF-8 bytes, up to exactly the limit", async () => {
+    const instance = await buildTestApp();
+    // {"text":"…"} adds 11 bytes around the text.
+    const ascii = (n: number) => ({ text: "x".repeat(n) });
+    expect((await write(instance, { body: ascii(DELEGATED_BODY_MAX_BYTES - 11) })).statusCode).toBe(
+      200,
+    );
+    await expect(write(instance, { body: ascii(DELEGATED_BODY_MAX_BYTES - 10) })).rejects.toThrow(
+      /too large/,
+    );
+    // Fewer characters than the limit, but two bytes each.
+    const accents = { text: "é".repeat(Math.ceil((DELEGATED_BODY_MAX_BYTES - 10) / 2)) };
+    expect(JSON.stringify(accents).length).toBeLessThan(DELEGATED_BODY_MAX_BYTES);
+    await expect(write(instance, { body: accents })).rejects.toThrow(/too large/);
+  });
+
+  it("reads its input once: a getter can't swap what was checked for what is sent", async () => {
+    const instance = await buildTestApp();
+    const readContext = await mint("u_1");
+    const otherChange = await mint("u_other", { access: "change" });
+    const reads = { context: 0, method: 0, idempotencyKey: 0 };
+    const input = {
+      routeUrl: "/api/test/echo",
+      url: "/api/test/echo",
+      get context() {
+        return reads.context++ === 0 ? otherChange : readContext;
+      },
+      get method() {
+        return reads.method++ === 0 ? ("POST" as const) : ("GET" as const);
+      },
+      get idempotencyKey() {
+        return reads.idempotencyKey++ === 0 ? KEY : "bad key";
+      },
+    };
+    const res = await injectAsDelegate(instance, input);
+    expect(res.json()).toMatchObject({
+      userId: uid("u_other"),
+      access: "change",
+      method: "POST",
+      idempotencyKey: KEY,
+    });
+    expect(reads).toEqual({ context: 1, method: 1, idempotencyKey: 1 });
+  });
+
+  it("holds the same route rules as a read: declared route, method, gate", async () => {
+    const instance = await buildTestApp({
+      gate: { allowsRoute: (method, url) => method === "POST" && url === "/api/test/echo" },
+    });
+    expect((await write(instance)).statusCode).toBe(200);
+    // Declared POST, sent to a route mounted only for GET: no route, refused by the hook.
+    const getOnly = await write(instance, { routeUrl: "/api/test/other" });
+    expect(getOnly.statusCode).toBe(403);
+    // The gate allows POST only.
+    const put = await write(instance, { method: "PUT" });
+    expect(put.statusCode).toBe(403);
+    expect(put.json().message).toContain("not delegable");
+    // Declared one route, sent to another.
+    const other = await write(instance, { routeUrl: "/api/test/echo", url: "/api/test/whoami" });
+    expect(other.statusCode).toBe(403);
+  });
+
+  it("is one-shot for writes too: a raw write from inside the handler gets no user", async () => {
+    const instance = Fastify({ logger: false });
+    await instance.register(backendAuthPlugin, {
+      verifier: createFakeVerifier(new Map()),
+      repository: refusingRepository,
+      delegation: allowAll,
+    });
+    instance.post("/api/test/outer", async () => {
+      const inner = await instance.inject({ method: "POST", url: "/api/test/inner", payload: {} });
+      return { innerStatus: inner.statusCode, innerCode: inner.json().code ?? null };
+    });
+    instance.post("/api/test/inner", async (request) => whoami(request));
+    await instance.ready();
+    app = instance;
+    const res = await write(instance, { routeUrl: "/api/test/outer" });
+    expect(res.json()).toEqual({ innerStatus: 403, innerCode: "delegation_refused" });
   });
 });
