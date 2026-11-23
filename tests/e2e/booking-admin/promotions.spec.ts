@@ -135,7 +135,7 @@ test("manages all automatic promotions in Promos and preserves last-minute tiers
     body: await page.screenshot({ fullPage: true }),
     contentType: "image/png",
   });
-  await page.getByRole("button", { name: "Collapse", exact: true }).click();
+  await page.getByRole("button", { name: "Collapse sidebar", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
@@ -281,7 +281,7 @@ test("shows the empty state and a keyboard-friendly type menu styled like New pr
     expect.objectContaining({ type: "LAST_MINUTE", active: false, threshold: 5 }),
   ]);
 
-  await page.getByRole("button", { name: "Collapse", exact: true }).click();
+  await page.getByRole("button", { name: "Collapse sidebar", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   await button.click();
   const menu = await page.getByRole("menu").boundingBox();

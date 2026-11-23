@@ -3,12 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  ChevronLeftIcon,
-  ChevronDownIcon,
-  CheckIcon,
-  Cog6ToothIcon,
-} from "@heroicons/react/24/outline";
+import { ChevronDownIcon, CheckIcon, Cog6ToothIcon } from "@heroicons/react/24/outline";
 import { useFeatureModuleActivations, visibleNavModules } from "@vayada/feature-hub";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
@@ -43,6 +38,17 @@ const MODULE_LABEL_KEYS: Record<string, string> = {
   promos: "bookingFlow.tabs.promos",
 };
 
+// The sidebar's collapsed/expanded choice, kept across pages and reloads (VAY-2593).
+const COLLAPSED_STORAGE_KEY = "vayada.bookingAdmin.sidebarCollapsed";
+
+function storedCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(COLLAPSED_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
 const settingsNavItem: NavItem = {
   labelKey: "layout.sidebar.settings",
   href: "/settings",
@@ -51,7 +57,8 @@ const settingsNavItem: NavItem = {
 
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
+  // The app layout renders the sidebar only in the browser, after sign-in, so this can read storage.
+  const [collapsed, setCollapsed] = useState(storedCollapsed);
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
   const [enabledProducts, setEnabledProducts] = useState<Set<Product>>(
@@ -97,6 +104,20 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     }
   };
 
+  const toggleCollapsed = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    setShowSwitcher(false);
+    try {
+      window.localStorage.setItem(COLLAPSED_STORAGE_KEY, String(next));
+    } catch {
+      // Storage off or full: the choice lasts until the page reloads.
+    }
+  };
+  const toggleLabel = t(
+    collapsed ? "layout.sidebar.expandSidebar" : "layout.sidebar.collapseSidebar",
+  );
+
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (switcherRef.current && !switcherRef.current.contains(e.target as Node)) {
@@ -141,34 +162,39 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     <aside
       className={cn(
         "h-full bg-white border-r border-gray-200 flex flex-col shrink-0 transition-all duration-200",
-        collapsed ? "w-14" : "w-52",
+        collapsed ? "w-16" : "w-52",
       )}
     >
       {/* App Switcher */}
       <div className="relative border-b border-gray-200 shrink-0" ref={switcherRef}>
-        <button
-          onClick={() => !collapsed && setShowSwitcher(!showSwitcher)}
-          className={cn(
-            "h-12 w-full px-3 flex items-center gap-2.5 hover:bg-gray-50 transition-colors",
-            collapsed && "justify-center px-0",
-          )}
-        >
-          <div className="w-7 h-7 bg-primary-500 rounded-md flex items-center justify-center shrink-0">
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 18 18"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <rect x="2" y="3" width="14" height="12" rx="2" stroke="white" strokeWidth="1.5" />
-              <path d="M2 7H16" stroke="white" strokeWidth="1.5" />
-              <path d="M6 3V1" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
-              <path d="M12 3V1" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </div>
+        <div className={cn("h-12 flex items-center", collapsed ? "justify-center" : "pr-2")}>
           {!collapsed && (
-            <>
+            <button
+              onClick={() => setShowSwitcher(!showSwitcher)}
+              className="h-full min-w-0 flex-1 px-3 flex items-center gap-2.5 hover:bg-gray-50 transition-colors"
+            >
+              <div className="w-7 h-7 bg-primary-500 rounded-md flex items-center justify-center shrink-0">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 18 18"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <rect
+                    x="2"
+                    y="3"
+                    width="14"
+                    height="12"
+                    rx="2"
+                    stroke="white"
+                    strokeWidth="1.5"
+                  />
+                  <path d="M2 7H16" stroke="white" strokeWidth="1.5" />
+                  <path d="M6 3V1" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
+                  <path d="M12 3V1" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </div>
               <div className="min-w-0 text-left flex-1">
                 <p className="text-xs font-semibold text-gray-900 leading-tight">
                   {t("layout.sidebar.bookingEngine")}
@@ -183,9 +209,18 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   showSwitcher && "rotate-180",
                 )}
               />
-            </>
+            </button>
           )}
-        </button>
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-label={toggleLabel}
+            title={toggleLabel}
+            className="shrink-0 w-8 h-8 flex items-center justify-center rounded-md border border-gray-200 text-gray-500 hover:text-gray-900 hover:bg-gray-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+          >
+            <SidebarToggleIcon collapsed={collapsed} className="w-[18px] h-[18px]" />
+          </button>
+        </div>
 
         {switchError && (
           <p className="px-3 py-2 text-xs text-red-600" role="alert">
@@ -319,28 +354,31 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           );
         })}
       </nav>
-
-      {/* Bottom section */}
-      <div className="px-2 pb-2 space-y-1.5">
-        {/* Collapse toggle */}
-        <button
-          onClick={() => setCollapsed(!collapsed)}
-          className={cn(
-            "flex items-center gap-2 w-full px-2.5 py-1.5 text-[13px] text-gray-500 hover:text-gray-700 rounded-md hover:bg-gray-50 transition-colors",
-            collapsed && "justify-center px-0",
-          )}
-        >
-          <ChevronLeftIcon
-            className={cn("w-3.5 h-3.5 transition-transform", collapsed && "rotate-180")}
-          />
-          {!collapsed && <span>{t("layout.sidebar.collapse")}</span>}
-        </button>
-      </div>
     </aside>
   );
 }
 
 /* Custom icon components matching the screenshot */
+
+/** A side panel with a chevron: left to collapse, right to expand (VAY-2593). */
+function SidebarToggleIcon({ collapsed, className }: { collapsed: boolean; className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M9 4v16" />
+      <path d={collapsed ? "M13.5 10l2 2-2 2" : "M15.5 10l-2 2 2 2"} />
+    </svg>
+  );
+}
 
 function DashboardIcon({ className }: { className?: string }) {
   return (
