@@ -81,88 +81,95 @@ export default function NearbyEditor({
         }
       : null;
   return (
-    <div className="space-y-6">
-      {/* page-header: Booking Admin's shared header spacing (VAY-2199). */}
-      <div className="page-header">
-        <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">
-          {t("nearbyPlaces.page.title")}
-        </h1>
-        <p className="mt-[var(--page-subtitle-gap,4px)] text-[13px] text-gray-500">
-          {profile.profile.displayName}
-        </p>
-      </div>
-      {editor.error && (
-        <div role="alert" className="rounded-xl bg-red-50 p-4 text-sm text-red-800">
-          <p>{t(editor.error)}</p>
-          <button type="button" className="mt-2 underline" onClick={reload}>
-            {t("nearbyPlaces.reloadLatest")}
-          </button>
+    <>
+      <div className="space-y-6">
+        {/* page-header: Booking Admin's shared header spacing (VAY-2199). */}
+        <div className="page-header">
+          <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">
+            {t("nearbyPlaces.page.title")}
+          </h1>
+          <p className="mt-[var(--page-subtitle-gap,4px)] text-[13px] text-gray-500">
+            {profile.profile.displayName}
+          </p>
         </div>
-      )}
-      {/* A live hotel's refused time zone or country: the server says what to do; reloading wouldn't help. */}
-      {editor.serverError && (
-        <p role="alert" className="rounded-xl bg-red-50 p-4 text-sm text-red-800">
-          {editor.serverError}
-        </p>
-      )}
-      {editor.notice && (
-        <p role="status" className="rounded-xl bg-green-50 p-4 text-sm text-green-800">
-          {t(editor.notice)}
-        </p>
-      )}
-      {intro?.(profile.profileRevision)}
-      {/* The address takes the full width, its map next to the fields; nearby places below (VAY-2322). */}
-      <div className="space-y-8">
-        <form
-          className="space-y-5 rounded-2xl border border-gray-200 bg-white p-5 sm:p-6"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void editor.saveLocation();
-          }}
-        >
-          <NearbyLocationForm
-            apiKey={apiKey}
-            value={location}
-            onChange={editor.setLocation}
-            disabled={editor.busy}
-            translate={addressTranslate}
-            locale={locale}
-            timezoneId={timezoneId}
-            countryId={countryId}
-          />
-          <button className={primary} disabled={editor.busy || !editor.locationDirty} type="submit">
-            {editor.busy
-              ? (addressTranslate?.("locationForm.saving") ??
-                nearbyLocationEnglish["locationForm.saving"])
-              : (addressTranslate?.("locationForm.save") ??
-                nearbyLocationEnglish["locationForm.save"])}
-          </button>
-        </form>
-        {editor.locationDirty && (
-          <p role="status" className="text-sm text-amber-800">
-            {t("nearbyPlaces.locationDirty")}
+        {editor.error && (
+          <div role="alert" className="rounded-xl bg-red-50 p-4 text-sm text-red-800">
+            <p>{t(editor.error)}</p>
+            <button type="button" className="mt-2 underline" onClick={reload}>
+              {t("nearbyPlaces.reloadLatest")}
+            </button>
+          </div>
+        )}
+        {/* A live hotel's refused time zone or country: the server says what to do; reloading wouldn't help. */}
+        {editor.serverError && (
+          <p role="alert" className="rounded-xl bg-red-50 p-4 text-sm text-red-800">
+            {editor.serverError}
           </p>
         )}
-        <NearbyPlacesEditor
-          t={t}
-          locale={locale}
-          apiKey={apiKey}
-          propertyName={profile.profile.displayName}
-          propertyPin={pin}
-          saved={saved}
-          draft={draft}
-          setDraft={(update) => editor.setDraft((current) => current && update(current))}
-          disabled={editor.busy || editor.locationDirty}
-          busy={editor.busy}
-          dirty={editor.placesDirty}
-          locationDirty={editor.locationDirty}
-          reconfirm={reconfirm}
-          onSave={() => void editor.savePlaces()}
-          onDiscard={editor.discard}
-          guestMap={guestMap}
-          onFormOpen={setFormOpen}
-        />
+        {editor.notice && (
+          <p role="status" className="rounded-xl bg-green-50 p-4 text-sm text-green-800">
+            {t(editor.notice)}
+          </p>
+        )}
+        {intro?.(profile.profileRevision)}
+        {/* The address takes the full width, its map next to the fields; nearby places below (VAY-2322). */}
+        <div className="space-y-8">
+          <form
+            className="space-y-5 rounded-2xl border border-gray-200 bg-white p-5 sm:p-6"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void editor.saveLocation();
+            }}
+          >
+            <NearbyLocationForm
+              apiKey={apiKey}
+              value={location}
+              onChange={editor.setLocation}
+              disabled={editor.busy}
+              translate={addressTranslate}
+              locale={locale}
+              timezoneId={timezoneId}
+              countryId={countryId}
+            />
+            <button
+              className={primary}
+              disabled={editor.busy || !editor.locationDirty}
+              type="submit"
+            >
+              {editor.busy
+                ? (addressTranslate?.("locationForm.saving") ??
+                  nearbyLocationEnglish["locationForm.saving"])
+                : (addressTranslate?.("locationForm.save") ??
+                  nearbyLocationEnglish["locationForm.save"])}
+            </button>
+          </form>
+          {editor.locationDirty && (
+            <p role="status" className="text-sm text-amber-800">
+              {t("nearbyPlaces.locationDirty")}
+            </p>
+          )}
+          <NearbyPlacesEditor
+            t={t}
+            locale={locale}
+            apiKey={apiKey}
+            propertyName={profile.profile.displayName}
+            propertyPin={pin}
+            saved={saved}
+            draft={draft}
+            setDraft={(update) => editor.setDraft((current) => current && update(current))}
+            disabled={editor.busy || editor.locationDirty}
+            busy={editor.busy}
+            dirty={editor.placesDirty}
+            locationDirty={editor.locationDirty}
+            reconfirm={reconfirm}
+            onSave={() => void editor.savePlaces()}
+            onDiscard={editor.discard}
+            guestMap={guestMap}
+            onFormOpen={setFormOpen}
+          />
+        </div>
       </div>
+      {/* Outside the space-y column: its top margin would push the fixed overlay 24px down. */}
       {editor.locationChange && (
         <LocationChangeConfirmDialog
           changes={editor.locationChange}
@@ -181,6 +188,6 @@ export default function NearbyEditor({
           locale={locale}
         />
       )}
-    </div>
+    </>
   );
 }

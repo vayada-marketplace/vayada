@@ -833,6 +833,10 @@ test("a live hotel's new time zone asks first: Keep saves nothing, Change saves 
     "pauses your booking page until you save your calendar again in PMS → Settings → Calendar",
   );
   await expect(page.getByText(conflict)).toHaveCount(0);
+  // The backdrop covers the whole screen, the header too (a spaced column once pushed it 24px down).
+  expect(
+    await question.evaluate((panel) => panel.parentElement!.getBoundingClientRect().toJSON()),
+  ).toMatchObject({ top: 0, left: 0 });
   const keep = question.getByRole("button", { name: "Keep Europe/Berlin", exact: true });
   await expect(keep).toBeFocused();
 
