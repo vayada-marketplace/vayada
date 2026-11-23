@@ -54,7 +54,10 @@ export function formatUsd(microUsd: number): string {
 /** The dollars typed for a budget, as the server takes them ("25", "12.50"), or null when they
  * are not whole dollars and cents from 0 to $100,000. A leading "$" and thousands commas are fine. */
 export function budgetInput(value: string): string | null {
-  const text = value.trim().replace(/^\$\s*/, "").replace(/,(?=\d{3}(\D|$))/g, "");
+  const text = value
+    .trim()
+    .replace(/^\$\s*/, "")
+    .replace(/,(?=\d{3}(\D|$))/g, "");
   if (!/^\d{1,6}(\.\d{1,2})?$/.test(text)) return null;
   return Number(text) <= MAX_MONTHLY_BUDGET_USD ? text : null;
 }
@@ -64,14 +67,26 @@ export function budgetField(account: AiAccountBudget): string {
   return account.custom ? (account.monthlyLimitMicroUsd / 1_000_000).toFixed(2) : "";
 }
 
-/** How much of its budget an account has used, for the bar (0 to 1), and whether its AI is paused
- * for the rest of the month. */
-export function budgetUse(account: AiAccountBudget): { share: number; usedUp: boolean } {
+/** How much of its budget an account has used, for the bar (0 to 1), and whether AI is stopped:
+ * a used-up budget pauses AI until the 1st, a $0 budget keeps it off (next month too). */
+export function budgetUse(account: AiAccountBudget): {
+  share: number;
+  usedUp: boolean;
+  off: boolean;
+} {
   const { usedMicroUsd: used, monthlyLimitMicroUsd: limit } = account;
   return {
     share: limit > 0 ? Math.min(1, used / limit) : used > 0 ? 1 : 0,
-    usedUp: used > 0 && used >= limit,
+    usedUp: limit > 0 && used >= limit,
+    off: limit === 0,
   };
+}
+
+/** The line under an account's spend when its AI is stopped this month, or null. */
+export function stoppedNote(account: AiAccountBudget, month: string): string | null {
+  const { usedUp, off } = budgetUse(account);
+  if (off && account.usedMicroUsd > 0) return "AI off: the budget is $0";
+  return usedUp ? `Used up · AI paused until ${nextMonthLabel(month)}` : null;
 }
 
 /** No spend and nothing to spend: the account has no AI at all this month. */

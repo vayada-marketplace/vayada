@@ -10,6 +10,7 @@ import {
   nextMonthLabel,
   noAiUse,
   problemOf,
+  stoppedNote,
   type AiAccountBudget,
 } from "./aiBudgets";
 
@@ -52,15 +53,20 @@ describe("AI budgets for vayada staff (VAY-2504)", () => {
     expect(budgetField(account({ custom: false, monthlyLimitMicroUsd: 0 }))).toBe("");
   });
 
-  it("pauses AI once the budget is used up, also when staff lowered it below the spend", () => {
-    expect(budgetUse(account())).toEqual({ share: 0.2564, usedUp: false });
-    expect(budgetUse(account({ usedMicroUsd: 25_000_000 }))).toEqual({ share: 1, usedUp: true });
-    expect(budgetUse(account({ monthlyLimitMicroUsd: 0 }))).toEqual({ share: 1, usedUp: true });
-    expect(budgetUse(account({ usedMicroUsd: 0, monthlyLimitMicroUsd: 0 }))).toEqual({
-      share: 0,
-      usedUp: false,
-    });
-    expect(noAiUse(account({ usedMicroUsd: 0, monthlyLimitMicroUsd: 0 }))).toBe(true);
+  it("pauses AI once the budget is used up, and says a $0 budget keeps it off", () => {
+    expect(budgetUse(account())).toEqual({ share: 0.2564, usedUp: false, off: false });
+    expect(stoppedNote(account(), "2026-11-01")).toBeNull();
+    const usedUp = account({ usedMicroUsd: 25_000_000 });
+    expect(budgetUse(usedUp)).toEqual({ share: 1, usedUp: true, off: false });
+    expect(stoppedNote(usedUp, "2026-11-01")).toBe("Used up · AI paused until December 1");
+    // Staff set $0 after some spend: AI stays off, also after the 1st.
+    const off = account({ monthlyLimitMicroUsd: 0 });
+    expect(budgetUse(off)).toEqual({ share: 1, usedUp: false, off: true });
+    expect(stoppedNote(off, "2026-11-01")).toBe("AI off: the budget is $0");
+    const none = account({ usedMicroUsd: 0, monthlyLimitMicroUsd: 0, custom: false });
+    expect(budgetUse(none)).toEqual({ share: 0, usedUp: false, off: true });
+    expect(stoppedNote(none, "2026-11-01")).toBeNull();
+    expect(noAiUse(none)).toBe(true);
     expect(noAiUse(account({ usedMicroUsd: 0 }))).toBe(false);
   });
 
@@ -75,7 +81,11 @@ describe("AI budgets for vayada staff (VAY-2504)", () => {
 
   it("reads the API's error code and message", () => {
     expect(
-      problemOf({ status: 404, data: { code: "hotel_account_not_found" }, message: "API Error: 404" }),
+      problemOf({
+        status: 404,
+        data: { code: "hotel_account_not_found" },
+        message: "API Error: 404",
+      }),
     ).toEqual({ status: 404, code: "hotel_account_not_found", message: "API Error: 404" });
     expect(problemOf(new Error("offline"))).toEqual({
       status: undefined,

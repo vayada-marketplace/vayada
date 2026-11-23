@@ -5,12 +5,19 @@ import { api, fulfillJson, signIn } from "./payoutsFixtures";
 // VAY-2504: vayada staff see each hotel account's AI spend this month and set its monthly AI
 // budget, with a reason, or put it back on the default ($0 = no AI).
 
-async function openPage(page: Page, baseURL: string | undefined, overview = overviewFixture) {
+// The table shows from 1280px; below that each hotel is a card (last test).
+test.use({ viewport: { width: 1440, height: 900 } });
+
+async function openPage(
+  page: Page,
+  baseURL: string | undefined,
+  overview: () => unknown = () => overviewFixture,
+) {
   const { adminBaseURL, origin } = await signIn(page, baseURL);
   const reads: number[] = [];
   await page.route(api("/api/platform/admin/ai-budgets"), (route) => {
     reads.push(Date.now());
-    return fulfillJson(route, origin, overview);
+    return fulfillJson(route, origin, overview());
   });
   await page.goto(new URL("/dashboard/ai-budgets", adminBaseURL).toString());
   return { origin, reads };
@@ -44,10 +51,10 @@ test("staff see each hotel's AI spend this month and its budget (VAY-2504)", asy
   await expect(row(page, /Harbour House Lisbon/)).not.toContainText("Used up");
   await expect(row(page, /Hotel Alpenrose Munich/)).toContainText("No AI use");
   await expect(row(page, /Hotel Alpenrose Munich/)).toContainText("Default");
-  await expect(row(page, /Hotel Alpenrose Munich/)).toContainText("Never");
+  await expect(row(page, /Hotel Alpenrose Munich/)).toContainText("—");
   await expect(
     row(page, /Hotel Alpenrose Munich/).getByRole("button", {
-      name: "Set AI budget for Hotel Alpenrose Munich",
+      name: "Set budget for Hotel Alpenrose Munich",
     }),
   ).toBeVisible();
   await expect(row(page, /Seaview Guesthouse Galle/)).toContainText("Suspended");
@@ -75,7 +82,7 @@ test("staff raise a hotel's AI budget with a reason (VAY-2504)", async ({ page, 
   });
 
   await row(page, /Harbour House Lisbon/)
-    .getByRole("button", { name: "Change AI budget for Harbour House Lisbon" })
+    .getByRole("button", { name: "Change budget for Harbour House Lisbon" })
     .click();
   const dialog = page.getByRole("dialog", { name: "AI budget for Harbour House Lisbon" });
   await expect(dialog).toContainText("Used $6.41 of $25.00 this month, in 3,077 AI calls.");
@@ -101,32 +108,50 @@ test("staff raise a hotel's AI budget with a reason (VAY-2504)", async ({ page, 
   expect(saved).toEqual({ monthlyLimitUsd: "40", reason: "Busy season" });
   // The list is read again after a change.
   await expect.poll(() => reads.length).toBeGreaterThan(readsBefore);
+  // Opening another hotel's dialog clears the notice.
+  await row(page, /Alpine Lodge/)
+    .getByRole("button", { name: "Change budget for Alpine Lodge" })
+    .click();
+  await expect(page.getByRole("status")).toHaveText("");
 });
 
 test("staff put a hotel back on the default budget; Escape closes without saving (VAY-2504)", async ({
   page,
   baseURL,
 }) => {
-  const { origin } = await openPage(page, baseURL);
+  const onDefault = {
+    ...overviewFixture.accounts[1],
+    monthlyLimitMicroUsd: 0,
+    custom: false,
+    updatedAt: null,
+  };
+  let reset = false;
+  const { origin } = await openPage(page, baseURL, () =>
+    reset
+      ? {
+          ...overviewFixture,
+          accounts: overviewFixture.accounts.map((account) =>
+            account.organizationId === harbour ? onDefault : account,
+          ),
+        }
+      : overviewFixture,
+  );
   const puts: unknown[] = [];
   await page.route(api(`/api/platform/admin/ai-budgets/${harbour}`), (route) => {
     if (route.request().method() !== "PUT") return route.fallback();
     puts.push(route.request().postDataJSON());
-    return fulfillJson(route, origin, {
-      ...overviewFixture.accounts[1],
-      monthlyLimitMicroUsd: 0,
-      custom: false,
-      updatedAt: null,
-    });
+    reset = true;
+    return fulfillJson(route, origin, onDefault);
   });
 
   const change = row(page, /Harbour House Lisbon/).getByRole("button", {
-    name: "Change AI budget for Harbour House Lisbon",
+    name: "Change budget for Harbour House Lisbon",
   });
   await change.click();
   const dialog = page.getByRole("dialog", { name: "AI budget for Harbour House Lisbon" });
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
+  await expect(change).toBeFocused();
 
   await change.click();
   await dialog.getByRole("radio", { name: /Use the default/ }).check();
@@ -136,6 +161,16 @@ test("staff put a hotel back on the default budget; Escape closes without saving
     "Harbour House Lisbon is back on the default AI budget ($0.00 a month).",
   );
   expect(puts).toEqual([{ monthlyLimitUsd: null, reason: "Pilot over" }]);
+  // Back on the default: AI stops ($0 default) and there is no own budget to date.
+  await expect(row(page, /Harbour House Lisbon/)).toContainText("$6.41 of $0.00");
+  await expect(row(page, /Harbour House Lisbon/)).toContainText("AI off: the budget is $0");
+  await expect(row(page, /Harbour House Lisbon/)).toContainText("Default");
+  await expect(row(page, /Harbour House Lisbon/)).toContainText("—");
+  await expect(
+    row(page, /Harbour House Lisbon/).getByRole("button", {
+      name: "Set budget for Harbour House Lisbon",
+    }),
+  ).toBeVisible();
 });
 
 test("a refused change says why and keeps the dialog open (VAY-2504)", async ({
@@ -149,7 +184,7 @@ test("a refused change says why and keeps the dialog open (VAY-2504)", async ({
       : route.fallback(),
   );
   await row(page, /Hotel Alpenrose Munich/)
-    .getByRole("button", { name: "Set AI budget for Hotel Alpenrose Munich" })
+    .getByRole("button", { name: "Set budget for Hotel Alpenrose Munich" })
     .click();
   const dialog = page.getByRole("dialog", { name: "AI budget for Hotel Alpenrose Munich" });
   await expect(dialog).toContainText("No AI use this month.");
@@ -187,7 +222,7 @@ test("on a phone each hotel is a card (VAY-2504)", async ({ page, baseURL }) => 
   await expect(card("Harbour House Lisbon")).toContainText("Changed Nov 12");
   await expect(card("Hotel Alpenrose Munich")).toContainText("No AI use · Default $0.00");
   await expect(
-    card("Hotel Alpenrose Munich").getByRole("button", { name: /Set AI budget/ }),
+    card("Hotel Alpenrose Munich").getByRole("button", { name: /Set budget for/ }),
   ).toBeVisible();
   await expect(page.locator("table")).toBeHidden();
 });

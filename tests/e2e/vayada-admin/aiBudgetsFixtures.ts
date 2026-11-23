@@ -50,7 +50,15 @@ export const overviewFixture = {
       "2026-11-20T16:45:00.000Z",
     ),
     hotel(alpenrose, "Hotel Alpenrose Munich", 0, 0, 0, null),
-    hotel("6f1c2a4e-0000-4000-8000-000000000006", "Seaview Guesthouse Galle", 0, 0, 0, null, "suspended"),
+    hotel(
+      "6f1c2a4e-0000-4000-8000-000000000006",
+      "Seaview Guesthouse Galle",
+      0,
+      0,
+      0,
+      null,
+      "suspended",
+    ),
     hotel("6f1c2a4e-0000-4000-8000-000000000007", "Ubud Rice Terrace Retreat", 0, 0, 0, null),
   ],
 };

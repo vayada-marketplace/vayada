@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   aiBudgetsService,
   budgetUse,
@@ -8,9 +8,9 @@ import {
   formatUsd,
   monthLabel,
   monthStartLabel,
-  nextMonthLabel,
   noAiUse,
   problemOf,
+  stoppedNote,
   type AiAccountBudget,
   type AiBudgetOverview,
 } from "@/services/api/aiBudgets";
@@ -28,6 +28,7 @@ export default function AiBudgetsPage() {
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<AiAccountBudget | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const opener = useRef<HTMLButtonElement | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -36,11 +37,9 @@ export default function AiBudgetsPage() {
       .overview()
       .then(setData)
       .catch((failure) => {
+        // A failed reload keeps the list already shown, with the error above it.
         const problem = problemOf(failure);
-        setData(null);
-        setError(
-          problem.status === 403 ? "AI budgets need vayada staff access." : problem.message,
-        );
+        setError(problem.status === 403 ? "AI budgets need vayada staff access." : problem.message);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -52,7 +51,17 @@ export default function AiBudgetsPage() {
     return query ? all.filter((account) => account.name.toLowerCase().includes(query)) : all;
   }, [data, search]);
   const own = data?.accounts.filter((account) => account.custom).length ?? 0;
-  const usedUp = data?.accounts.filter((account) => budgetUse(account).usedUp).length ?? 0;
+  const usedUp =
+    data?.accounts.filter((account) => account.custom && budgetUse(account).usedUp).length ?? 0;
+  const open = (account: AiAccountBudget, button: HTMLButtonElement) => {
+    opener.current = button;
+    setNotice(null);
+    setEditing(account);
+  };
+  const close = () => {
+    setEditing(null);
+    opener.current?.focus();
+  };
 
   return (
     <div className="p-4 md:p-8 max-w-[1400px]">
@@ -78,23 +87,31 @@ export default function AiBudgetsPage() {
         </label>
       </div>
 
-      {notice && (
-        <p
-          role="status"
-          className="mb-4 rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-2.5 text-[12px] text-emerald-800"
-        >
-          {notice}
-        </p>
-      )}
+      {/* Always mounted, so screen readers announce a notice when it appears. */}
+      <div role="status">
+        {notice && (
+          <p className="mb-4 rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-2.5 text-[12px] text-emerald-800">
+            {notice}
+          </p>
+        )}
+      </div>
 
       {loading && !data ? (
         <div className="animate-pulse h-64 bg-gray-100 rounded-xl" />
-      ) : error || !data ? (
+      ) : !data ? (
         <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
           <p className="text-[13px] text-gray-500">{error ?? "Something went wrong."}</p>
         </div>
       ) : (
         <>
+          {error && (
+            <p
+              role="alert"
+              className="mb-4 rounded-xl bg-red-50 border border-red-200 px-4 py-2.5 text-[12px] text-red-700"
+            >
+              {`Couldn't load the latest numbers: ${error}`}
+            </p>
+          )}
           <div className="hidden sm:grid grid-cols-3 gap-3 mb-4">
             <Summary
               label="Spent this month"
@@ -135,7 +152,8 @@ export default function AiBudgetsPage() {
             </div>
           ) : (
             <>
-              <div className="hidden md:block bg-white border border-gray-200 rounded-xl overflow-hidden">
+              {/* The table needs about 1,000px: below that (with the menu open) hotels are cards. */}
+              <div className="hidden xl:block bg-white border border-gray-200 rounded-xl overflow-x-auto">
                 <table className="w-full text-[13px]">
                   <thead>
                     <tr className="border-b border-gray-200 bg-gray-50">
@@ -170,12 +188,12 @@ export default function AiBudgetsPage() {
                           {account.calls.toLocaleString("en-US")}
                         </td>
                         <td
-                          className={`px-4 py-3 text-[12px] ${account.updatedAt ? "text-gray-600" : "text-gray-400"}`}
+                          className={`px-4 py-3 text-[12px] ${changed(account, data.month) ? "text-gray-600" : "text-gray-400"}`}
                         >
-                          {account.updatedAt ? changedOn(account.updatedAt, data.month) : "Never"}
+                          {changed(account, data.month) ?? "—"}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <ChangeButton account={account} onClick={() => setEditing(account)} />
+                          <ChangeButton account={account} onOpen={open} />
                         </td>
                       </tr>
                     ))}
@@ -183,7 +201,7 @@ export default function AiBudgetsPage() {
                 </table>
               </div>
 
-              <ul className="md:hidden space-y-3">
+              <ul className="xl:hidden grid gap-3 lg:grid-cols-2">
                 {accounts.map((account) => (
                   <li
                     key={account.organizationId}
@@ -196,7 +214,7 @@ export default function AiBudgetsPage() {
                         </span>
                         <StatusTag status={account.status} />
                       </span>
-                      <ChangeButton account={account} onClick={() => setEditing(account)} />
+                      <ChangeButton account={account} onOpen={open} />
                     </div>
                     <PhoneUse account={account} month={data.month} />
                   </li>
@@ -215,9 +233,9 @@ export default function AiBudgetsPage() {
         <AiBudgetDialog
           account={editing}
           defaultMonthlyLimitMicroUsd={data.defaultMonthlyLimitMicroUsd}
-          onClose={() => setEditing(null)}
+          onClose={close}
           onSaved={(message) => {
-            setEditing(null);
+            close();
             setNotice(message);
             load();
           }}
@@ -227,10 +245,16 @@ export default function AiBudgetsPage() {
   );
 }
 
+/** When staff last set the account's own budget ("Nov 12"); null while the default applies (putting
+ * an account back on the default removes its own budget, and with it the date). */
+function changed(account: AiAccountBudget, month: string): string | null {
+  return account.custom && account.updatedAt ? changedOn(account.updatedAt, month) : null;
+}
+
 function Th({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
     <th
-      className={`px-4 py-3 text-left font-medium text-[11px] text-gray-500 uppercase tracking-wider ${className}`}
+      className={`whitespace-nowrap px-4 py-3 text-left font-medium text-[11px] text-gray-500 uppercase tracking-wider ${className}`}
     >
       {children}
     </th>
@@ -279,11 +303,19 @@ function StatusTag({ status }: { status: string }) {
   );
 }
 
-function Bar({ share, usedUp, className = "" }: { share: number; usedUp: boolean; className?: string }) {
+function Bar({
+  share,
+  stopped,
+  className = "",
+}: {
+  share: number;
+  stopped: boolean;
+  className?: string;
+}) {
   return (
     <div className={`h-1 rounded-full bg-gray-100 ${className}`}>
       <div
-        className={`h-1 rounded-full ${usedUp ? "bg-amber-500" : "bg-gray-900"}`}
+        className={`h-1 rounded-full ${stopped ? "bg-amber-500" : "bg-gray-900"}`}
         style={{ width: `${Math.round(share * 100)}%` }}
       />
     </div>
@@ -292,19 +324,15 @@ function Bar({ share, usedUp, className = "" }: { share: number; usedUp: boolean
 
 function Used({ account, month }: { account: AiAccountBudget; month: string }) {
   if (noAiUse(account)) return <span className="text-gray-400">No AI use</span>;
-  const { share, usedUp } = budgetUse(account);
+  const note = stoppedNote(account, month);
   return (
     <div className="space-y-1.5">
-      <p>
+      <p className="whitespace-nowrap">
         <span className="font-semibold text-gray-900">{formatUsd(account.usedMicroUsd)}</span>{" "}
         <span className="text-gray-500">{`of ${formatUsd(account.monthlyLimitMicroUsd)}`}</span>
       </p>
-      <Bar share={share} usedUp={usedUp} className="w-60" />
-      {usedUp && (
-        <p className="text-[11px] text-amber-700">
-          {`Used up · AI paused until ${nextMonthLabel(month)}`}
-        </p>
-      )}
+      <Bar share={budgetUse(account).share} stopped={note !== null} className="w-60" />
+      {note && <p className="text-[11px] text-amber-700">{note}</p>}
     </div>
   );
 }
@@ -335,7 +363,7 @@ function PhoneUse({ account, month }: { account: AiAccountBudget; month: string 
         {`No AI use · ${account.custom ? "Own budget" : "Default"} ${formatUsd(account.monthlyLimitMicroUsd)}`}
       </p>
     );
-  const { share, usedUp } = budgetUse(account);
+  const note = stoppedNote(account, month);
   const calls = `${account.calls.toLocaleString("en-US")} ${account.calls === 1 ? "call" : "calls"}`;
   return (
     <>
@@ -343,14 +371,10 @@ function PhoneUse({ account, month }: { account: AiAccountBudget; month: string 
         <span className="font-semibold text-gray-900">{formatUsd(account.usedMicroUsd)}</span>{" "}
         <span className="text-gray-500">{`of ${formatUsd(account.monthlyLimitMicroUsd)} · ${account.custom ? "Own budget" : "Default budget"}`}</span>
       </p>
-      <Bar share={share} usedUp={usedUp} />
+      <Bar share={budgetUse(account).share} stopped={note !== null} />
       <div className="flex justify-between gap-2 text-[11px]">
-        <span className={usedUp ? "text-amber-700" : "text-gray-500"}>
-          {usedUp
-            ? `Used up · AI paused until ${nextMonthLabel(month)}`
-            : account.updatedAt
-              ? `Changed ${changedOn(account.updatedAt, month)}`
-              : "Never changed"}
+        <span className={note ? "text-amber-700" : "text-gray-500"}>
+          {note ?? (changed(account, month) ? `Changed ${changed(account, month)}` : "")}
         </span>
         <span className="shrink-0 text-gray-500">{calls}</span>
       </div>
@@ -358,13 +382,19 @@ function PhoneUse({ account, month }: { account: AiAccountBudget; month: string 
   );
 }
 
-function ChangeButton({ account, onClick }: { account: AiAccountBudget; onClick: () => void }) {
+function ChangeButton({
+  account,
+  onOpen,
+}: {
+  account: AiAccountBudget;
+  onOpen: (account: AiAccountBudget, button: HTMLButtonElement) => void;
+}) {
   return (
     <button
       type="button"
-      onClick={onClick}
-      aria-label={`${account.custom ? "Change" : "Set"} AI budget for ${account.name}`}
-      className="shrink-0 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-[12px] font-medium text-gray-700 hover:bg-gray-50"
+      onClick={(event) => onOpen(account, event.currentTarget)}
+      aria-label={`${account.custom ? "Change budget" : "Set budget"} for ${account.name}`}
+      className="shrink-0 whitespace-nowrap rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-[12px] font-medium text-gray-700 hover:bg-gray-50"
     >
       {account.custom ? "Change" : "Set budget"}
     </button>
