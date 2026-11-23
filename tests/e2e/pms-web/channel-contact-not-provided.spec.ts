@@ -118,7 +118,13 @@ test("says so in the booker's locked phone when their guest record can't be reac
   await assertHealthy();
 });
 
-const airbnbStay = stay({ channel: "airbnb", directSource: null });
+const airbnbStay = stay({
+  bookingGuestId: "guest_timo_airbnb",
+  guestBookingId: "guest_booking_airbnb",
+  bookingReference: "CHX-9E3C27A1F6B04D58E2C7",
+  channel: "airbnb",
+  directSource: null,
+});
 const noEmail = {
   firstName: "Timo",
   lastName: "Schreyer",
