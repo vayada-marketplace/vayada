@@ -43,7 +43,7 @@ describe("defineRouteAction (VAY-2507)", () => {
 
   it.each([
     [
-      "a change (Phase 1 is read-only)",
+      "a change (only GET routes become read actions; changes are change actions)",
       { route: "POST /api/pms/properties/:propertyId/room-blocks" },
     ],
     ["a bad name", { name: "Rooms List" }],

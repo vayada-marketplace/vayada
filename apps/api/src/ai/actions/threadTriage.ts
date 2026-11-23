@@ -1,0 +1,62 @@
+// Marking a guest conversation done, for follow-up or open again (VAY-2522, first change batch).
+import { z } from "zod";
+
+import { defineChangeAction } from "./defineChangeAction.js";
+
+const shared = {
+  version: 1,
+  pathParams: { threadId: z.uuid() },
+  // The thread's version: a conversation that changed meanwhile is refused, not overwritten.
+  idempotency: { in: "header" },
+  preconditions: ["expectedThreadVersion"],
+  authoritySites: ["pms_inbox_triage_scope"],
+  group: "ask",
+  permission: "pms.inbox.reply",
+  output: z.object({
+    propertyId: z.string(),
+    threadId: z.string(),
+    attentionState: z.enum(["needs_attention", "follow_up", "done"]),
+    followUpAt: z.string().nullable(),
+    threadVersion: z.number(),
+  }),
+  surfaces: [],
+  contractVersion: "native-guest-inbox.v2",
+  reviewedBy: "VAY-2522",
+} as const;
+const expectedThreadVersion = z.number().int().min(1);
+
+export const threadMarkDone = defineChangeAction({
+  ...shared,
+  name: "thread_mark_done",
+  description:
+    "Marks one guest conversation of a property as done, so it leaves the list of conversations " +
+    "that need an answer. Send the conversation's current version. The person confirms it in " +
+    "vayada before it runs.",
+  route: "POST /api/pms/properties/:propertyId/messaging/threads/:threadId/done",
+  body: z.strictObject({ expectedThreadVersion }),
+});
+
+export const threadFollowUp = defineChangeAction({
+  ...shared,
+  name: "thread_follow_up",
+  description:
+    "Sets one guest conversation of a property aside until a later time, when it needs an answer " +
+    "again. Send the conversation's current version and the time (UTC, with milliseconds). The " +
+    "person confirms it in vayada before it runs.",
+  route: "POST /api/pms/properties/:propertyId/messaging/threads/:threadId/follow-up",
+  body: z.strictObject({
+    expectedThreadVersion,
+    followUpAt: z.iso.datetime({ precision: 3 }),
+  }),
+});
+
+export const threadReopen = defineChangeAction({
+  ...shared,
+  name: "thread_reopen",
+  description:
+    "Opens a guest conversation of a property again, so it is back in the list of conversations " +
+    "that need an answer. Send the conversation's current version. The person confirms it in " +
+    "vayada before it runs.",
+  route: "POST /api/pms/properties/:propertyId/messaging/threads/:threadId/reopen",
+  body: z.strictObject({ expectedThreadVersion }),
+});

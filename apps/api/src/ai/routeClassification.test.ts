@@ -1,7 +1,7 @@
 // Every next-api route is sorted for the AI exactly once (VAY-2507; decisions of 2026-11-20).
 import { describe, expect, it } from "vitest";
 
-import { AI_ACTIONS } from "./actions/registry.js";
+import { AI_ACTIONS, CHANGE_ACTIONS } from "./actions/registry.js";
 import { NEVER_ROUTES, NEVER_RULES, neverArea } from "./neverList.js";
 import {
   classifyRoute,
@@ -13,7 +13,9 @@ import {
 } from "./routeClassification.js";
 import { ROUTE_MANIFEST } from "./routeManifest.generated.js";
 
-const actionRoutes = new Set<string>(AI_ACTIONS.map((action) => action.route));
+const actionRoutes = new Set<string>(
+  [...AI_ACTIONS, ...CHANGE_ACTIONS].map((action) => action.route),
+);
 const exactEntries = Object.keys(ROUTE_CLASSES);
 
 describe("AI route classification (VAY-2507)", () => {

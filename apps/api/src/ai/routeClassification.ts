@@ -420,8 +420,6 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
   "POST /api/pms/properties/:propertyId/messaging/threads/:threadId/assignment": later(),
   "POST /api/pms/properties/:propertyId/messaging/threads/:threadId/assist":
     notForAi("ai_calling_ai"),
-  "POST /api/pms/properties/:propertyId/messaging/threads/:threadId/done": later(),
-  "POST /api/pms/properties/:propertyId/messaging/threads/:threadId/follow-up": later(),
   "POST /api/pms/properties/:propertyId/messaging/threads/:threadId/messages": later(),
   "POST /api/pms/properties/:propertyId/messaging/threads/:threadId/notes": later(),
   "POST /api/pms/properties/:propertyId/messaging/threads/:threadId/provider-actions/close":
@@ -431,7 +429,6 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
   "POST /api/pms/properties/:propertyId/messaging/threads/:threadId/provider-actions/preapprove":
     later(),
   "POST /api/pms/properties/:propertyId/messaging/threads/:threadId/read": later(),
-  "POST /api/pms/properties/:propertyId/messaging/threads/:threadId/reopen": later(),
   "GET /api/pms/properties/:propertyId/messaging/unread-count": later(),
   "GET /api/pms/properties/:propertyId/module-activations": notForAi("owner_session"),
   "PATCH /api/pms/properties/:propertyId/module-activations/:moduleId": askLater(
@@ -556,7 +553,6 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
   "POST /api/pms/properties/:propertyId/reservations/:guestBookingId/mark-paid": later(),
   "POST /api/pms/properties/:propertyId/reservations/:guestBookingId/no-show": later(),
   "GET /api/pms/properties/:propertyId/reservations/:guestBookingId/notes": later(),
-  "POST /api/pms/properties/:propertyId/reservations/:guestBookingId/notes": later(),
   "DELETE /api/pms/properties/:propertyId/reservations/:guestBookingId/notes/:noteId": later(),
   "PATCH /api/pms/properties/:propertyId/reservations/:guestBookingId/notes/:noteId": later(),
   "PATCH /api/pms/properties/:propertyId/reservations/:guestBookingId/primary-guest/nationality":
@@ -576,8 +572,6 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
   ),
   "POST /api/pms/properties/:propertyId/reviews/:reviewId/reply": later(),
   "GET /api/pms/properties/:propertyId/room-blocks": later(),
-  "POST /api/pms/properties/:propertyId/room-blocks": later(),
-  "DELETE /api/pms/properties/:propertyId/room-blocks/:blockId": later(),
   "PATCH /api/pms/properties/:propertyId/room-blocks/:blockId": later(),
   "GET /api/pms/properties/:propertyId/room-publication-snapshot": later(),
   "GET /api/pms/properties/:propertyId/room-types": later(),
@@ -597,7 +591,6 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
   "POST /api/pms/properties/:propertyId/room-types/:roomTypeId/physical-units": later(),
   "DELETE /api/pms/properties/:propertyId/room-types/:roomTypeId/physical-units/:roomUnitId":
     later(),
-  "PUT /api/pms/properties/:propertyId/room-types/:roomTypeId/physical-units/:roomUnitId": later(),
   "PUT /api/pms/properties/:propertyId/room-types/:roomTypeId/physical-units/:roomUnitId/operational-label":
     later(),
   "GET /api/pms/properties/:propertyId/room-types/:roomTypeId/retirement-impact": later(),

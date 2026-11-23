@@ -1,16 +1,23 @@
 // The AI action registry (VAY-2507): every action the in-app assistant and MCP can use, and the
 // only routes an AI may run as a user. Registration refuses an action whose route is on the never
-// list, deny-listed or not sorted for the AI, so the app does not even start with one.
+// list, deny-listed or not sorted for the AI, so the app does not even start with one. Change
+// actions (VAY-2522) run only through the executor of AI changes, which alone can mint a delegation
+// that writes (VAY-2524); until it exists they are offered on no surface.
 import type { DelegatedRouteGate, RequestContext } from "@vayada/backend-auth";
 import { z } from "zod";
 
 import { neverArea } from "../neverList.js";
 import { classifyRoute } from "../routeClassification.js";
 import { ROUTE_MANIFEST } from "../routeManifest.generated.js";
+import { bookingNoteAdd } from "./bookingNoteAdd.js";
 import { calendarDays } from "./calendarDays.js";
+import type { ChangeAction } from "./defineChangeAction.js";
 import type { AiSurface, RouteAction } from "./defineRouteAction.js";
 import { propertiesList } from "./propertiesList.js";
+import { roomBlockCreate, roomBlockRelease } from "./roomBlocks.js";
 import { roomsList } from "./roomsList.js";
+import { roomStatusSet } from "./roomStatusSet.js";
+import { threadFollowUp, threadMarkDone, threadReopen } from "./threadTriage.js";
 
 export const AI_ACTIONS: readonly RouteAction[] = assertRegistry([
   propertiesList,
@@ -18,16 +25,40 @@ export const AI_ACTIONS: readonly RouteAction[] = assertRegistry([
   calendarDays,
 ]);
 
-const ACTION_ROUTES = new Set<string>(AI_ACTIONS.map((action) => action.route));
-const BY_KEY = new Map(AI_ACTIONS.map((action) => [action.key, action]));
+/** The first change batch (plan row 50). */
+export const CHANGE_ACTIONS: readonly ChangeAction[] = assertChangeRegistry(
+  [
+    bookingNoteAdd,
+    roomBlockCreate,
+    roomBlockRelease,
+    roomStatusSet,
+    threadMarkDone,
+    threadFollowUp,
+    threadReopen,
+  ],
+  AI_ACTIONS,
+);
 
-/** The auth plugin's delegation gate: an AI may run exactly the routes of registered actions. */
+const ACTION_ROUTES = new Set<string>(
+  [...AI_ACTIONS, ...CHANGE_ACTIONS].map((action) => action.route),
+);
+const BY_KEY = new Map(AI_ACTIONS.map((action) => [action.key, action]));
+const CHANGE_BY_KEY = new Map(CHANGE_ACTIONS.map((action) => [action.key, action]));
+
+/**
+ * The auth plugin's delegation gate: an AI may run exactly the routes of registered actions. A
+ * change route also needs a delegation that may write, which only the executor mints (VAY-2522).
+ */
 export const aiActionRouteGate: DelegatedRouteGate = {
   allowsRoute: (method, routeUrl) => ACTION_ROUTES.has(`${method} ${routeUrl}`),
 };
 
 export function findAction(key: string): RouteAction | undefined {
   return BY_KEY.get(key);
+}
+
+export function findChangeAction(key: string): ChangeAction | undefined {
+  return CHANGE_BY_KEY.get(key);
 }
 
 /** The surface a delegated context runs on, from its delegation (never from the caller). */
@@ -69,6 +100,28 @@ export function toolDefinition(action: RouteAction): ToolDefinition {
 
 /** Throws at module load for a registry that breaks a rule the actions alone can not check. */
 export function assertRegistry(actions: readonly RouteAction[]): readonly RouteAction[] {
+  assertActionList(actions);
+  return Object.freeze([...actions]);
+}
+
+/**
+ * The same rules for change actions, read and change actions together (one name, one tool), and
+ * no surface until the executor of AI changes exists (VAY-2524): nothing can offer one yet.
+ */
+export function assertChangeRegistry(
+  actions: readonly ChangeAction[],
+  readActions: readonly RouteAction[],
+): readonly ChangeAction[] {
+  assertActionList([...readActions, ...actions]);
+  for (const action of actions) {
+    if (action.surfaces.length > 0) {
+      throw new Error(`AI change ${action.key} has a surface before Ask first exists (VAY-2524)`);
+    }
+  }
+  return Object.freeze([...actions]);
+}
+
+function assertActionList(actions: readonly { key: string; name: string; route: string }[]) {
   const keys = new Set<string>();
   const names = new Set<string>();
   const manifest = new Set<string>(ROUTE_MANIFEST);
@@ -96,5 +149,4 @@ export function assertRegistry(actions: readonly RouteAction[]): readonly RouteA
       );
     }
   }
-  return Object.freeze([...actions]);
 }

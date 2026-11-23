@@ -590,6 +590,33 @@ Two things to know when doing this (VAY-2522):
   [`bookingPublicationCommandRepository.ts:346`](../apps/api/src/domains/bookingPublicationCommandRepository.ts#L346));
   and `lockPmsManageScope` (closures, operating calendar).
 
+**Built (VAY-2522 PR3): change actions.** `defineChangeAction`
+([`apps/api/src/ai/actions/defineChangeAction.ts`](../apps/api/src/ai/actions/defineChangeAction.ts))
+makes one change from one write route on one property (`:propertyId` is required, so an account-wide
+write can not escape a delegation narrowed to fewer properties). Beside the read fields it declares:
+
+- `body`: what the AI may send; the AI's input is one strict object of path parameters and these
+  body fields, so the route's other fields (a room's number on the room update) stay out of reach;
+- `idempotency`: where the route reads its retry key, the `Idempotency-Key` header or body fields
+  (notes and room blocks take `commandId` and `idempotencyKey`); the executor fills it, and the AI
+  can never send it;
+- `preconditions`: body fields the route compares with the current state (expected versions); a
+  change to something that exists must have one;
+- `authoritySites`: every rights check inside the transaction, from
+  [`authoritySites.ts`](../apps/api/src/ai/actions/authoritySites.ts); only checks that already take
+  the AI's limits may be listed, so a change through any other can not be registered;
+- `group: "ask"`: every AI change asks first until Undo exists (plan row 39).
+
+`changeRequest(action, input, key)` builds the one request a change makes; the executor (VAY-2524)
+sends it with the user's change delegation. The first batch (plan row 50): `booking_note_add`,
+`room_block_create`, `room_block_release`, `room_status_set`, `thread_mark_done`,
+`thread_follow_up`, `thread_reopen`. Their routes are on the delegation gate, but no surface offers
+them until the executor exists (the registry refuses one), and only the executor can mint a
+delegation that writes. `changeSafety.test.ts` runs each through its real route and the default gate:
+the owner's change delegation runs it with the AI's limits reaching the command's own check; a read
+delegation, a property outside the delegation, an assigned-only member on another property, another
+account and a user without the route's permission are refused.
+
 ### 5.5 MCP connections
 
 **Tokens and sign-in.**
