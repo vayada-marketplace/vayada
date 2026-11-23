@@ -275,6 +275,47 @@ export function delegatedPropertyIds(
 }
 
 /**
+ * An AI delegation's limits as plain data (VAY-2522). A command whose transaction checks the
+ * user's rights again reads them from the database, which knows nothing of the delegation; the
+ * command carries this so that check can apply the limits too.
+ */
+export type AuthorityNarrowing = {
+  readonly access: "read" | "change";
+  /** The only properties the command may touch. */
+  readonly propertyIds: readonly string[];
+};
+
+/** What a command built from this context must carry: null when a person made the request. */
+export function authorityNarrowing(context: RequestContext): AuthorityNarrowing | null {
+  const { delegation } = context;
+  if (!delegation) return null;
+  return { access: delegation.access, propertyIds: delegatedPropertyIds(context) };
+}
+
+/**
+ * Whether a command under this narrowing may change this property: always for a person's request
+ * (null); for an AI one only with "change" access and the property listed. Anything else is
+ * refused, including a narrowing that is missing or malformed.
+ */
+export function narrowingAllowsChange(
+  narrowing: AuthorityNarrowing | null,
+  propertyId: string,
+): boolean {
+  if (narrowing === null) return true;
+  if (
+    typeof narrowing !== "object" ||
+    narrowing.access !== "change" ||
+    !Array.isArray(narrowing.propertyIds) ||
+    typeof propertyId !== "string"
+  ) {
+    return false;
+  }
+  // Ids are UUIDs, which the database compares without case.
+  const wanted = propertyId.toLowerCase();
+  return narrowing.propertyIds.some((id) => typeof id === "string" && id.toLowerCase() === wanted);
+}
+
+/**
  * True only for a context `resolveDelegatedContext` could have produced: an agent context of an
  * active hotel member, without a session id, already narrowed. The auth hook refuses any other.
  */

@@ -1,4 +1,4 @@
-import { UnauthorizedError } from "@vayada/backend-auth";
+import { UnauthorizedError, authorityNarrowing } from "@vayada/backend-auth";
 import { AuthorizationError } from "@vayada/backend-authorization";
 import {
   parseReconcilePhysicalRoomUnitsCommand,
@@ -222,6 +222,7 @@ export async function registerPmsPhysicalRoomManagementRoutes(
           roomTypeId,
           idempotencyKey,
           audit: commandAudit(scope.context),
+          narrowing: authorityNarrowing(scope.context),
           ...parsed.data,
           action,
           ...(action !== "create" ? { roomUnitId } : {}),

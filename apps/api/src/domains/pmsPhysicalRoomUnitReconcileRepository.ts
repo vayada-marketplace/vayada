@@ -1,6 +1,7 @@
 import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { createHash } from "node:crypto";
 
+import { narrowingAllowsChange, type AuthorityNarrowing } from "@vayada/backend-auth";
 import {
   PMS_ROOM_FACTS_CONTRACT_VERSION,
   parseReconcilePhysicalRoomUnitsResult,
@@ -89,7 +90,14 @@ async function executeReconcile(
   const fingerprint = sha256(serializeReconcilePhysicalRoomUnitsFingerprint(command));
   try {
     await client.query("BEGIN");
-    if (!(await lockAuthorizedPmsPhysicalRoomScope(client, command, occurredAt))) {
+    // Not an AI change yet: it gets a narrowing when its action is built (VAY-2522).
+    if (
+      !(await lockAuthorizedPmsPhysicalRoomScope(
+        client,
+        { ...command, narrowing: null },
+        occurredAt,
+      ))
+    ) {
       await client.query("ROLLBACK");
       return failure({ code: "setup_scope_unavailable" });
     }
@@ -138,12 +146,19 @@ async function executeReconcile(
   }
 }
 
+/**
+ * Rechecks the user's room-management rights inside the command's transaction. An AI request is
+ * also held to its narrowing (VAY-2522): the database knows only the user's own rights.
+ */
 export async function lockAuthorizedPmsPhysicalRoomScope(
   client: PmsPhysicalRoomUnitReconcileClient,
-  command: Pick<ReconcilePhysicalRoomUnitsCommand, "organizationId" | "propertyId" | "audit">,
+  command: Pick<ReconcilePhysicalRoomUnitsCommand, "organizationId" | "propertyId" | "audit"> & {
+    readonly narrowing: AuthorityNarrowing | null;
+  },
   occurredAt: Date,
 ): Promise<boolean> {
   if (command.audit.actor.kind !== "user") return false;
+  if (!narrowingAllowsChange(command.narrowing, command.propertyId)) return false;
   const result = await client.query(
     `SELECT property.id
      FROM hotel_catalog.properties property

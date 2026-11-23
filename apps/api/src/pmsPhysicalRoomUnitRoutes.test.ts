@@ -648,6 +648,8 @@ describe("physical-room management authorization and conflicts", () => {
       organizationId,
       expectedRevision: 2,
       action: "retire",
+      // A person's request: no AI limits for the transaction to apply (VAY-2522).
+      narrowing: null,
     });
   });
 });

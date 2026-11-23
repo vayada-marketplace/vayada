@@ -232,6 +232,11 @@ hit are:
 - `lockPmsManageScope`: closures, operating calendar;
 - if exposed later, the room type locks in E2.
 
+Threaded with the delegation's narrowing (VAY-2522 PR2; design note §5.2): the inbox triage scope
+lock (`lockActorScope` in `pmsInboxTriageCommand.ts`, before `lockPmsInboxRolePermissions`) and
+`lockAuthorizedPmsPhysicalRoomScope` for physical-room management. The operational-label and
+reconcile commands pass `null` until their action is built.
+
 ## F. Never-list routes
 
 Every `apps/api` route behind each never-list item in design note

@@ -2,12 +2,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  authorityNarrowing,
   delegatedPropertyIds,
   isDelegatedContext,
   isMintedDelegatedContext,
   narrowDelegatedContext,
+  narrowingAllowsChange,
   resolveDelegatedChangeContext,
   resolveDelegatedContext,
+  type AuthorityNarrowing,
   type DelegatedContextInput,
 } from "./delegatedContext.js";
 import { AuthError, DelegationRefusedError } from "./errors.js";
@@ -19,7 +22,7 @@ import type {
   IdentityUserWithWorkosIdentity,
 } from "./repository.js";
 import type { AuthorizationResolver } from "./resolve.js";
-import type { MembershipPropertyAccess, ProductEntitlement } from "./types.js";
+import type { MembershipPropertyAccess, ProductEntitlement, RequestContext } from "./types.js";
 
 const USER = "aaaaaaaa-0000-4000-8000-000000000001";
 const ORG_A = "bbbbbbbb-0000-4000-8000-00000000000a";
@@ -545,5 +548,65 @@ describe("narrowDelegatedContext", () => {
   it("is idempotent", async () => {
     const context = await resolve();
     expect(narrowDelegatedContext(context)).toEqual(context);
+  });
+});
+
+describe("authorityNarrowing (VAY-2522)", () => {
+  const change = (overrides: Partial<DelegatedContextInput> = {}) =>
+    resolveDelegatedChangeContext(repository(), input(overrides), {
+      authorizationResolver,
+      now: () => new Date("2026-11-20T12:00:00Z"),
+    });
+
+  it("is null for a request a person made", async () => {
+    const person: RequestContext = { ...(await resolve()) };
+    delete person.delegation;
+    expect(authorityNarrowing(person)).toBeNull();
+  });
+
+  it("carries the delegation's access and only the properties it may use", async () => {
+    // Org A's member is assigned P1 only; org B's owner has all of B (P3).
+    expect(authorityNarrowing(await resolve())).toEqual({ access: "read", propertyIds: [P1] });
+    expect(authorityNarrowing(await change({ organizationId: ORG_B }))).toEqual({
+      access: "change",
+      propertyIds: [P3],
+    });
+    expect(authorityNarrowing(await change({ organizationId: ORG_B, propertyIds: [] }))).toEqual({
+      access: "change",
+      propertyIds: [],
+    });
+  });
+
+  it("lets a change through only for a change narrowing that lists the property", async () => {
+    const narrowing = authorityNarrowing(await change({ organizationId: ORG_B }));
+    expect(narrowingAllowsChange(narrowing, P3)).toBe(true);
+    expect(narrowingAllowsChange(narrowing, P3.toUpperCase())).toBe(true);
+    expect(narrowingAllowsChange(narrowing, P1)).toBe(false);
+    expect(narrowingAllowsChange(authorityNarrowing(await resolve()), P1)).toBe(false);
+    expect(narrowingAllowsChange({ access: "change", propertyIds: [] }, P1)).toBe(false);
+  });
+
+  it("lets a person's request through: the route and the database decide", () => {
+    expect(narrowingAllowsChange(null, P1)).toBe(true);
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["not an object", "change"],
+    ["no access", { propertyIds: [P1] }],
+    ["another access", { access: "CHANGE", propertyIds: [P1] }],
+    ["no property list", { access: "change" }],
+    // A string would match any substring of itself.
+    ["a string for the list", { access: "change", propertyIds: P1 }],
+    ["an object that prints the id", { access: "change", propertyIds: [{ toString: () => P1 }] }],
+  ])("refuses a malformed narrowing: %s", (_name, narrowing) => {
+    expect(narrowingAllowsChange(narrowing as unknown as AuthorityNarrowing, P1)).toBe(false);
+  });
+
+  it("refuses a property id that is not a string", () => {
+    const narrowing: AuthorityNarrowing = { access: "change", propertyIds: [P1] };
+    expect(narrowingAllowsChange(narrowing, { toString: () => P1 } as unknown as string)).toBe(
+      false,
+    );
   });
 });

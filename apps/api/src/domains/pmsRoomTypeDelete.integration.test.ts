@@ -191,6 +191,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room type Delete with cleanup", 
           correlationId: null,
           requestedAt: acceptedAt,
         },
+        narrowing: null,
       }),
     ).toMatchObject({ ok: true, response: { outcome: "created" } });
     // A guest can no longer book the deleted room; the other room still sells.
