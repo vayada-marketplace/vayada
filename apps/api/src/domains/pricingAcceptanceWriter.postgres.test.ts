@@ -3807,57 +3807,79 @@ describe.skipIf(!url)("pricing acceptance writer requests (PostgreSQL)", () => {
     }
   });
 
-  it("lets the hotel decline a request: rooms released, guest told, no PMS job", async () => {
-    const fixture = await setupFixture((quote) =>
-      Object.assign(quote, { acceptanceMode: "request" }),
-    );
-    const hostPool = new pg.Pool({ connectionString: url, max: 2 });
-    const released: unknown[] = [];
-    const actions = createBookingHostActions({
-      pool: hostPool,
-      guards: targetBookingHostActionGuards,
-      inventory: {
-        reserve: async () => null,
-        async release({ reservation }) {
-          released.push(reservation);
+  // VAY-2099: front desk staff (accept, but no cancel permission) may decline a request too.
+  it.each([
+    ["staff who can cancel", undefined],
+    ["front desk", { requestsOnly: true }],
+  ] as const)(
+    "lets the hotel decline a request (%s): rooms released, guest told, no PMS job",
+    async (_who, permissions) => {
+      const fixture = await setupFixture((quote) =>
+        Object.assign(quote, { acceptanceMode: "request" }),
+      );
+      const hostPool = new pg.Pool({ connectionString: url, max: 2 });
+      const released: unknown[] = [];
+      const actions = createBookingHostActions({
+        pool: hostPool,
+        guards: targetBookingHostActionGuards,
+        inventory: {
+          reserve: async () => null,
+          async release({ reservation }) {
+            released.push(reservation);
+          },
         },
-      },
-    });
-    const actorUserId = randomUUID();
-    try {
-      mockOwners(fixture);
-      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
-        new Date().toISOString(),
-      );
-      const requested = await writePricingAcceptance(fixture.pool, fixture.input, undefined, true);
-      await fixture.observer.query(
-        "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
-        [actorUserId, `${actorUserId}@example.test`],
-      );
-      const scope = { propertyId: fixture.propertyId, bookingId: requested.bookingId, actorUserId };
-      const preview = await actions.preview(scope, { action: "reject", reason: "Fully booked" });
-      await expect(actions.apply(scope, preview.previewId, "decline")).resolves.toEqual({
-        bookingId: requested.bookingId,
-        lifecycleStatus: "declined",
       });
-      expect(released).toEqual([
-        parsePmsInventoryReservationBundle(acceptanceFixture().inventory_reservation_bundle),
-      ]);
-      const jobs = (
+      const actorUserId = randomUUID();
+      try {
+        mockOwners(fixture);
+        vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+          new Date().toISOString(),
+        );
+        const requested = await writePricingAcceptance(
+          fixture.pool,
+          fixture.input,
+          undefined,
+          true,
+        );
         await fixture.observer.query(
-          "SELECT job_type FROM platform.jobs WHERE property_id=$1 ORDER BY job_type",
-          [fixture.propertyId],
-        )
-      ).rows.map((row) => row.job_type);
-      expect(jobs).toContain("email.booking-rejected");
-      expect(jobs.filter((job) => job.startsWith("pms."))).toEqual([]);
-      await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({ revenue: 0 });
-    } finally {
-      await actions.close();
-      await hostPool.end().catch(() => undefined);
-      await fixture.close();
-    }
-  });
+          "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
+          [actorUserId, `${actorUserId}@example.test`],
+        );
+        const scope = {
+          propertyId: fixture.propertyId,
+          bookingId: requested.bookingId,
+          actorUserId,
+        };
+        const preview = await actions.preview(
+          scope,
+          { action: "reject", reason: "Fully booked" },
+          permissions,
+        );
+        await expect(
+          actions.apply(scope, preview.previewId, "decline", permissions),
+        ).resolves.toEqual({
+          bookingId: requested.bookingId,
+          lifecycleStatus: "declined",
+        });
+        expect(released).toEqual([
+          parsePmsInventoryReservationBundle(acceptanceFixture().inventory_reservation_bundle),
+        ]);
+        const jobs = (
+          await fixture.observer.query(
+            "SELECT job_type FROM platform.jobs WHERE property_id=$1 ORDER BY job_type",
+            [fixture.propertyId],
+          )
+        ).rows.map((row) => row.job_type);
+        expect(jobs).toContain("email.booking-rejected");
+        expect(jobs.filter((job) => job.startsWith("pms."))).toEqual([]);
+        await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({ revenue: 0 });
+      } finally {
+        await actions.close();
+        await hostPool.end().catch(() => undefined);
+        await fixture.close();
+      }
+    },
+  );
 
   it("lets the guest withdraw a request: rooms released, no PMS job", async () => {
     const fixture = await setupFixture((quote) =>
@@ -4889,7 +4911,14 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
         [actorUserId, `${actorUserId}@example.test`],
       );
       const scope = { propertyId: fixture.propertyId, bookingId: pending.bookingId, actorUserId };
+      // VAY-2099: declining a booking that waits for its payment stays with staff who can cancel.
+      await expect(
+        actions.preview(scope, { action: "reject", reason: "No payment" }, { requestsOnly: true }),
+      ).rejects.toMatchObject({ statusCode: 403 });
       const preview = await actions.preview(scope, { action: "reject", reason: "No payment" });
+      await expect(
+        actions.apply(scope, preview.previewId, "front-desk", { requestsOnly: true }),
+      ).rejects.toMatchObject({ statusCode: 403 });
       await expect(actions.apply(scope, preview.previewId, "decline")).resolves.toEqual({
         bookingId: pending.bookingId,
         lifecycleStatus: "declined",

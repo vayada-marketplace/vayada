@@ -82,6 +82,73 @@ it.each(
   expect(requestEmail).toHaveBeenCalledTimes(mode === "allowed" ? 1 : 0);
   await app.close();
 });
+// VAY-2099: staff who can accept a request but not cancel bookings may reject a request: the route
+// lets them through and asks the action to check the booking (requestsOnly).
+it.each([
+  ["update-only", ["pms.reservation.update"] as PermissionKey[], true],
+  [
+    "update and cancel",
+    ["pms.reservation.update", "pms.reservation.cancel"] as PermissionKey[],
+    false,
+  ],
+])("lets %s staff reject a request through the right check", async (_who, permissions, only) => {
+  const app = Fastify();
+  const preview = vi.fn(async () => ({ previewId: propertyId }));
+  const apply = vi.fn(async () => ({ bookingId: propertyId, lifecycleStatus: "declined" }));
+  app.decorateRequest("authContext", null);
+  app.addHook("onRequest", async (request) => {
+    request.authContext = context({ permissions });
+  });
+  await app.register(registerBookingHostActionRoutes, {
+    actions: {
+      preview: preview as never,
+      apply: apply as never,
+      retryCardRefund: vi.fn() as never,
+      close: async () => {},
+      findAction: async () => "reject",
+    },
+    propertyAccessRepository: {
+      findMembershipPropertyScope: async () => ({
+        mode: "all",
+        roleKey: "front_desk",
+        accessOrigin: "agency",
+        assignedPropertyIds: [],
+      }),
+    },
+  });
+  const base = `/properties/${propertyId}/reservations/${propertyId}/host-actions`;
+  const previewed = await app.inject({
+    method: "POST",
+    url: `${base}/preview`,
+    payload: { action: "reject", reason: "Fully booked" },
+  });
+  expect(previewed.statusCode).toBe(200);
+  const applied = await app.inject({
+    method: "POST",
+    url: `${base}/apply`,
+    payload: { previewId: propertyId, idempotencyKey: "key" },
+  });
+  expect(applied.statusCode).toBe(200);
+  const scope = { propertyId, bookingId: propertyId, actorUserId };
+  const action = { action: "reject", reason: "Fully booked" };
+  if (only) {
+    expect(preview).toHaveBeenCalledWith(scope, action, { requestsOnly: true });
+    expect(apply).toHaveBeenCalledWith(scope, propertyId, "key", { requestsOnly: true });
+  } else {
+    expect(preview).toHaveBeenCalledWith(scope, action);
+    expect(preview.mock.calls[0]).toHaveLength(2);
+    expect(apply.mock.calls[0]).toHaveLength(3);
+  }
+  // Cancelling still needs the cancel permission.
+  const cancelled = await app.inject({
+    method: "POST",
+    url: `${base}/preview`,
+    payload: { action: "cancel", reason: "Guest asked" },
+  });
+  expect(cancelled.statusCode).toBe(only ? 403 : 200);
+  await app.close();
+});
+
 function context(auth: Auth): RequestContext {
   return {
     actor: {
