@@ -5,10 +5,12 @@ import {
   clearChannexAssignmentFixture,
 } from "./channexAssignmentTestFixture.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { BOOKING_HAS_EVER_BEEN_ACCEPTED_SQL } from "../domains/bookingGuestContactAccess.js";
 import { runChannexBookingJobs } from "./channexBookings.js";
 
 const URL = process.env["TEST_DATABASE_URL"],
   P = "11890000-0000-4000-8000-000000000001",
+  REQUEST = "11890000-0000-4000-8000-000000002577",
   C = "11890000-0000-4000-8000-000000000002",
   T = "11890000-0000-4000-8000-000000000003",
   R = "11890000-0000-4000-8000-000000000004",
@@ -122,6 +124,27 @@ describe.skipIf(!URL)("Channex booking worker (PostgreSQL)",()=>{
     await edit("Adele","adele@example.test");
     await send("staff-6",{mail:""},0,"cancelled");
     expect(await booker()).toEqual({first_name:"Adele",last_name:"Guest",email:"adele@example.test",phone:"+200"});
+  });
+
+  // VAY-2577: what Booking.com and Airbnb send is stored and shown without an acceptance; Channex's mask never is.
+  it("shows Booking.com and Airbnb contact at once and never stores Channex's *** mask",async()=>{
+    const send=async(id:string,bookingId:string,source:string,customer:Record<string,string>,status="new")=>{const value=revision(id,bookingId,source);value.attributes.status=status;value.attributes.customer=customer as typeof value.attributes.customer;await job(bookingId,id,false,value);expect((await run()).succeeded).toBe(1);};
+    const booker=async(bookingId:string)=>(await db.query(`SELECT guest.email,guest.phone,${BOOKING_HAS_EVER_BEEN_ACCEPTED_SQL} AS shown FROM booking.booking_guests guest JOIN booking.guest_bookings booking ON booking.id=guest.guest_booking_id WHERE booking.source_booking_id=$1 AND guest.guest_role='booker'`,[`channex:${P}:${bookingId}`])).rows[0];
+    // Booking.com sends its masked address and, when the guest gave one, a phone.
+    await send("contact-bcom-1","contact-bcom","BookingCom",{name:"Ada",surname:"Guest",mail:"ada.4x7k@guest.booking.com",phone:"+31 6 1234 5678"});
+    expect(await booker("contact-bcom")).toEqual({email:"ada.4x7k@guest.booking.com",phone:"+31 6 1234 5678",shown:true});
+    // Airbnb sends a phone and no email.
+    await send("contact-airbnb-1","contact-airbnb","Airbnb",{name:"Bo",surname:"Guest",phone:"+44 20 7946 0000"});
+    expect(await booker("contact-airbnb")).toEqual({email:null,phone:"+44 20 7946 0000",shown:true});
+    // A revision read after Channex masked the booking ("***") keeps what was stored.
+    await send("contact-bcom-2","contact-bcom","BookingCom",{name:"Ada",surname:"Guest",mail:"***",phone:"***"},"modified");
+    expect(await booker("contact-bcom")).toEqual({email:"ada.4x7k@guest.booking.com",phone:"+31 6 1234 5678",shown:true});
+    // A booking first read masked (Retry import of an acknowledged revision) stores no contact.
+    await send("contact-masked-1","contact-masked","BookingCom",{name:"Cy",surname:"Guest",mail:"***",phone:"***"});
+    expect(await booker("contact-masked")).toEqual({email:null,phone:null,shown:true});
+    // A booking-page request has no channel: it stays hidden until the property accepts it.
+    await fixture("INSERT INTO booking.guest_bookings(id,property_id,public_reference,lifecycle_status,check_in,check_out,currency) VALUES($1,$2,'VAY2577-REQUEST','pending_payment','2026-09-01','2026-09-03','EUR')",[REQUEST,P]);
+    expect((await db.query(`SELECT ${BOOKING_HAS_EVER_BEEN_ACCEPTED_SQL} AS shown FROM booking.guest_bookings booking WHERE booking.id=$1`,[REQUEST])).rows[0]).toEqual({shown:false});
   });
 
   // VAY-2368: OTA rooms take the first free unit of their type by the Assign button's rule.

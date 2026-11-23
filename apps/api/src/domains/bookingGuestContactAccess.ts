@@ -46,6 +46,14 @@ export const BOOKING_HAS_EVER_BEEN_ACCEPTED_SQL = `(
     FROM pms.booking_checkout_records contact_checkout
     WHERE contact_checkout.guest_booking_id = booking.id
   )
+  OR EXISTS (
+    -- VAY-2577: a channel booking (Booking.com, Airbnb, ...) was confirmed on the channel; the
+    -- property never accepts it here, so its guest contact shows as soon as it is imported.
+    SELECT 1
+    FROM pms.channel_booking_mappings contact_channel
+    WHERE contact_channel.guest_booking_id = booking.id
+      AND contact_channel.property_id = booking.property_id
+  )
 )`;
 
 export const PROPERTY_ALWAYS_HAS_GUEST_CONTACT_SQL = `COALESCE((
