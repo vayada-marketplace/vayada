@@ -541,8 +541,8 @@ ask me again"). A second click, another tab or a resumed turn joins the same run
   `{ answer: "yes", cardSha256 }`. Only a vayada session answers: the verifier admits only the
   app's own `client_id`, the token must carry a session id (no machine token), the Origin must be a
   vayada app, and any AI context is refused (the routes are also on the never-list). Staff signed in
-  as the person (WorkOS impersonation, an `act` claim on the token) may see the card but not answer
-  it, neither Yes nor No. Access tokens
+  as the person (WorkOS impersonation, an `act` claim on the token) see the card without the digest
+  and get 403 `impersonated` for a Yes or a No. Access tokens
   travel in the Authorization header, which another site can't send, so a CSRF cookie adds
   nothing. Same user and selected account; the person's permissions and property now; AI on for
   the account (budget above 0, else closed `ai_switched_off`); the conversation or connection still

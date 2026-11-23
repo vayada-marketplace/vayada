@@ -256,13 +256,19 @@ describe("answering AI changes (VAY-2524)", () => {
     const { get, answer, starts, rows } = await setUp([op]);
     const seen = await get(op.id, "owner-impersonated");
     expect(seen.statusCode).toBe(200);
-    const { cardSha256: sha, card } = seen.json<PendingActionView>();
-    expect(card).toMatchObject({ question: "Block room 12 for 3 nights?" });
+    // The same card, without the digest a Yes needs: this session can't answer it.
+    expect(seen.json()).toMatchObject({
+      state: "needs_answer",
+      card: { question: "Block room 12 for 3 nights?" },
+      cardSha256: null,
+    });
+    const sha = (await get(op.id)).json<PendingActionView>().cardSha256;
+    expect(sha).toMatch(/^[0-9a-f]{64}$/);
     for (const body of [{ answer: "yes", cardSha256: sha }, { answer: "no" }]) {
       const response = await answer(op.id, body, "owner-impersonated");
       expect(response.statusCode).toBe(403);
       expect(response.json()).toMatchObject({
-        code: "first_party_only",
+        code: "impersonated",
         message: "You're signed in as someone else. Only they can answer.",
       });
     }
