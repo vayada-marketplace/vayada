@@ -317,5 +317,9 @@ export async function routeAssistant(
       json: { statusCode: 404, code: "not_found", message: "Not found" },
     });
   });
-  return seen;
+  return {
+    ...seen,
+    /** Changes a pending action as the API will show it from the next read on. */
+    setPendingAction: (id: string, view: PendingActionView) => actions.set(id, view),
+  };
 }

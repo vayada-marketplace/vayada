@@ -205,6 +205,44 @@ describe("transcriptOf", () => {
     ]);
   });
 
+  it("puts a turn's card after its text, also when the text was stored after the result", () => {
+    const pendingActionId = "8f3c2a10-1b2c-4d5e-8f90-123456789abc";
+    const items = transcriptOf(
+      view(
+        [{ status: "waiting_for_answer" }, { status: "done" }],
+        [
+          { turnId: "t1", message: { role: "user", content: "Block room 12" } },
+          {
+            turnId: "t1",
+            message: {
+              role: "assistant",
+              content: [
+                { type: "tool-call", toolCallId: "b", toolName: "room_block_create", input: {} },
+              ],
+            },
+          },
+          {
+            turnId: "t1",
+            message: {
+              role: "tool",
+              content: [
+                {
+                  type: "tool-result",
+                  toolCallId: "b",
+                  toolName: "room_block_create",
+                  output: { type: "json", value: { pendingActionId } },
+                },
+              ],
+            },
+          },
+          { turnId: "t1", message: { role: "assistant", content: "Tap Yes if it's right." } },
+          { turnId: "t2", message: { role: "user", content: "And room 14?" } },
+        ],
+      ),
+    );
+    expect(items.map((item) => item.kind)).toEqual(["question", "answer", "change", "question"]);
+  });
+
   it("makes no card of a result that only looks like one", () => {
     const items = transcriptOf(
       view(

@@ -127,7 +127,6 @@ export type ChangeCard = {
 export type PendingActionView = {
   id: string;
   state: PendingActionState;
-  action: string;
   /** While it waits: the answer is due by then. */
   answerBy: string | null;
   answeredAt: string | null;
@@ -138,17 +137,16 @@ export type PendingActionView = {
   cardSha256: string | null;
 };
 
-/** An answer the API refused (answered elsewhere, expired, changed since): the change as it is now. */
-export type AnswerResult = { view: PendingActionView; refused?: string };
-
-const pendingActionOf = (error: unknown): PendingActionView | undefined => {
+/**
+ * The change as it is now, from a refused answer: 409 (answered elsewhere, expired, changed since)
+ * or 403 (not allowed). A 503 may carry one too, but then nothing is known about the answer.
+ */
+const refusedWith = (error: unknown): PendingActionView | undefined => {
+  const status = statusOf(error);
+  if (status !== 409 && status !== 403) return undefined;
   const data = (error as { data?: { pendingAction?: unknown } } | null)?.data;
   const view = data?.pendingAction as PendingActionView | undefined;
   return view && typeof view.id === "string" && typeof view.state === "string" ? view : undefined;
-};
-const codeOf = (error: unknown): string | undefined => {
-  const code = (error as { data?: { code?: unknown } } | null)?.data?.code;
-  return typeof code === "string" ? code : undefined;
 };
 
 const scopeQuery = (scope: AssistantScope) =>
@@ -196,25 +194,25 @@ export function createAssistantApi(http: AssistantHttp) {
     },
 
     /**
-     * The person's Yes (bound to the card they saw) or No. A refusal that names the change as it
-     * is now (answered in another tab, expired, changed since) resolves with it; others throw.
+     * The person's Yes (bound to the card they saw) or No; resolves with the change as it is
+     * after it. A refusal that names the change as it is now (answered in another tab, expired,
+     * changed since, not allowed) resolves with that; anything else throws, and nobody knows yet
+     * whether the answer arrived.
      */
     async answer(
       view: Pick<PendingActionView, "id" | "cardSha256">,
       given: "yes" | "no",
-    ): Promise<AnswerResult> {
+    ): Promise<PendingActionView> {
       try {
         const body =
           given === "yes" ? { answer: "yes", cardSha256: view.cardSha256 } : { answer: "no" };
-        return {
-          view: await http.post<PendingActionView>(
-            `/api/ai/pending-actions/${encodeURIComponent(view.id)}/answer`,
-            body,
-          ),
-        };
+        return await http.post<PendingActionView>(
+          `/api/ai/pending-actions/${encodeURIComponent(view.id)}/answer`,
+          body,
+        );
       } catch (error) {
-        const current = pendingActionOf(error);
-        if (current) return { view: current, refused: codeOf(error) ?? "refused" };
+        const current = refusedWith(error);
+        if (current) return current;
         throw error;
       }
     },

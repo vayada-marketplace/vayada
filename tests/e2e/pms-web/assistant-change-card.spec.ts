@@ -87,7 +87,7 @@ test("a change waits for the person's Yes: the card, the waiting bar, then Done"
   await expect(panel.getByText("Looked at the calendar")).toBeVisible();
   await expect(panel.getByText("Looked something up")).toHaveCount(0);
   const bar = panel.getByRole("status").filter({ hasText: "Waiting for your answer:" });
-  await expect(bar).toContainText("block room 12");
+  await expect(bar).toContainText("Block room 12 for 3 nights");
   await shot(page, testInfo, "03-pms-yes-no-card");
 
   await card.getByRole("button", { name: "Yes, block room 12" }).click();
@@ -212,6 +212,96 @@ test("a Yes refused because something changed shows it, and Ask again asks afres
   await expect.poll(() => seen.turns.map((turn) => turn.question)).toEqual([QUESTION]);
 });
 
+test("a change being made is read again until it is done", async ({ page }, testInfo) => {
+  const healthy = watchPageHealth(page, testInfo);
+  const id = ids(6);
+  await openChat(page, "c-running");
+  const fake = await routeAssistant(page, {
+    chats: [waitingChat("c-running", id)],
+    pendingActions: {
+      [id]: roomBlockAction(id, inFifteenMinutes(), {
+        state: "running",
+        answerBy: null,
+        answeredAt: now(),
+        cardSha256: null,
+      }),
+    },
+  });
+  await page.goto("/dashboard");
+  const card = cardOf(page);
+  await expect(card.getByText("Making the change...")).toBeVisible();
+  await expect(card.getByRole("button", { name: "Yes, block room 12" })).toHaveCount(0);
+  fake.setPendingAction(
+    id,
+    roomBlockAction(id, inFifteenMinutes(), {
+      state: "done",
+      answerBy: null,
+      answeredAt: now(),
+      finishedAt: now(),
+      cardSha256: null,
+    }),
+  );
+  await expect(panelOf(page).getByText("Blocked room 12 for 3 nights")).toBeVisible({
+    timeout: 10_000,
+  });
+  await healthy();
+});
+
+test("a card vayada can't bind a Yes to has no Yes", async ({ page }, testInfo) => {
+  const healthy = watchPageHealth(page, testInfo);
+  const id = ids(7);
+  await openChat(page, "c-unbound");
+  await routeAssistant(page, {
+    chats: [waitingChat("c-unbound", id)],
+    pendingActions: {
+      [id]: roomBlockAction(id, inFifteenMinutes(), { card: null, cardSha256: null }),
+    },
+  });
+  await page.goto("/dashboard");
+  const card = cardOf(page);
+  await expect(card).toContainText("is gone or hidden from you now");
+  await expect(card.getByRole("button")).toHaveCount(0);
+  await healthy();
+});
+
+// No page-health watch: the browser logs the lost answer's 503 as a console error.
+test("an answer whose reply was lost is never called failed: the card reads the change again", async ({
+  page,
+}) => {
+  const id = ids(8);
+  const waitingView = roomBlockAction(id, inFifteenMinutes());
+  await openChat(page, "c-lost");
+  const fake = await routeAssistant(page, {
+    chats: [waitingChat("c-lost", id)],
+    pendingActions: { [id]: waitingView },
+    // The reply never comes back (onAnswer gives nothing: a 503 without the change).
+  });
+  await page.goto("/dashboard");
+  const card = cardOf(page);
+  // 1. It still waits: the answer didn't get through, and Yes can be pressed again.
+  await card.getByRole("button", { name: "Yes, block room 12" }).click();
+  await expect(card.getByRole("alert")).toHaveText(
+    "Your answer didn't get through. Nothing changed. Try again.",
+  );
+  await expect(card.getByRole("button", { name: "Yes, block room 12" })).toBeVisible();
+  // 2. It ran before the reply was lost: the card shows Done, never "Nothing changed".
+  fake.setPendingAction(
+    id,
+    roomBlockAction(id, inFifteenMinutes(), {
+      state: "done",
+      answerBy: null,
+      answeredAt: now(),
+      finishedAt: now(),
+      cardSha256: null,
+    }),
+  );
+  await card.getByRole("button", { name: "Yes, block room 12" }).click();
+  const panel = panelOf(page);
+  await expect(panel.getByText("Blocked room 12 for 3 nights")).toBeVisible();
+  await expect(panel.getByText(/Nothing changed/)).toHaveCount(0);
+  expect(fake.answers).toHaveLength(2);
+});
+
 test("every outcome reads as on board 07", async ({ page }, testInfo) => {
   const healthy = watchPageHealth(page, testInfo);
   await openChat(page, "c-outcomes");
@@ -221,6 +311,7 @@ test("every outcome reads as on board 07", async ({ page }, testInfo) => {
     ["expired", {}],
     ["not_allowed", {}],
     ["stopped", {}],
+    ["changed", {}],
     ["failed", { answeredAt: now() }],
     ["unsure", { answeredAt: now() }],
   ];
@@ -258,6 +349,7 @@ test("every outcome reads as on board 07", async ({ page }, testInfo) => {
     "Not done",
     "Expired",
     "Not allowed anymore",
+    "This changed since",
     "Stopped",
     "Couldn't finish",
     "Not sure it happened",

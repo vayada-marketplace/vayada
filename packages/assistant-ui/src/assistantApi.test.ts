@@ -206,7 +206,7 @@ describe("createAssistantApi", () => {
     const post = vi.fn(async () => ({ id: "p1", state: "done" }) as never);
     const api = createAssistantApi(fakeHttp({ post }));
     const card = { id: "p1", cardSha256: "b".repeat(64) };
-    await expect(api.answer(card, "yes")).resolves.toEqual({ view: { id: "p1", state: "done" } });
+    await expect(api.answer(card, "yes")).resolves.toEqual({ id: "p1", state: "done" });
     expect(post).toHaveBeenLastCalledWith("/api/ai/pending-actions/p1/answer", {
       answer: "yes",
       cardSha256: "b".repeat(64),
@@ -215,21 +215,25 @@ describe("createAssistantApi", () => {
     expect(post).toHaveBeenLastCalledWith("/api/ai/pending-actions/p1/answer", { answer: "no" });
   });
 
-  it("hands back the change as it is now when the answer is refused, and throws otherwise", async () => {
+  it("hands back the change as it is now when the answer is refused (409, 403)", async () => {
     const current = { id: "p1", state: "changed" };
     const refused = Object.assign(httpError(409), {
       data: { code: "changed", pendingAction: current },
+    });
+    // A 503 may carry the change too, but then nobody knows whether the answer arrived.
+    const unavailable = Object.assign(httpError(503), {
+      data: { code: "unavailable", pendingAction: { id: "p1", state: "needs_answer" } },
     });
     const api = createAssistantApi(
       fakeHttp({
         post: vi
           .fn()
           .mockRejectedValueOnce(refused)
-          .mockRejectedValueOnce(httpError(503)) as AssistantHttp["post"],
+          .mockRejectedValueOnce(unavailable) as AssistantHttp["post"],
       }),
     );
     const card = { id: "p1", cardSha256: "c".repeat(64) };
-    await expect(api.answer(card, "yes")).resolves.toEqual({ view: current, refused: "changed" });
+    await expect(api.answer(card, "yes")).resolves.toEqual(current);
     await expect(api.answer(card, "yes")).rejects.toMatchObject({ status: 503 });
   });
 });

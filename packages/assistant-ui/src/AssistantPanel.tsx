@@ -258,7 +258,10 @@ function OpenDrawer({
       return next;
     });
   }, []);
-  const waiting = Object.values(cards).find((card) => card?.state === "needs_answer");
+  // The first card in the chat that still waits gets the bar.
+  const waiting = chat.items
+    .map((item) => (item.kind === "change" ? cards[item.pendingActionId] : undefined))
+    .find((card) => card?.state === "needs_answer");
 
   // Stop disappears when the answer ends: the question box takes the focus it had.
   useEffect(() => {
@@ -847,6 +850,8 @@ function Transcript({
 
   let question = "";
   const canRetry = !chat.answering && !chat.blocker && !chat.notice;
+  // Only the chat's latest card offers "Ask again" (an older one would ask an old question).
+  const lastCard = [...chat.items].reverse().find((item) => item.kind === "change");
   return (
     <div className="flex-1 overflow-y-auto px-5 py-4">
       <div
@@ -882,7 +887,9 @@ function Transcript({
                 m={m.change}
                 locale={locale}
                 onView={onCardView}
-                onAskAgain={canRetry && asked ? () => onRetry(asked) : undefined}
+                onAskAgain={
+                  row === lastCard && canRetry && asked ? () => onRetry(asked) : undefined
+                }
               />
             );
           }

@@ -88,6 +88,7 @@ export type ChangeMessages = {
   unavailable: string;
   gone: string;
   answerFailed: string;
+  answerUnknown: string;
   waiting: string;
   until: string;
   show: string;
@@ -183,7 +184,8 @@ export const assistantEnglish: AssistantMessages = {
     notAllowed: "Not allowed anymore",
     notAllowedBody: "Your role no longer allows this change, so vayada didn't make it.",
     stopped: "Stopped",
-    stoppedBody: "AI was switched off for this account, so vayada didn't make this change.",
+    stoppedBody:
+      "AI was switched off for this account, or the chat that asked for it is gone, so vayada didn't make this change.",
     failed: "Couldn't finish",
     failedBody:
       "vayada couldn't make this change. Nothing changed. Try again, or make it yourself in vayada.",
@@ -195,6 +197,8 @@ export const assistantEnglish: AssistantMessages = {
     unavailable: "This change can't be shown right now.",
     gone: "Something this change names is gone or hidden from you now, so it can't be answered here.",
     answerFailed: "Your answer didn't get through. Nothing changed. Try again.",
+    answerUnknown:
+      "We couldn't tell whether your answer got through. Look at this card again in a moment before you answer again.",
     waiting: "Waiting for your answer:",
     until: "until {time}",
     show: "Show",
@@ -295,7 +299,7 @@ export const assistantGerman: AssistantMessages = {
       "Ihre Rolle erlaubt diese Änderung nicht mehr, daher hat vayada sie nicht ausgeführt.",
     stopped: "Gestoppt",
     stoppedBody:
-      "KI wurde für dieses Konto ausgeschaltet, daher hat vayada diese Änderung nicht ausgeführt.",
+      "KI wurde für dieses Konto ausgeschaltet oder der Chat, der darum bat, ist weg, daher hat vayada diese Änderung nicht ausgeführt.",
     failed: "Konnte nicht abgeschlossen werden",
     failedBody:
       "vayada konnte diese Änderung nicht ausführen. Es wurde nichts geändert. Versuchen Sie es nochmal oder ändern Sie es selbst in vayada.",
@@ -308,6 +312,8 @@ export const assistantGerman: AssistantMessages = {
     gone: "Etwas, das diese Änderung nennt, ist weg oder für Sie nicht mehr sichtbar, daher kann sie hier nicht beantwortet werden.",
     answerFailed:
       "Ihre Antwort ist nicht angekommen. Es wurde nichts geändert. Versuchen Sie es nochmal.",
+    answerUnknown:
+      "Wir konnten nicht feststellen, ob Ihre Antwort angekommen ist. Schauen Sie gleich nochmal auf diese Karte, bevor Sie erneut antworten.",
     waiting: "Wartet auf Ihre Antwort:",
     until: "bis {time}",
     show: "Anzeigen",
