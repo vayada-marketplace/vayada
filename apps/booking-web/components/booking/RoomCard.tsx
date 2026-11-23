@@ -102,7 +102,7 @@ export default function RoomCard({
   const t = useTranslations("home");
   const tc = useTranslations("common");
   const locale = useLocale();
-  const { approximate } = useCurrency();
+  const { displayPrice } = useCurrency();
   const [imageIndex, setImageIndex] = useState(0);
   const [picked, setPicked] = useState<string | null>(null);
   const current = pick?.current ?? chosen;
@@ -224,20 +224,6 @@ export default function RoomCard({
 
   const amount = (choice: (typeof shown)[number]) =>
     choice.priced ? quoteMoneyAmount(choice.priced.totalMinor, choice.priced.currency) : null;
-  // The charged amount in its own currency, with cents when it has them.
-  const exactMoney = (value: number, currency: string) =>
-    new Intl.NumberFormat("en-GB", {
-      style: "currency",
-      currency,
-      minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
-      maximumFractionDigits: Number.isInteger(value) ? 0 : 2,
-    }).format(value);
-  // VAY-2390: the guest's display currency leads ("≈ US$311"), and what they pay follows it.
-  const money = (value: number, currency: string) => {
-    const exact = exactMoney(value, currency);
-    const approx = approximate(value, currency);
-    return { label: approx ?? exact, paid: approx ? exact : null };
-  };
   // A no-refund rate's saving (VAY-2392, shared with "Best deal first", VAY-2449).
   const saving = (choice: (typeof all)[number]): SavingChoice => ({
     mealPlan: choice.offer.mealPlan,
@@ -275,7 +261,6 @@ export default function RoomCard({
       <div className="space-y-3">
         {shown.map((choice) => {
           const total = amount(choice);
-          const price = total === null ? null : money(total, choice.priced!.currency);
           return (
             <RateOption
               key={choice.offer.publicOfferKey}
@@ -285,16 +270,13 @@ export default function RoomCard({
               refundable={choice.text.refundable}
               title={choice.text.name}
               terms={choice.text.terms}
-              totalLabel={price?.label ?? null}
-              nightlyLabel={
-                total === null || price?.paid
-                  ? null
-                  : exactMoney(
-                      Math.round((total / Math.max(nights, 1)) * 100) / 100,
-                      choice.priced!.currency,
-                    )
+              // VAY-2588: the stay's price in the guest's currency only, rounded when converted.
+              totalLabel={total === null ? null : displayPrice(total, choice.priced!.currency)}
+              subParts={
+                inDetails
+                  ? [t("taxesIncluded")]
+                  : [tc("nights", { count: nights }), t("taxesIncluded")]
               }
-              paidLabel={price?.paid ?? null}
               discountPercent={discount(choice)}
               unavailable={
                 choice.unavailable ||
@@ -394,7 +376,7 @@ export default function RoomCard({
                 ? t("pickRoom.continueWithPlace")
                 : inDetails && selected?.priced
                   ? t("selectThisRateFor", {
-                      price: money(amount(selected)!, selected.priced.currency).label,
+                      price: displayPrice(amount(selected)!, selected.priced.currency),
                     })
                   : t("selectThisRate")}
         </button>
@@ -456,7 +438,7 @@ export default function RoomCard({
     const cheapest = selectable.find(({ priced }) => priced)?.priced ?? null;
     const nightly =
       cheapest &&
-      money(
+      displayPrice(
         Math.round(
           (quoteMoneyAmount(cheapest.totalMinor, cheapest.currency) / Math.max(nights, 1)) * 100,
         ) / 100,
@@ -546,12 +528,9 @@ export default function RoomCard({
             ) : nightly ? (
               <p className="text-sm text-gray-500">
                 <span className="font-bold text-gray-900 sm:block sm:text-base">
-                  {tc("fromPrice", { price: nightly.label })}
+                  {tc("fromPrice", { price: nightly })}
                 </span>{" "}
                 {tc("perNight")}
-                {nightly.paid && (
-                  <span className="block text-xs">{t("youPay", { price: nightly.paid })}</span>
-                )}
                 {/* VAY-2393: a part's price is for the adults the place takes. */}
                 {part && bookPart && (
                   <span className="block text-xs">
