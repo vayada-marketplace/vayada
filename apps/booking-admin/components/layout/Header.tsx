@@ -11,9 +11,10 @@ import { settingsService, HotelSummary, SuperAdminHotel } from "@/services/setti
 import { useTranslation, SUPPORTED_LANGUAGES } from "@/lib/i18n";
 import NavigationSearch from "./NavigationSearch";
 import DailyStatsStrip from "./DailyStatsStrip";
-import NotificationsBell from "./notifications/NotificationsBell";
+import NotificationsBell from "@vayada/product-onboarding/NotificationsBell";
 import NotificationToasts from "./notifications/NotificationToasts";
-import { useHostNotifications } from "./notifications/useHostNotifications";
+import { useHostNotifications } from "@vayada/product-onboarding/useHostNotifications";
+import { bookingNotificationsClient } from "@/services/api/bookingNotificationsClient";
 import { useNotificationActions } from "./notifications/useNotificationActions";
 import ManagePropertiesModal from "./ManagePropertiesModal";
 import { buildBookingPreviewUrl } from "@/lib/utils/bookingPreviewUrl";
@@ -87,7 +88,7 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
 
   // The bell's feed for the selected property (VAY-2349), by its canonical property id.
   const propertyId = selectedHotel?.propertyId ?? selectedHotel?.id;
-  const notifications = useHostNotifications(propertyId);
+  const notifications = useHostNotifications(propertyId, bookingNotificationsClient);
   const notificationActions = useNotificationActions(propertyId, notifications);
 
   const initials = userName
@@ -266,6 +267,8 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
           hotelName={selectedHotel?.name ?? ""}
           notifications={notifications}
           actions={notificationActions}
+          t={t}
+          locale={locale}
         />
 
         {/* Profile Avatar + Dropdown */}

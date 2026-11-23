@@ -25,6 +25,11 @@ import { useTranslation, SUPPORTED_LANGUAGES } from "@/lib/i18n";
 import { usePmsAccess } from "@/lib/settings/PmsAccessContext";
 import { CURRENCY_OPTIONS } from "@/lib/constants/options";
 import SearchModal from "./SearchModal";
+import { holdsPrices } from "@/lib/utils/holdsPrices";
+import NotificationsBell from "@vayada/product-onboarding/NotificationsBell";
+import { useHostNotifications } from "@vayada/product-onboarding/useHostNotifications";
+import { pmsNotificationsClient } from "@/services/api/pmsNotificationsClient";
+import { usePmsNotificationActions } from "./notifications/usePmsNotificationActions";
 
 interface DayStats {
   today: string;
@@ -32,9 +37,6 @@ interface DayStats {
   remainingArrivals: number;
   departures: number;
 }
-
-/** A room page can hold unsaved prices: leaving through the document lets its beforeunload warning run. */
-const holdsPrices = () => /^\/rooms\/[^/]+$/.test(window.location.pathname);
 
 export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
   const router = useRouter();
@@ -61,6 +63,9 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
     departures: 0,
   });
   const profileRef = useRef<HTMLDivElement>(null);
+  // The notifications bell, as in Booking Admin (VAY-2591): hidden for people the feed refuses.
+  const notifications = useHostNotifications(selectedHotel?.id, pmsNotificationsClient);
+  const notificationActions = usePmsNotificationActions(selectedHotel?.id, notifications);
   const supportDialog = useRef<SupportDialogHandle>(null);
   const profileButtonRef = useRef<HTMLButtonElement>(null);
   const propertyRef = useRef<HTMLDivElement>(null);
@@ -312,6 +317,13 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
 
       {/* Right: avatar */}
       <div className="flex items-center gap-3 shrink-0">
+        <NotificationsBell
+          hotelName={selectedHotel?.name ?? ""}
+          notifications={notifications}
+          actions={notificationActions}
+          t={t}
+          locale={locale}
+        />
         {/* Profile avatar */}
         <div className="relative" ref={profileRef}>
           <button

@@ -7,13 +7,13 @@ import {
   BellIcon,
   CalendarIcon,
   CheckCircleIcon,
+  CheckIcon,
   ExclamationTriangleIcon,
   TicketIcon,
   UserPlusIcon,
   XCircleIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
-import { useTranslation } from "@/lib/i18n";
 import {
   NOTIFICATION_TABS,
   badgeLabel,
@@ -23,11 +23,14 @@ import {
   syncAlertText,
   unreadForTab,
   type NotificationAction,
+  type NotificationGroup,
   type NotificationRow,
   type NotificationTab,
+  type Translate,
 } from "./notificationRows";
+import type { HostNotification, HostNotificationSyncAlert } from "./hostNotifications";
 import type { useHostNotifications } from "./useHostNotifications";
-import type { useNotificationActions } from "./useNotificationActions";
+import type { SyncRetryState } from "./useSyncRetry";
 
 const TAB_LABEL: Record<NotificationTab, string> = {
   all: "notifications.tab.all",
@@ -56,24 +59,46 @@ const AMOUNT_TONE: Record<NotificationRow["amountTone"], string> = {
   default: "text-gray-700",
 };
 const SECONDARY_BUTTON =
-  "inline-flex h-[30px] items-center rounded-[7px] border border-gray-300 bg-white px-3 text-[13px] font-medium text-gray-700 hover:bg-gray-50";
+  "inline-flex h-[30px] items-center gap-1.5 rounded-[7px] border border-gray-300 bg-white px-3 text-[13px] font-medium text-gray-700 hover:bg-gray-50";
+// A needs-action item's own action (VAY-2591): brand blue.
+const PRIMARY_BUTTON =
+  "inline-flex h-[30px] items-center rounded-[7px] bg-primary-600 px-3 text-[13px] font-medium text-white hover:bg-primary-700";
+// On touch screens (no hover) the mark button sits with the row's buttons, under the text.
+const TOUCH_MARK_BUTTON =
+  "hidden h-[30px] items-center gap-1.5 rounded-[7px] border border-gray-300 bg-white px-3 text-[13px] font-medium text-primary-600 hover:bg-gray-50 [@media(hover:none)]:inline-flex";
+// With a mouse it takes the label's place while the row is hovered, or while it has keyboard focus.
+const HOVER_MARK_BUTTON =
+  "pointer-events-none absolute right-0 top-0 inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-semibold text-primary-600 opacity-0 shadow-sm transition-opacity hover:bg-gray-50 focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 [@media(hover:none)]:hidden";
 
 type Notifications = ReturnType<typeof useHostNotifications>;
-type Actions = ReturnType<typeof useNotificationActions>;
 
-/** Booking Admin's bell and notifications panel (VAY-2349): a dropdown from 768 px, a full-width sheet
- * under the header on phones. */
+/** What the bell's buttons do in the app that shows it: links (Booking Admin and PMS open different pages)
+ * and the shared Retry sync (useSyncRetry). */
+export type NotificationActions = {
+  act: (key: string, read: boolean, action: NotificationAction) => void;
+  retrySync: (alert: HostNotificationSyncAlert) => Promise<void>;
+  openChannelManager: (alert: HostNotificationSyncAlert) => Promise<void>;
+  sync: SyncRetryState;
+  resetSync: () => void;
+};
+
+/** The notifications bell and panel (VAY-2349), in Booking Admin's and PMS's top bars (VAY-2591): a
+ * dropdown from 768 px, a full-width sheet under the header on phones. Each app passes its own translations
+ * (the `notifications.*` and `layout.header.notifications` keys). */
 export default function NotificationsBell({
   hotelName,
   notifications,
   actions,
+  t,
+  locale,
 }: {
   hotelName: string;
   notifications: Notifications;
-  actions: Actions;
+  actions: NotificationActions;
+  t: Translate;
+  locale: string;
 }) {
-  const { t, locale } = useTranslation();
-  const { feed, status, markRead, markAllRead } = notifications;
+  const { feed, status, markRead, markUnread, markDone, markAllRead } = notifications;
   const { sync, resetSync, retrySync, openChannelManager } = actions;
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<NotificationTab>("all");
@@ -107,7 +132,9 @@ export default function NotificationsBell({
     if (!open) resetSync();
   }, [open, resetSync]);
 
-  if (status === "unavailable") return null;
+  // Nothing until the first read answers: people the feed refuses (PMS front desk without the Booking
+  // Engine) never see the bell flash up and vanish.
+  if (status === "unavailable" || (status === "loading" && !feed)) return null;
 
   const unread = feed?.unread.all ?? 0;
   // Red with nothing unread: the sync error was read but is still failing (a dot without a count).
@@ -132,6 +159,14 @@ export default function NotificationsBell({
   };
 
   const items = feed ? itemsForTab(feed.items, tab) : [];
+  // Needs action lists what is still to do as one group; the other tabs group by day.
+  const groups: { group: NotificationGroup; items: HostNotification[] }[] = !feed
+    ? []
+    : tab === "needs_action"
+      ? items.length > 0
+        ? [{ group: "todo", items }]
+        : []
+      : groupNotifications(items, feed.timeZone, now);
   const alert = feed?.syncAlert ?? null;
   const showAlert = alert !== null && !synced && (tab === "all" || tab === "needs_action");
   const nothingAtAll = feed !== null && feed.items.length === 0 && alert === null && !synced;
@@ -237,7 +272,7 @@ export default function NotificationsBell({
                   onClick={() => setTab(name)}
                   className={`flex h-[30px] shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] ${
                     active
-                      ? "bg-gray-900 font-semibold text-white"
+                      ? "bg-primary-600 font-semibold text-white"
                       : "font-medium text-gray-600 hover:bg-gray-50"
                   }`}
                 >
@@ -245,11 +280,7 @@ export default function NotificationsBell({
                   {count > 0 && (
                     <span
                       className={`flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-[5px] text-[11px] font-bold ${
-                        active
-                          ? "bg-white text-gray-900"
-                          : name === "needs_action"
-                            ? "bg-red-50 text-red-600"
-                            : "bg-primary-50 text-primary-600"
+                        active ? "bg-white text-primary-600" : "bg-primary-50 text-primary-600"
                       }`}
                     >
                       {badgeLabel(count)}
@@ -328,7 +359,11 @@ export default function NotificationsBell({
                       {alert.canViewDetails && (
                         <button
                           type="button"
-                          onClick={() => void openChannelManager(alert)}
+                          onClick={() => {
+                            // In PMS the page changes under the header: close the panel too.
+                            setOpen(false);
+                            void openChannelManager(alert);
+                          }}
                           className="inline-flex h-[30px] items-center rounded-[7px] border border-red-200 bg-white px-3 text-[13px] font-medium text-red-800 hover:bg-red-50"
                         >
                           {t("notifications.sync.viewDetails")}
@@ -354,25 +389,33 @@ export default function NotificationsBell({
               />
             )}
 
-            {feed &&
-              groupNotifications(items, feed.timeZone, now).map(({ group, items: grouped }) => (
-                <section key={group} aria-label={t(`notifications.group.${group}`)}>
-                  <h3 className="px-4 pb-1.5 pt-3.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-500">
-                    {t(`notifications.group.${group}`)}
-                  </h3>
-                  <ul>
-                    {grouped.map((item, index) => (
-                      <Row
-                        key={item.key}
-                        row={notificationRow(item, context)}
-                        last={index === grouped.length - 1}
-                        onMarkRead={(key) => void markRead([key])}
-                        onAction={act}
-                      />
-                    ))}
-                  </ul>
-                </section>
-              ))}
+            {groups.map(({ group, items: grouped }) => (
+              <section key={group} aria-label={t(`notifications.group.${group}`)}>
+                <h3 className="px-4 pb-1.5 pt-3.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-500">
+                  {t(`notifications.group.${group}`)}
+                </h3>
+                <ul className="flex flex-col gap-1 px-2 pb-2">
+                  {grouped.map((item) => (
+                    <Row
+                      key={item.key}
+                      t={t}
+                      row={notificationRow(item, context)}
+                      done={item.done}
+                      todo={item.category === "needs_action" && !item.done}
+                      card={group === "todo"}
+                      onMarkRead={(key) => void markRead([key])}
+                      onMarkUnread={(key) => void markUnread([key])}
+                      onMarkDone={(key) => {
+                        void markDone([key]);
+                        // Its button goes with it: keep the focus in the panel.
+                        panel.current?.focus();
+                      }}
+                      onAction={act}
+                    />
+                  ))}
+                </ul>
+              </section>
+            ))}
           </div>
         </div>
       )}
@@ -380,20 +423,35 @@ export default function NotificationsBell({
   );
 }
 
+/** One notification (VAY-2591): unread rows are light blue with a "New" label, read rows white with "Read",
+ * done rows say "Done". Hovering the row turns the label into "Mark as read", "Mark as unread" or "Mark as
+ * not done" (keyboard users tab to it); on touch screens that button always shows, under the text. An item
+ * that needs action has its own action in brand blue and "Mark as done"; in the Needs action tab it is an
+ * amber "To do" card. */
 function Row({
+  t,
   row,
-  last,
+  done,
+  todo,
+  card,
   onMarkRead,
+  onMarkUnread,
+  onMarkDone,
   onAction,
 }: {
+  t: Translate;
   row: NotificationRow;
-  last: boolean;
+  done: boolean;
+  todo: boolean;
+  card: boolean;
   onMarkRead: (key: string) => void;
+  onMarkUnread: (key: string) => void;
+  onMarkDone: (key: string) => void;
   onAction: (row: NotificationRow, action: NotificationAction) => void;
 }) {
-  const { t } = useTranslation();
   const { icon: Icon, tile } = TONE[row.tone];
   const action = row.action;
+  const unread = !row.read;
   const label =
     action?.kind === "contact_guest"
       ? t("notifications.action.contactGuest")
@@ -404,21 +462,63 @@ function Row({
               : "notifications.action.raiseLimit",
           )
         : t("notifications.action.viewBooking");
+  const status = unread
+    ? "notifications.status.new"
+    : done
+      ? "notifications.status.done"
+      : "notifications.status.read";
+  // Unread: mark read. Done: undo it for the team ("Mark as not done"). Read: mark unread.
+  const mark = unread
+    ? { label: "notifications.markRead", named: "notifications.markReadNamed", run: onMarkRead }
+    : done
+      ? {
+          label: "notifications.markNotDone",
+          named: "notifications.markNotDoneNamed",
+          run: onMarkUnread,
+        }
+      : {
+          label: "notifications.markUnread",
+          named: "notifications.markUnreadNamed",
+          run: onMarkUnread,
+        };
+  const markButton = (className: string) => (
+    <button
+      type="button"
+      onClick={() => mark.run(row.key)}
+      aria-label={t(mark.named, { title: row.title })}
+      className={className}
+    >
+      {unread && <CheckIcon className="h-3.5 w-3.5" aria-hidden="true" />}
+      {t(mark.label)}
+    </button>
+  );
   return (
     <li
       data-testid="notification-row"
-      data-unread={row.read ? undefined : "true"}
-      className={`flex gap-3 py-3 pl-4 pr-3 ${row.read ? "" : "bg-[#F5F7FF]"} ${
-        last ? "" : "border-b border-gray-100"
+      data-unread={unread ? "true" : undefined}
+      data-done={done ? "true" : undefined}
+      className={`group flex gap-3 rounded-xl p-3 ${
+        card
+          ? "border border-amber-200 bg-amber-50"
+          : unread
+            ? "bg-[#F5F7FF] hover:bg-primary-50 hover:ring-1 hover:ring-inset hover:ring-primary-200"
+            : "hover:bg-gray-50"
       }`}
     >
-      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${tile}`}>
+      <span
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+          card ? `border border-amber-200 ${tile}` : unread ? tile : "bg-gray-100 text-gray-400"
+        }`}
+      >
         <Icon className="h-[17px] w-[17px]" />
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex items-start justify-between gap-2">
-          <p className={`text-sm text-gray-900 ${row.read ? "font-medium" : "font-semibold"}`}>
-            {!row.read && <span className="sr-only">{t("notifications.unread")}: </span>}
+          <p
+            className={`text-sm ${unread ? "font-semibold text-gray-900" : "font-medium text-gray-600"}`}
+          >
+            {unread && <span className="sr-only">{t("notifications.unread")}: </span>}
+            {done && !unread && <span className="sr-only">{t("notifications.status.done")}: </span>}
             {row.title}
           </p>
           {row.amount && (
@@ -427,35 +527,50 @@ function Row({
             </span>
           )}
         </div>
-        <p className="text-[13px] leading-[18px] text-gray-700">{row.detail}</p>
+        <p
+          className={`text-[13px] leading-[18px] ${unread || card ? "text-gray-700" : "text-gray-500"}`}
+        >
+          {row.detail}
+        </p>
         <p className="text-xs text-gray-500">{row.meta}</p>
-        {action && (
-          <div className="mt-2 flex">
+        <div
+          className={`mt-2 flex-wrap gap-2 ${action || todo ? "flex" : "hidden [@media(hover:none)]:flex"}`}
+        >
+          {action && (
             <button
               type="button"
               onClick={() => onAction(row, action)}
-              className={
-                action.kind === "contact_guest"
-                  ? "inline-flex h-[30px] items-center rounded-[7px] bg-gray-900 px-3 text-[13px] font-medium text-white hover:bg-gray-800"
-                  : SECONDARY_BUTTON
-              }
+              className={todo ? PRIMARY_BUTTON : SECONDARY_BUTTON}
             >
               {label}
             </button>
-          </div>
-        )}
+          )}
+          {todo && (
+            <button
+              type="button"
+              onClick={() => onMarkDone(row.key)}
+              aria-label={t("notifications.markDoneNamed", { title: row.title })}
+              className={SECONDARY_BUTTON}
+            >
+              <CheckIcon className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("notifications.markDone")}
+            </button>
+          )}
+          {markButton(TOUCH_MARK_BUTTON)}
+        </div>
       </div>
-      <div className="-mr-1.5 -mt-1 flex w-6 shrink-0 justify-center">
-        {!row.read && (
-          <button
-            type="button"
-            onClick={() => onMarkRead(row.key)}
-            aria-label={t("notifications.markReadNamed", { title: row.title })}
-            className="group flex h-6 w-6 items-center justify-center rounded-full"
-          >
-            <span className="h-2 w-2 rounded-full bg-primary-500 ring-primary-200 group-hover:ring-4" />
-          </button>
-        )}
+      <div className="relative flex shrink-0 items-start justify-end">
+        <span
+          aria-hidden="true"
+          data-testid="notification-status"
+          className={`flex h-5 items-center gap-1 rounded-md px-1.5 text-[11px] font-semibold transition-opacity [@media(hover:hover)]:group-hover:opacity-0 ${
+            unread ? "bg-primary-50 text-primary-600" : done ? "text-green-700" : "text-gray-500"
+          }`}
+        >
+          {done && !unread && <CheckIcon className="h-3 w-3" />}
+          {t(status)}
+        </span>
+        {markButton(HOVER_MARK_BUTTON)}
       </div>
     </li>
   );

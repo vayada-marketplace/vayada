@@ -4,14 +4,16 @@ import { BOOKING_ADMIN_URL } from "./setupHandoff";
 
 /**
  * Opens a Booking Admin page signed in, the way the sidebar switches apps: a one-time session
- * handoff when the exchange is up, Booking Admin's own login with the path otherwise.
+ * handoff when the exchange is up, Booking Admin's own login with the path otherwise. With a
+ * property, the handoff opens it on that property (the notifications bell, VAY-2591).
  */
-export async function openBookingAdmin(targetPath: string): Promise<void> {
+export async function openBookingAdmin(targetPath: string, propertyId?: string): Promise<void> {
   const csrfToken = getAuthCsrfToken();
   if (csrfToken) {
     try {
       window.location.href = await createBrowserAuthHandoff({
         csrfToken,
+        ...(propertyId ? { routingHints: { propertyId } } : {}),
         sourceSurface: "pms-web",
         targetPath,
         targetSurface: "booking-admin",
