@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -152,6 +153,56 @@ describe.skipIf(!TEST_DATABASE_URL)("Guest profile links (runtime login)", () =>
        VALUES ($1::uuid, 'guest_booking.accepted', NULL, 'confirmed', 'property_user')`,
       [bookingId],
     );
+
+  // VAY-2577: a booking with a Channex mapping is a channel booking. Replica mode skips the binding
+  // triggers a real connection needs; this suite doesn't test those.
+  const mapToChannel = async (propertyId: string, bookingId: string) => {
+    const client = await admin.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL session_replication_role = replica");
+      const connectionId = randomUUID();
+      await client.query(
+        `INSERT INTO pms.channel_connections
+           (id, property_id, provider, connection_status, external_property_id)
+         VALUES ($1::uuid, $2::uuid, 'channex', 'connected', $3)`,
+        [connectionId, propertyId, `${PREFIX}${connectionId}`],
+      );
+      await client.query(
+        `INSERT INTO pms.channel_booking_mappings
+           (property_id, connection_id, guest_booking_id, external_booking_id)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4)`,
+        [propertyId, connectionId, bookingId, `${PREFIX}${bookingId}`],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  };
+
+  const remark = async () => {
+    const sql = await readFile(
+      new URL(
+        "../../../../packages/backend-migration/migrations/0554_booking_guest_profile_channel_contact_remark.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const client = await admin.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(sql);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  };
 
   const link = async (bookingGuestId: string) =>
     (
@@ -560,6 +611,50 @@ describe.skipIf(!TEST_DATABASE_URL)("Guest profile links (runtime login)", () =>
     });
   });
 
+  // VAY-2577: a channel stay that closed while its contact was hidden never reached the guest
+  // record; migration 0554 marks it once and the next run fills only the record's empty fields.
+  it("fills the guest record from a channel stay that closed while its contact was hidden (0554)", async () => {
+    const ota = await book(
+      propertyA,
+      { channel: "booking_com", status: "canceled", accepted: false },
+      { first: "Lea", last: "Brandt", email: "lea.k2@guest.booking.test", phone: "+49 30 1234567" },
+    );
+    const desk = await book(
+      propertyA,
+      { status: "canceled", accepted: false },
+      { first: "Jan", last: "Roth", email: "jan@example.test" },
+    );
+    await sweep();
+    expect(await link(ota.guestIds[0]!)).toMatchObject({
+      link: "created",
+      deferred: false,
+      email: null,
+      phone: null,
+    });
+
+    // Since #4220 its Channex mapping shows the contact, but the job doesn't read a closed row again.
+    await mapToChannel(propertyA, ota.bookingId);
+    await sweep();
+    expect(await link(ota.guestIds[0]!)).toMatchObject({ email: null, phone: null });
+
+    await remark();
+    expect((await link(ota.guestIds[0]!)).deferred).toBe(true);
+    // A desk booking isn't a channel booking: its hidden contact stays hidden.
+    expect((await link(desk.guestIds[0]!)).deferred).toBe(false);
+    await sweep();
+    expect(await link(ota.guestIds[0]!)).toMatchObject({
+      deferred: false,
+      synced: true,
+      email: "lea.k2@guest.booking.test",
+      phone: "+49 30 1234567",
+    });
+    expect((await link(desk.guestIds[0]!)).email).toBeNull();
+
+    // Nothing is left to fill, so a second run marks nothing.
+    await remark();
+    expect((await link(ota.guestIds[0]!)).deferred).toBe(false);
+  });
+
   it("linked every row of this suite without a row error", async () => {
     const ours = await admin.query<{ id: string }>(
       `SELECT guest.id::text AS id FROM booking.booking_guests guest
@@ -611,6 +706,10 @@ async function cleanup(pool: pg.Pool): Promise<void> {
       "DELETE FROM platform.product_audit_events WHERE property_id = ANY($1::uuid[])",
       [properties],
     );
+    // VAY-2577's channel fixture (its mappings went with the bookings).
+    await client.query("DELETE FROM pms.channel_connections WHERE property_id = ANY($1::uuid[])", [
+      properties,
+    ]);
     await client.query(
       "DELETE FROM identity.organization_resource_links WHERE resource_id = ANY($1::text[])",
       [properties],
