@@ -385,9 +385,13 @@ export function WaitingBar({
       className="mb-2 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900"
     >
       <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
-      <span className="min-w-0 flex-1 truncate">
-        <span className="font-semibold">{m.waiting}</span> {changeTitle(view)}
-        {view.answerBy && ` · ${fill(m.until, { time: timeOf(view.answerBy, locale) })}`}
+      {/* The title gives way first: "until 09:58" always shows. */}
+      <span className="flex min-w-0 flex-1 gap-1 whitespace-nowrap">
+        <span className="shrink-0 font-semibold">{m.waiting}</span>
+        <span className="min-w-0 truncate">{changeTitle(view)}</span>
+        {view.answerBy && (
+          <span className="shrink-0">· {fill(m.until, { time: timeOf(view.answerBy, locale) })}</span>
+        )}
       </span>
       <button
         type="button"
