@@ -480,21 +480,21 @@ describe("room commands bring the calendar along (VAY-2469)", () => {
       expect(calls).toEqual([]);
       expect(query).not.toHaveBeenCalled();
     }
-    const allowed = fake();
-    await followRoomChangesInCalendar(
-      async () => ({ ok: true }),
-      allowed.ports,
-      vi.fn(),
-    )({
-      ...command,
-      narrowing: { access: "change", propertyIds: [propertyId] },
-    });
-    expect(allowed.calls.map(([name]) => name)).toEqual([
-      "crowded",
-      "preview",
-      "save",
-      "materialize",
-    ]);
+    // An AI change the limits allow, and a person's change (null), both bring the calendar along.
+    for (const narrowing of [{ access: "change", propertyIds: [propertyId] }, null] as const) {
+      const allowed = fake();
+      await followRoomChangesInCalendar(
+        async () => ({ ok: true }),
+        allowed.ports,
+        vi.fn(),
+      )({ ...command, narrowing });
+      expect(allowed.calls.map(([name]) => name)).toEqual([
+        "crowded",
+        "preview",
+        "save",
+        "materialize",
+      ]);
+    }
   });
 
   it("logs a calendar that can't follow, and still answers with the room change", async () => {

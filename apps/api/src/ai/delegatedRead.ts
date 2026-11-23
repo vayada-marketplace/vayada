@@ -75,7 +75,8 @@ export async function runDelegatedRead(
       body = undefined; // malformed JSON: never hand its bytes on
     }
   }
-  // Only the auth hook answers with this code: a refused delegation, not the route's own answer.
+  // A refused delegation, not the route's own answer: the auth hook sends this code, and so do the
+  // routes that take no AI request yet (VAY-2522).
   if (
     response.statusCode === 403 &&
     (body as { code?: unknown } | null)?.code === "delegation_refused"
