@@ -348,6 +348,12 @@ test("shows checkout in the guest's currency with cents, and the charged amount 
   const credit = page.getByRole("link", { name: "Rates By Exchange Rate API" });
   await expect(credit).toHaveAttribute("href", "https://www.exchangerate-api.com");
   await page.screenshot({ path: testInfo.outputPath("checkout-usd-1280.png"), fullPage: true });
+  // Phones: the line is in the bottom bar before paying, without opening Details.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByTestId("charged-currency")).toBeVisible();
+  await expect(credit).toHaveAttribute("href", "https://www.exchangerate-api.com");
+  await page.screenshot({ path: testInfo.outputPath("checkout-usd-390.png") });
+  await page.setViewportSize({ width: 1280, height: 720 });
 
   // In the hotel's own currency there's nothing to convert: no info line, no credit.
   await nav.getByRole("button", { name: "USD", exact: true }).click();
