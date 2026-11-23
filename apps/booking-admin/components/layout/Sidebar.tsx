@@ -114,9 +114,9 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       // Storage off or full: the choice lasts until the page reloads.
     }
   };
-  const toggleLabel = t(
-    collapsed ? "layout.sidebar.expandSidebar" : "layout.sidebar.collapseSidebar",
-  );
+  const toggleLabel = collapsed
+    ? t("layout.sidebar.expandSidebar")
+    : t("layout.sidebar.collapseSidebar");
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -159,64 +159,62 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   }, []);
 
   return (
+    // VAY-2593: 240px wide so the header keeps "Booking Engine" on one line beside the toggle.
+    // Collapsing applies from lg up only: below it the sidebar is the menu drawer, which floats
+    // over the page and always opens in full.
     <aside
       className={cn(
-        "h-full bg-white border-r border-gray-200 flex flex-col shrink-0 transition-all duration-200",
-        collapsed ? "w-16" : "w-52",
+        "h-full overflow-hidden bg-white border-r border-gray-200 flex flex-col shrink-0 transition-all duration-200",
+        collapsed ? "w-60 lg:w-16" : "w-60",
       )}
     >
       {/* App Switcher */}
       <div className="relative border-b border-gray-200 shrink-0" ref={switcherRef}>
-        <div className={cn("h-12 flex items-center", collapsed ? "justify-center" : "pr-2")}>
-          {!collapsed && (
-            <button
-              onClick={() => setShowSwitcher(!showSwitcher)}
-              className="h-full min-w-0 flex-1 px-3 flex items-center gap-2.5 hover:bg-gray-50 transition-colors"
-            >
-              <div className="w-7 h-7 bg-primary-500 rounded-md flex items-center justify-center shrink-0">
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 18 18"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <rect
-                    x="2"
-                    y="3"
-                    width="14"
-                    height="12"
-                    rx="2"
-                    stroke="white"
-                    strokeWidth="1.5"
-                  />
-                  <path d="M2 7H16" stroke="white" strokeWidth="1.5" />
-                  <path d="M6 3V1" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
-                  <path d="M12 3V1" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-              </div>
-              <div className="min-w-0 text-left flex-1">
-                <p className="text-xs font-semibold text-gray-900 leading-tight">
-                  {t("layout.sidebar.bookingEngine")}
-                </p>
-                <p className="text-[10px] text-gray-500 leading-tight truncate">
-                  {t("layout.sidebar.bookingEngineDescription")}
-                </p>
-              </div>
-              <ChevronDownIcon
-                className={cn(
-                  "w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform",
-                  showSwitcher && "rotate-180",
-                )}
-              />
-            </button>
-          )}
+        <div
+          className={cn("h-12 flex items-center pr-2", collapsed && "lg:justify-center lg:pr-0")}
+        >
+          <button
+            onClick={() => setShowSwitcher(!showSwitcher)}
+            className={cn(
+              "h-full min-w-0 flex-1 px-3 flex items-center gap-2.5 hover:bg-gray-50 transition-colors",
+              collapsed && "lg:hidden",
+            )}
+          >
+            <div className="w-7 h-7 bg-primary-500 rounded-md flex items-center justify-center shrink-0">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 18 18"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <rect x="2" y="3" width="14" height="12" rx="2" stroke="white" strokeWidth="1.5" />
+                <path d="M2 7H16" stroke="white" strokeWidth="1.5" />
+                <path d="M6 3V1" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
+                <path d="M12 3V1" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </div>
+            <div className="min-w-0 text-left flex-1">
+              <p className="text-xs font-semibold text-gray-900 leading-tight">
+                {t("layout.sidebar.bookingEngine")}
+              </p>
+              <p className="text-[10px] text-gray-500 leading-tight truncate">
+                {t("layout.sidebar.bookingEngineDescription")}
+              </p>
+            </div>
+            <ChevronDownIcon
+              className={cn(
+                "w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform",
+                showSwitcher && "rotate-180",
+              )}
+            />
+          </button>
           <button
             type="button"
             onClick={toggleCollapsed}
             aria-label={toggleLabel}
             title={toggleLabel}
-            className="shrink-0 w-8 h-8 flex items-center justify-center rounded-md border border-gray-200 text-gray-500 hover:text-gray-900 hover:bg-gray-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+            className="shrink-0 w-8 h-8 hidden lg:flex items-center justify-center rounded-md border border-gray-200 text-gray-500 hover:text-gray-900 hover:bg-gray-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
           >
             <SidebarToggleIcon collapsed={collapsed} className="w-[18px] h-[18px]" />
           </button>
@@ -228,7 +226,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           </p>
         )}
 
-        {showSwitcher && !collapsed && (
+        {showSwitcher && (
           <div className="absolute top-full left-2 right-2 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1.5">
             <p className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
               <svg
@@ -339,7 +337,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 isActive
                   ? "text-gray-900 font-semibold bg-gray-50"
                   : "text-gray-600 hover:text-gray-900 hover:bg-gray-50",
-                collapsed && "justify-center px-0",
+                collapsed && "lg:justify-center lg:px-0",
               )}
               title={collapsed ? label : undefined}
             >
@@ -349,7 +347,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   isActive ? "text-gray-900" : "text-gray-400",
                 )}
               />
-              {!collapsed && <span>{label}</span>}
+              <span className={cn(collapsed && "lg:hidden")}>{label}</span>
             </Link>
           );
         })}
