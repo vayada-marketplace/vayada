@@ -390,7 +390,9 @@ export function WaitingBar({
         <span className="shrink-0 font-semibold">{m.waiting}</span>
         <span className="min-w-0 truncate">{changeTitle(view)}</span>
         {view.answerBy && (
-          <span className="shrink-0">· {fill(m.until, { time: timeOf(view.answerBy, locale) })}</span>
+          <span className="shrink-0">
+            · {fill(m.until, { time: timeOf(view.answerBy, locale) })}
+          </span>
         )}
       </span>
       <button
