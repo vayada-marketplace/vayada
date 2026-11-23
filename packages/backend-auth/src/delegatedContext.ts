@@ -337,14 +337,17 @@ function snapshotInput(input: DelegatedContextInput): DelegatedContextInput {
   };
 }
 
+/** RegExp.test turns any value into a string (undefined, or an object's own toString): strings only. */
+const matches = (pattern: RegExp, value: unknown): value is string =>
+  typeof value === "string" && pattern.test(value);
+
 function assertDelegatedInput(input: DelegatedContextInput): void {
-  if (!UUID.test(input.userId)) throw new DelegationRefusedError("malformed user id");
-  if (!UUID.test(input.organizationId)) {
+  if (!matches(UUID, input.userId)) throw new DelegationRefusedError("malformed user id");
+  if (!matches(UUID, input.organizationId)) {
     throw new DelegationRefusedError("malformed organization id");
   }
   const { delegation } = input;
-  // A RegExp test turns undefined into the string "undefined", which the pattern accepts.
-  if (typeof delegation.toolCallId !== "string" || !TOOL_CALL_ID.test(delegation.toolCallId)) {
+  if (!matches(TOOL_CALL_ID, delegation.toolCallId)) {
     throw new DelegationRefusedError("malformed tool-call id");
   }
   const origin =
@@ -353,16 +356,16 @@ function assertDelegatedInput(input: DelegatedContextInput): void {
       : delegation.channel === "in_app"
         ? { id: delegation.conversationId, other: delegation.connectionId }
         : null;
-  if (!origin || !origin.id || !UUID.test(origin.id) || origin.other !== undefined) {
+  if (!origin || !matches(UUID, origin.id) || origin.other !== undefined) {
     throw new DelegationRefusedError("a delegation needs exactly its connection or conversation");
   }
-  if (input.propertyIds && !input.propertyIds.every((id) => UUID.test(id))) {
+  if (input.propertyIds && !input.propertyIds.every((id) => matches(UUID, id))) {
     throw new DelegationRefusedError("malformed property id");
   }
-  if (input.locale !== undefined && !LOCALE.test(input.locale)) {
+  if (input.locale !== undefined && !matches(LOCALE, input.locale)) {
     throw new DelegationRefusedError("malformed locale");
   }
-  if (input.currency !== undefined && !CURRENCY.test(input.currency)) {
+  if (input.currency !== undefined && !matches(CURRENCY, input.currency)) {
     throw new DelegationRefusedError("malformed currency");
   }
 }

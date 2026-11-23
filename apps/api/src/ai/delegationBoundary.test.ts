@@ -13,8 +13,13 @@ const DELEGATION_API =
 const CHANGE_API = /\bresolveDelegatedChangeContext\b/;
 const EXECUTOR_DIR = "apps/api/src/ai/executor/";
 /** Handing the change resolver on under another name: a named re-export or a star re-export. */
-const RE_EXPORT =
-  /export\s*\{[^}]*\bresolveDelegatedChangeContext\b|export\s*\*\s*(as\s+\w+\s*)?from\s*["']@vayada\/backend-auth/;
+const RE_EXPORT = new RegExp(
+  [
+    /export\s*\{[^}]*\bresolveDelegatedChangeContext\b/.source,
+    /export\s*\*\s*(as\s+\w+\s*)?from\s*["']@vayada\/backend-auth/.source,
+    /export\s+(default\s+|(const|let|var)\s+\w+\s*=\s*)resolveDelegatedChangeContext\b/.source,
+  ].join("|"),
+);
 const SKIPPED_DIRS = new Set(["node_modules", "dist", "build", "coverage", "out"]);
 
 /** Every source file in the repository, tests excluded (they may build any context). */

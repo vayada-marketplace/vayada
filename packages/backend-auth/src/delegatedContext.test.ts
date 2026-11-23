@@ -445,6 +445,19 @@ describe("resolveDelegatedContext (VAY-2506)", () => {
     ["no delegation", { delegation: undefined }],
     ["a delegation that is not an object", { delegation: "in_app" }],
     ["a missing tool-call id", { delegation: { channel: "in_app", conversationId: CONVERSATION } }],
+    // RegExp.test calls toString: an object that says it is a UUID is not one (review N1).
+    ["a user id that only says it is a UUID", { userId: { toString: () => USER } }],
+    [
+      "a conversation id that only says it is a UUID",
+      {
+        delegation: {
+          channel: "in_app",
+          conversationId: { toString: () => CONVERSATION },
+          toolCallId: "c",
+        },
+      },
+    ],
+    ["a locale that only says it is one", { locale: { toString: () => "en" } }],
   ])("refuses %s", async (_label, overrides) => {
     await expect(resolve(overrides as never)).rejects.toThrow(DelegationRefusedError);
   });

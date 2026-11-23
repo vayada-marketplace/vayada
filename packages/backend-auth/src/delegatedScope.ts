@@ -123,7 +123,7 @@ export async function injectAsDelegate(
   if (typeof url !== "string" || !url.startsWith("/") || url.startsWith("//")) {
     throw new DelegationRefusedError("the URL must be a path on this server");
   }
-  if (requestId !== undefined && !REQUEST_ID.test(requestId)) {
+  if (requestId !== undefined && (typeof requestId !== "string" || !REQUEST_ID.test(requestId))) {
     throw new DelegationRefusedError("a request id must be a UUID");
   }
   // Boot outside the scope, so no boot hook or timer ever holds it (review L3).
@@ -167,7 +167,8 @@ function jsonBody(body: unknown): string {
   } catch {
     text = undefined; // cycles and BigInts
   }
-  if (typeof text !== "string") {
+  // A toJSON can still turn a plain object into a string or a number: check what is sent.
+  if (typeof text !== "string" || !(text.startsWith("{") || text.startsWith("["))) {
     throw new DelegationRefusedError("the body must be a JSON object or array");
   }
   if (Buffer.byteLength(text) > DELEGATED_BODY_MAX_BYTES) {

@@ -318,6 +318,10 @@ describe("delegated scope (VAY-2506)", () => {
       });
     expect((await (await call(requestId)).json()).requestId).toBe(requestId);
     await expect(call("tool_call_u_1")).rejects.toThrow(DelegationRefusedError);
+    // An object whose toString says a UUID is still not one (VAY-2522 review N1).
+    await expect(call({ toString: () => requestId } as unknown as string)).rejects.toThrow(
+      /request id must be a UUID/,
+    );
   });
 
   it("is never visible to an outside request, before, during or after", async () => {
@@ -600,6 +604,7 @@ describe("write delegation (VAY-2522)", () => {
       42,
       new Map([["a", 1]]),
       new Date(0),
+      { toJSON: () => "text" },
     ]) {
       await expect(write(instance, { body })).rejects.toThrow(/JSON object or array/);
     }
