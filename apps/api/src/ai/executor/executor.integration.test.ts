@@ -95,6 +95,12 @@ describe.skipIf(!url)("the executor of AI changes on PostgreSQL (VAY-2524)", () 
       user,
       `${PREFIX}@example.test`,
     ]);
+    // The identity lookup finds a user through their sign-in identity.
+    await admin.query(
+      `INSERT INTO identity.external_identities (user_id, provider, provider_user_id)
+       VALUES ($1, 'workos', $2)`,
+      [user, `wk-user-${PREFIX}`],
+    );
     await admin.query(
       `INSERT INTO identity.organization_memberships
          (organization_id, user_id, status, role_key, access_origin, property_access_mode)
@@ -145,6 +151,7 @@ describe.skipIf(!url)("the executor of AI changes on PostgreSQL (VAY-2524)", () 
       "identity.product_entitlements",
     ])
       await admin.query(`DELETE FROM ${table} WHERE organization_id = $1`, [org]);
+    await admin.query(`DELETE FROM identity.external_identities WHERE user_id = $1`, [user]);
     await admin.query(`DELETE FROM identity.users WHERE id = $1`, [user]);
     await admin.query(`DELETE FROM hotel_catalog.properties WHERE id = $1`, [property]);
     await admin.query(`DELETE FROM identity.organizations WHERE id = $1`, [org]);
