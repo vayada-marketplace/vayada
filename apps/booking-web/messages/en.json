@@ -842,8 +842,8 @@
       "pay_at_property": {
         "title": "Pay at the hotel",
         "summary": "Nothing to pay now · pay on arrival",
-        "explain": "Nothing is charged now. You pay {total} at the hotel when you arrive. Your booking is confirmed straight away.",
-        "explainRequest": "Nothing is charged now. If the hotel accepts your request, you pay {total} when you arrive. The hotel answers within 24 hours.",
+        "explain": "Nothing is charged now. You pay at the hotel when you arrive. Your booking is confirmed straight away.",
+        "explainRequest": "Nothing is charged now. If the hotel accepts your request, you pay when you arrive. The hotel answers within 24 hours.",
         "boxNow": "Pay now",
         "boxLater": "At the hotel",
         "phrase": "at the hotel"
@@ -852,10 +852,10 @@
         "title": "Pay with card",
         "summary": "Charged when you book",
         "summaryRequest": "Charged only when the hotel accepts",
-        "explain": "We charge {now} to your card when you confirm. You enter your card details in the next step.",
-        "explainSplit": "We charge {now} to your card when you confirm, and you pay the rest, {later}, at the hotel. You enter your card details in the next step.",
-        "explainRequest": "We place a hold of {now} on your card. If the hotel declines or doesn’t reply within 24 hours, the hold is released. You enter your card details in the next step.",
-        "explainRequestSplit": "We place a hold of {now} on your card, and you pay the rest, {later}, at the hotel. If the hotel declines or doesn’t reply within 24 hours, the hold is released. You enter your card details in the next step.",
+        "explain": "We charge the total to your card when you confirm. You enter your card details in the next step.",
+        "explainSplit": "We charge the amount due now to your card when you confirm, and you pay the rest at the hotel. You enter your card details in the next step.",
+        "explainRequest": "We place a hold for the total on your card. If the hotel declines or doesn’t reply within 24 hours, the hold is released. You enter your card details in the next step.",
+        "explainRequestSplit": "We place a hold for the amount due now on your card, and you pay the rest at the hotel. If the hotel declines or doesn’t reply within 24 hours, the hold is released. You enter your card details in the next step.",
         "boxNow": "Charged now",
         "boxHold": "Card hold now",
         "boxCharged": "Charged",
@@ -905,7 +905,8 @@
       "continueShort": "Continue",
       "priceDetails": "Price details",
       "taxes": "Taxes & fees",
-      "included": "Included"
+      "included": "Included",
+      "chargedIn": "The hotel charges in {currency}: <b>{amount}</b>. The {shown} shown uses today’s exchange rate."
     },
     "checkingPrice": "Checking price…",
     "busyConfirm": "Confirming booking…",
