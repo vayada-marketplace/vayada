@@ -2649,6 +2649,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "ai_conversation_messages",
         "ai_conversation_turns",
         "ai_conversations",
+        "ai_operations",
         "ai_tool_calls",
         "ai_usage_ledger",
         "channex_adoption_approval_records",

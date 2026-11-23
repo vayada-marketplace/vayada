@@ -1449,6 +1449,12 @@ describe("api config", () => {
     );
   });
 
+  it("keeps the in-app assistant's API off unless AI_ASSISTANT_ENABLED is true (VAY-2518)", () => {
+    expect(loadConfig({}).aiAssistantEnabled).toBe(false);
+    expect(loadConfig({ AI_ASSISTANT_ENABLED: "false" }).aiAssistantEnabled).toBe(false);
+    expect(loadConfig({ AI_ASSISTANT_ENABLED: "true" }).aiAssistantEnabled).toBe(true);
+  });
+
   it("reads the AI budget default and the monthly AI spend alert (VAY-2504)", () => {
     expect(loadConfig({})).toMatchObject({
       aiDefaultMonthlyBudgetMicroUsd: 0,

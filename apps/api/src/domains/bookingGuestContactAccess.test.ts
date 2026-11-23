@@ -63,6 +63,13 @@ describe("guestContactForPropertyPlan", () => {
     expect(BOOKING_HAS_EVER_BEEN_ACCEPTED_SQL).not.toContain("payment_status");
   });
 
+  it("counts a channel booking of the same property as accepted (VAY-2577)", () => {
+    expect(BOOKING_HAS_EVER_BEEN_ACCEPTED_SQL).toContain("FROM pms.channel_booking_mappings");
+    expect(BOOKING_HAS_EVER_BEEN_ACCEPTED_SQL).toContain(
+      "contact_channel.property_id = booking.property_id",
+    );
+  });
+
   it("fails closed when more than one active booking plan entitlement exists", () => {
     expect(PROPERTY_ALWAYS_HAS_GUEST_CONTACT_SQL).toContain("COUNT(*) = 1");
     expect(PROPERTY_ALWAYS_HAS_GUEST_CONTACT_SQL).toContain("BOOL_AND(plan_key = 'fixed')");

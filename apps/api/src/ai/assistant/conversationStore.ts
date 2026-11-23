@@ -88,7 +88,10 @@ export type ConversationStore = {
   /** Starts a turn with the user's question, in a new conversation or one of the user's own. */
   startTurn(input: {
     owner: ConversationOwner;
+    /** An existing conversation of the user's. */
     conversationId?: string;
+    /** For a new conversation: its id, chosen beforehand (tool calls are delegated for it). */
+    newConversationId?: string;
     contract: SealedRequestContract;
     message: ChatMessage;
   }): Promise<StartTurnResult>;
@@ -101,6 +104,11 @@ export type ConversationStore = {
   heartbeat(turnId: string): Promise<boolean>;
   /** False if the turn had already ended. */
   endTurn(turnId: string, end: TurnEnd): Promise<boolean>;
+  /**
+   * The user's Stop when their turn runs in another API task: closes the conversation's running
+   * turn as stopped; that task sees it at its next heartbeat. False when nothing was running.
+   */
+  stopTurn(owner: ConversationOwner, conversationId: string, turnId?: string): Promise<boolean>;
   /** `contractSha256`: the request contract this user's next question would use. */
   read(
     owner: ConversationOwner,
@@ -286,10 +294,16 @@ export function createPgConversationStore(config: { pool: pg.Pool }): Conversati
         } else {
           const { rows } = await client.query<{ id: string }>(
             `INSERT INTO platform.ai_conversations
-               (organization_id, property_id, user_id, app, contract, contract_sha256)
-             VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::jsonb, $6)
+               (id, organization_id, property_id, user_id, app, contract, contract_sha256)
+             VALUES (COALESCE($7::uuid, gen_random_uuid()), $1::uuid, $2::uuid, $3::uuid, $4,
+                     $5::jsonb, $6)
              RETURNING id`,
-            [...ownerValues(owner), JSON.stringify(input.contract.contract), input.contract.sha256],
+            [
+              ...ownerValues(owner),
+              JSON.stringify(input.contract.contract),
+              input.contract.sha256,
+              input.newConversationId ?? null,
+            ],
           );
           conversationId = rows[0]!.id;
         }
@@ -365,6 +379,28 @@ export function createPgConversationStore(config: { pool: pg.Pool }): Conversati
         const conversationId = await lockRunningTurn(client, turnId);
         if (!conversationId) return false;
         await closeTurn(client, conversationId, turnId, end);
+        return true;
+      });
+    },
+
+    async stopTurn(owner, conversationId, turnId) {
+      if (!UUID.test(conversationId)) return false;
+      return transaction(async (client) => {
+        const { rowCount } = await client.query(
+          `SELECT 1 FROM platform.ai_conversations WHERE id = $1::uuid AND ${owned(2)} FOR UPDATE`,
+          [conversationId, ...ownerValues(owner)],
+        );
+        if (rowCount !== 1) return false;
+        const { rows } = await client.query<{ id: string }>(
+          `SELECT id FROM platform.ai_conversation_turns
+            WHERE conversation_id = $1::uuid AND status = 'running'`,
+          [conversationId],
+        );
+        if (!rows[0] || (turnId !== undefined && rows[0].id !== turnId)) return false;
+        await closeTurn(client, conversationId, rows[0].id, {
+          status: "stopped",
+          reason: "user_stopped",
+        });
         return true;
       });
     },

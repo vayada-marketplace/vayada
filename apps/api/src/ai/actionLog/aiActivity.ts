@@ -12,6 +12,8 @@ import type { AiActionGroup, AiActionOutcome, AiRecordRef, AiSurface } from "./a
  * conversations 30 days after their last activity (VAY-2518).
  */
 export const AI_ACTION_LOG_RETENTION = "2 years";
+/** AI changes, with the text their arguments can carry (plan 3.6, VAY-2524). */
+export const AI_OPERATION_RETENTION = "90 days";
 
 export type AiActivityItem = {
   id: string;
@@ -51,15 +53,19 @@ export type AiActivityStore = {
   list(query: AiActivityQuery): Promise<AiActivityItem[]>;
 };
 
+export type AiRetentionBatch = {
+  logRows: number;
+  assistResults: number;
+  conversations: number;
+  operations: number;
+};
+
 export type AiActionLogRetentionStore = {
   /**
-   * Deletes up to `limit` expired log rows and assistant conversations each, and empties up to
-   * `limit` expired assist results.
+   * Deletes up to `limit` expired log rows, assistant conversations and AI changes past their
+   * retention (VAY-2524) each, and empties up to `limit` expired assist results.
    */
-  purgeExpiredBatch(
-    now: Date,
-    limit: number,
-  ): Promise<{ logRows: number; assistResults: number; conversations: number }>;
+  purgeExpiredBatch(now: Date, limit: number): Promise<AiRetentionBatch>;
   close(): Promise<void>;
 };
 
@@ -160,7 +166,27 @@ export function createPgAiActionLogRetentionStore(config: {
         [now.toISOString(), limit],
       );
       const conversations = await purgeExpiredConversations(db, now, limit);
-      return { logRows: log.rows[0]?.n ?? 0, assistResults: assist.rows[0]?.n ?? 0, conversations };
+      const operations = await db.query<{ n: number }>(
+        `WITH expired AS (
+           SELECT id FROM platform.ai_operations
+            WHERE created_at < LEAST($1::timestamptz, now()) - $3::text::interval
+            ORDER BY created_at
+            LIMIT $2
+            FOR UPDATE SKIP LOCKED
+         ), deleted AS (
+           DELETE FROM platform.ai_operations operation USING expired
+            WHERE operation.id = expired.id
+           RETURNING 1
+         )
+         SELECT count(*)::int AS n FROM deleted`,
+        [now.toISOString(), limit, AI_OPERATION_RETENTION],
+      );
+      return {
+        logRows: log.rows[0]?.n ?? 0,
+        assistResults: assist.rows[0]?.n ?? 0,
+        conversations,
+        operations: operations.rows[0]?.n ?? 0,
+      };
     },
     close: () => db.end(),
   };

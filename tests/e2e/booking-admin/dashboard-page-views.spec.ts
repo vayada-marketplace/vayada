@@ -122,7 +122,7 @@ test.describe("booking-admin page-view timeline", () => {
     await expect(dialog).toBeHidden();
     await expect(pageViewsCard).toBeFocused();
     dashboardRefreshFails = true;
-    await page.getByRole("button", { name: "This week" }).click();
+    await page.getByRole("button", { name: "7 days", exact: true }).click();
     await expect(pageViewsCard).toContainText("--");
     await expect(pageViewsCard).not.toContainText("28");
   });
