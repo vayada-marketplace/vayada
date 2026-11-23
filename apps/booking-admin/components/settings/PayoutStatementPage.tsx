@@ -15,7 +15,10 @@ import {
   type StatementFilter,
 } from "@/components/settings/payoutStatement";
 import { useTranslation } from "@/lib/i18n";
-import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
+import {
+  BookingPropertyLinkClientError,
+  getBookingHotelPropertyLink,
+} from "@/services/api/bookingPropertyLinkClient";
 import {
   getSelectedBookingHotelId,
   SELECTED_HOTEL_CHANGED_EVENT,
@@ -89,6 +92,15 @@ export function PayoutStatementPage({
       );
     } catch (error) {
       if (!current()) return;
+      // A member who may not manage the hotel's booking settings is refused at the hotel's link
+      // already; the owner always may, so payouts are someone else's.
+      if (error instanceof BookingPropertyLinkClientError) {
+        setState({
+          kind:
+            error.statusCode === 403 ? "ownerOnly" : error.statusCode === 404 ? "empty" : "failed",
+        });
+        return;
+      }
       const status = error instanceof ApiErrorResponse ? error.status : null;
       const code = error instanceof ApiErrorResponse ? error.data?.code : undefined;
       setState({

@@ -9,7 +9,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { useTranslation } from "@/lib/i18n";
 import type { HostNotificationFeed } from "@/services/api/bookingNotificationsClient";
-import { notificationRow } from "./notificationRows";
+import { notificationRow } from "@vayada/product-onboarding/notificationRows";
 import { TOAST_MS, nextToasts, type Toast } from "./notificationToasts";
 import type { useNotificationActions } from "./useNotificationActions";
 

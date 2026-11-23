@@ -113,6 +113,7 @@ export default function StaySummary({
   payLabel,
   policy,
   brief = false,
+  charged,
 }: {
   quote?: PublicBookingQuote;
   /** The stay's dates while there is no price. */
@@ -152,6 +153,9 @@ export default function StaySummary({
   policy?: ReactNode;
   /** The step shows the stay in a small card (StayBrief): the phone's sheet is the price only. */
   brief?: boolean;
+  /** VAY-2588 (Timo's board): shown in the guest's currency, the price names what the hotel
+   * charges once, at the summary's end: the currency's name, the charged amount and the shown one. */
+  charged?: { currency: string; amount: string; shown: string } | null;
 }) {
   const t = useTranslations("reviewPay");
   const tRooms = useTranslations("extrasRooms");
@@ -438,9 +442,10 @@ export default function StaySummary({
           )}
           {charges.length > 0 && <Row label={t("stay.fees")} value={money(sum(charges))} />}
           {discount > BigInt(0) && <Row label={t("stay.discount")} value={`−${money(discount)}`} />}
-          {/* The sheet says it as a line; with fees of their own, the line under the total does. */}
-          {sheet && quote && !charges.length && (
-            <div className="flex justify-between gap-4 text-[15px] text-gray-600 lg:hidden">
+          {/* Taxes and fees are a line (VAY-2588, Timo's board); with fees of their own, the line
+              under the total says so. */}
+          {quote && !charges.length && (
+            <div className="flex justify-between gap-4 text-[15px] text-gray-600">
               <span>{t("stay.taxes")}</span>
               <span>{t("stay.included")}</span>
             </div>
@@ -498,9 +503,9 @@ export default function StaySummary({
                 {icon(open ? "M19 9l-7 7-7-7" : "M5 15l7-7 7 7", "")}
               </button>
             )}
-            {quote && (
+            {quote && charges.length > 0 && (
               <p
-                className={`ml-auto text-right text-[13px] text-gray-500 ${row || (sheet && !charges.length) ? "max-lg:hidden" : ""}`}
+                className={`ml-auto text-right text-[13px] text-gray-500 ${row ? "max-lg:hidden" : ""}`}
               >
                 {t("stay.includes")}
               </p>
@@ -556,6 +561,21 @@ export default function StaySummary({
           >
             {icon("M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z", "")}
             {ranOut ? t("stay.expired") : t("stay.hold", { time: timeLeft! })}
+          </p>
+        )}
+        {/* Before paying it shows at every width; the slim steps' sheet keeps it for "Details". */}
+        {quote && charged && (
+          <p
+            data-testid="charged-currency"
+            className={`${slim ? hidden : ""} flex items-start gap-2 border-t border-gray-200 pt-3 text-xs leading-5 text-gray-500`}
+          >
+            {icon("M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z", "mt-0.5")}
+            <span>
+              {t.rich("stay.chargedIn", {
+                ...charged,
+                b: (chunks) => <strong className="font-semibold text-gray-900">{chunks}</strong>,
+              })}
+            </span>
           </p>
         )}
       </div>

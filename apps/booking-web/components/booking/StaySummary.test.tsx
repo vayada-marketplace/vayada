@@ -70,7 +70,8 @@ it("is the one summary: room, dates with the hotel's times, total and how to pay
     "Tue 27 Oct",
     "by 11:00",
     "1 night",
-    "Includes taxes & fees",
+    // VAY-2588 (Timo's board): taxes and fees are a row of the summary.
+    "Taxes & feesIncluded",
     "Pay at the hotel or by bank transfer",
     "Price held for you for 14:52 min",
   ])
@@ -148,7 +149,7 @@ it("lists each extra and ends with the step's button", () => {
     onChangeRoom,
     action: createElement("button", { type: "button" }, "Continue to your details"),
   });
-  expect(text()).toContain("1 nightUS$175Airport transferUS$30Total");
+  expect(text()).toContain("1 nightUS$175Airport transferUS$30Taxes & feesIncludedTotal");
   expect(text()).not.toContain("Extras");
   expect(text()).toContain("Pay nowUS$0At the hotelUS$205Continue to your details");
   const total = document.querySelector('[data-testid="stay-total"]')!;
@@ -282,10 +283,10 @@ it("is one row on phones when slim, and opens the lines, payment box and policy 
   expect(aside.firstElementChild!.className).toContain("w-10");
   expect(toggle.className).toContain("max-lg:hidden");
   expect(text()).toContain("Taxes & feesIncluded");
-  const includes = Array.from(aside.querySelectorAll("p")).find(
-    (p) => p.textContent === "Includes taxes & fees",
-  )!;
-  expect(includes.className).toContain("max-lg:hidden");
+  // VAY-2588: the row says it at every width; no second line under the total.
+  expect(
+    Array.from(aside.querySelectorAll("p")).some((p) => p.textContent === "Includes taxes & fees"),
+  ).toBe(false);
   expect(text()).toMatch(/At the hotelUS\$175Cancellation policy.*Continue to review/);
   expect(total.className).toContain("max-lg:text-lg");
   // It takes focus.
@@ -403,4 +404,22 @@ it("keeps the full bar without slim (Review) and shows no Close or policy", () =
   expect(
     document.querySelector('[data-testid="stay-total"]')!.previousElementSibling!.className,
   ).not.toContain("sr-only");
+});
+
+it("names what the hotel charges once, at the end, shown before paying at every width (VAY-2588)", () => {
+  const charged = { currency: "Indonesian Rupiah", amount: "IDR 950,000", shown: "US$52.42" };
+  const line = () => document.querySelector('[data-testid="charged-currency"]');
+  // Review & pay: always shown, phones included.
+  render({ charged, action: createElement("button", null, "Confirm") });
+  expect(line()!.textContent).toBe(
+    "The hotel charges in Indonesian Rupiah: IDR 950,000. The US$52.42 shown uses today’s exchange rate.",
+  );
+  expect(line()!.querySelector("strong")!.textContent).toBe("IDR 950,000");
+  expect(line()!.className).not.toContain("max-lg:hidden");
+  // The slim steps keep it in the phone's sheet, with the rest of the price.
+  render({ charged, slim: true, action: createElement("button", null, "Go") });
+  expect(line()!.className).toContain("max-lg:hidden");
+  // In the hotel's own currency there is nothing to name.
+  render({ charged: null });
+  expect(line()).toBeNull();
 });

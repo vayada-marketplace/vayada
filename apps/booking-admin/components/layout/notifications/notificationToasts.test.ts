@@ -13,6 +13,7 @@ function item(key: string, kind: HostNotification["kind"], read = false): HostNo
     category: kind === "payment_not_received" ? "needs_action" : "bookings",
     occurredAt: "2026-10-25T11:00:00Z",
     read,
+    done: false,
   };
 }
 
@@ -53,6 +54,21 @@ describe("notification toasts (VAY-2349)", () => {
       ),
     );
     expect(candidates.map((toast) => toast.key)).toEqual(["sync-1", "new", "paid"]);
+  });
+
+  it("never toasts an item seen read once and then marked unread (VAY-2591)", () => {
+    const first = nextToasts([], null, feed([item("old", "booking_new", true)], "sync-1"));
+    // Marked unread on this page: the optimistic feed now shows it unread, and the sync card too.
+    const later = nextToasts(
+      first.toasts,
+      first.seen,
+      feed([item("old", "booking_new"), item("new", "booking_new")], "sync-1"),
+    );
+    expect(later.toasts.map((toast) => toast.key)).toEqual(["new"]);
+    // Read on one read, unread on the next: still no toast.
+    const read = nextToasts(later.toasts, later.seen, feed([item("new", "booking_new", true)]));
+    const again = nextToasts(read.toasts, read.seen, feed([item("new", "booking_new")]));
+    expect(again.toasts).toEqual([]);
   });
 
   it("notes what is there on the first read and toasts what arrives later, newest last", () => {

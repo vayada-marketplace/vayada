@@ -143,6 +143,7 @@ function command(overrides: Partial<TriageInput> = {}): TriageInput {
       correlationId: "correlation-1373",
       requestedAt: NOW.toISOString(),
     },
+    narrowing: null,
     ...overrides,
   };
 }
@@ -301,6 +302,32 @@ describe("PostgreSQL PMS Inbox triage command", () => {
       "PMS Inbox triage command failed",
     );
     expect(failed.calls.at(-1)?.text).toBe("ROLLBACK");
+  });
+
+  it.each([
+    ["read access", { access: "read", propertyIds: [PROPERTY] }],
+    ["another property", { access: "change", propertyIds: [THREAD] }],
+    ["no property", { access: "change", propertyIds: [] }],
+  ] as const)(
+    "holds an AI request to its narrowing before reading any rights (VAY-2522): %s",
+    async (_name, narrowing) => {
+      const database = new FakeDatabase();
+      await expect(port(database).transition(command({ narrowing }))).rejects.toThrow(
+        "PMS Inbox triage command failed",
+      );
+      expect(database.calls.map((call) => call.text)).toEqual(["BEGIN", "ROLLBACK"]);
+      expect(database.releases).toBe(1);
+    },
+  );
+
+  it("runs an AI change narrowed to this property (VAY-2522)", async () => {
+    const database = new FakeDatabase();
+    await expect(
+      port(database).transition(
+        command({ narrowing: { access: "change", propertyIds: [PROPERTY] } }),
+      ),
+    ).resolves.toMatchObject({ ok: true, value: { attentionState: "done" } });
+    expect(database.calls.at(-1)?.text).toBe("COMMIT");
   });
 
   it("rejects malformed commands before opening a transaction", async () => {

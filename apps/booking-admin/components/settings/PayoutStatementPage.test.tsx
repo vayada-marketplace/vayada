@@ -39,11 +39,17 @@ vi.mock("@/services/api/bookingHotelScope", () => ({
   getSelectedBookingHotelId: () => "booking_hotel_alpenrose",
   SELECTED_HOTEL_CHANGED_EVENT: "vayada:selected-hotel-changed",
 }));
-vi.mock("@/services/api/bookingPropertyLinkClient", () => ({
-  getBookingHotelPropertyLink: async () => ({ propertyId: PROPERTY }),
+const propertyLink = vi.hoisted(() => ({ fail: null as Error | null }));
+vi.mock("@/services/api/bookingPropertyLinkClient", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/api/bookingPropertyLinkClient")>()),
+  getBookingHotelPropertyLink: async () => {
+    if (propertyLink.fail) throw propertyLink.fail;
+    return { propertyId: PROPERTY };
+  },
 }));
 vi.mock("@/services/settings", () => ({ settingsService: { getPropertySettings: vi.fn() } }));
 
+import { BookingPropertyLinkClientError } from "@/services/api/bookingPropertyLinkClient";
 import { ApiErrorResponse } from "@/services/api/client";
 import type { PayoutStatement } from "@/services/api/financePayoutStatementClient";
 import { PayoutStatementPage } from "./PayoutStatementPage";
@@ -316,6 +322,19 @@ describe("Settings › Payouts (VAY-2584)", () => {
       "Payouts aren't available for this hotel account.",
     );
     expect(byTestId(noAccess, "payout-statement-owner-only")).toHaveLength(0);
+    // A member who may not manage booking settings is refused at the hotel's link (VAY-2584 card).
+    propertyLink.fail = new BookingPropertyLinkClientError({
+      statusCode: 403,
+      code: "forbidden",
+      category: "authorization",
+      detail: "Missing permission.",
+    } as never);
+    const linkRefused = await render(async () => statement);
+    propertyLink.fail = null;
+    expect(textOf(byTestId(linkRefused, "payout-statement-owner-only")[0]!)).toContain(
+      "Only the account owner can see payouts",
+    );
+    expect(textOf(linkRefused.root)).not.toContain("Payouts couldn't be loaded.");
 
     const load = vi
       .fn<(propertyId: string) => Promise<PayoutStatement>>()

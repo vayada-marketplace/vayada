@@ -1,6 +1,7 @@
 import { lockPmsInboxRolePermissions, type PmsInboxRoleActor } from "./pmsInboxRolePermissions.js";
 import { createHash } from "node:crypto";
 
+import { narrowingAllowsChange } from "@vayada/backend-auth";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import { type PmsInboxTriageAction, type PmsInboxTriagePort } from "./pmsInbox.js";
@@ -238,6 +239,8 @@ async function lockActorScope(
   input: TriageInput,
   acceptedAt: Date,
 ): Promise<boolean> {
+  // The database knows only the user's own rights; an AI request is held to its limits here too.
+  if (!narrowingAllowsChange(input.narrowing, input.propertyId)) return false;
   const scope = await client.query<PmsInboxRoleActor>(
     `SELECT membership.role_key AS "roleKey", membership.role_definition_id AS "roleDefinitionId", membership.permission_overrides AS "permissionOverrides"
      FROM hotel_catalog.properties property

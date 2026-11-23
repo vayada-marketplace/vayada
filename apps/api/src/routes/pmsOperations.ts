@@ -75,11 +75,12 @@ import type {
   PmsRoomType,
   PmsSourceFreshness,
 } from "../domains/pmsOperationsReadModel.js";
-import type {
-  PermissionKey,
-  RequestActor,
-  RequestContext,
-  ResourceRelationship,
+import {
+  authorityNarrowing,
+  type PermissionKey,
+  type RequestActor,
+  type RequestContext,
+  type ResourceRelationship,
 } from "@vayada/backend-auth";
 import { hasPermission, type PropertyAccessRepository } from "@vayada/backend-authorization";
 import { enforceRoutePolicy } from "./policy.js";
@@ -2852,6 +2853,7 @@ export async function registerPmsOperationsRoutes(
               correlationId: context.audit.correlationId ?? context.audit.requestId,
               requestedAt: context.audit.receivedAt,
             },
+            narrowing: authorityNarrowing(context),
           });
           if (!result.ok) return sendInboxTriageError(reply, result.error);
           if (!validInboxTriageResult(result.value, propertyId, threadId, action, input.value))

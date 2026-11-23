@@ -107,6 +107,65 @@ describe.skipIf(!connectionString)("target Booking funnel PostgreSQL scope", () 
     });
   });
 
+  it("counts anonymous page views from a hotel's first one on, and keeps them out of the funnel (VAY-2592)", async () => {
+    const viewsId = randomUUID();
+    await pool.query(
+      "INSERT INTO hotel_catalog.properties (id, public_id, display_name, profile_status) VALUES ($1::uuid, $1::text, 'Page views test', 'complete')",
+      [viewsId],
+    );
+    await pool.query(
+      "INSERT INTO hotel_catalog.property_locations (property_id, timezone) VALUES ($1, 'America/New_York')",
+      [viewsId],
+    );
+    const consented = randomUUID();
+    for (const [type, at, sessionId, metadata] of [
+      // Before the hotel's first anonymous page view, its consented visits are its page views.
+      ["page_visit", "2026-03-10T15:00:00Z", randomUUID(), { funnelVersion: 1, funnelSequence: 1 }],
+      ["page_view", "2026-03-11T15:00:00Z", null, {}],
+      // From then on every load sends a page view, so a consented visit is not counted again.
+      ["page_visit", "2026-03-11T15:00:01Z", consented, { funnelVersion: 1, funnelSequence: 1 }],
+      ["rate_selected", "2026-03-11T15:01:00Z", consented, { funnelVersion: 1, funnelSequence: 2 }],
+      ["page_view", "2026-03-11T16:00:00Z", null, {}],
+    ] as const) {
+      await pool.query(
+        `INSERT INTO distribution.booking_web_events
+          (property_id, event_type, event_id, session_id, metadata, occurred_at)
+          VALUES ($1, $2, $3, $4, $5, $6)`,
+        [viewsId, type, randomUUID(), sessionId, JSON.stringify(metadata), at],
+      );
+    }
+
+    const timeline = await readPort.getPageViewTimeline({
+      propertyId: viewsId,
+      windowStart: "2026-03-10",
+      windowEnd: "2026-03-11",
+    });
+    expect(timeline).toMatchObject({
+      total: 3,
+      buckets: [
+        { date: "2026-03-10", count: 1 },
+        { date: "2026-03-11", count: 2 },
+      ],
+    });
+    const metrics = await readPort.getDashboardMetrics({
+      propertyId: viewsId,
+      periodStart: "2026-03-11",
+      periodEnd: "2026-03-11",
+      previousPeriodStart: "2026-03-10",
+      previousPeriodEnd: "2026-03-10",
+    });
+    expect(metrics?.current.pageViewCount).toBe(2);
+    expect(metrics?.previous.pageViewCount).toBe(1);
+    // The funnel still starts from consented visits only.
+    const funnel = await readPort.getConversionFunnel({
+      propertyId: viewsId,
+      windowStart: "2026-03-11",
+      windowEnd: "2026-03-11",
+    });
+    expect(funnel?.steps[0]).toMatchObject({ stage: "page_visit", count: 1 });
+    expect(funnel?.steps[1]).toMatchObject({ stage: "rate_selected", count: 1 });
+  });
+
   it("shows add-ons only when public active definitions and the property flag both allow them", async () => {
     const input = { propertyId, windowStart: "2026-03-08", windowEnd: "2026-03-08" };
     await pool.query("INSERT INTO booking.booking_settings (property_id) VALUES ($1)", [

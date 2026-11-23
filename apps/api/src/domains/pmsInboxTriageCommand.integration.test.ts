@@ -56,6 +56,30 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox triage transaction", () => {
     );
   });
 
+  it("holds an AI change to its narrowing inside the transaction (VAY-2522)", async () => {
+    // The owner may triage this thread; only the narrowing says no, so the refusal is its own.
+    for (const [key, narrowing] of [
+      ["ai-read", { access: "read", propertyIds: [PROPERTY] }],
+      ["ai-other-property", { access: "change", propertyIds: [OTHER_PROPERTY] }],
+    ] as const) {
+      await expect(triage.transition(command(key, { narrowing }))).rejects.toThrow(
+        "PMS Inbox triage command failed",
+      );
+    }
+    expect((await state()).counts).toEqual({
+      idempotency: 0,
+      events: 0,
+      audits: 0,
+      jobs: 0,
+      outbox: 0,
+    });
+    await expect(
+      triage.transition(
+        command("ai-change", { narrowing: { access: "change", propertyIds: [PROPERTY] } }),
+      ),
+    ).resolves.toMatchObject({ ok: true, value: { attentionState: "done", threadVersion: 5 } });
+  });
+
   it("marks a thread done once and preserves complete evidence on replay", async () => {
     const input = command("done-once", { action: "done" });
     const first = await triage.transition(input);
@@ -253,6 +277,7 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox triage transaction", () => {
       expectedThreadVersion: 4,
       followUpAt: null,
       audit: { requestId: `request-${key}`, correlationId: "inbox-triage", requestedAt: NOW },
+      narrowing: null,
       ...overrides,
     };
   }

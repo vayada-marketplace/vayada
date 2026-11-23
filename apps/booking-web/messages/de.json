@@ -842,8 +842,8 @@
       "pay_at_property": {
         "title": "Im Hotel bezahlen",
         "summary": "Jetzt nichts zahlen · Zahlung bei Ankunft",
-        "explain": "Jetzt wird nichts berechnet. Sie zahlen {total} bei Ankunft im Hotel. Ihre Buchung ist sofort bestätigt.",
-        "explainRequest": "Jetzt wird nichts berechnet. Wenn das Hotel Ihre Anfrage annimmt, zahlen Sie {total} bei Ankunft. Das Hotel antwortet innerhalb von 24 Stunden.",
+        "explain": "Jetzt wird nichts berechnet. Sie zahlen bei Ankunft im Hotel. Ihre Buchung ist sofort bestätigt.",
+        "explainRequest": "Jetzt wird nichts berechnet. Wenn das Hotel Ihre Anfrage annimmt, zahlen Sie bei Ankunft. Das Hotel antwortet innerhalb von 24 Stunden.",
         "boxNow": "Jetzt zahlen",
         "boxLater": "Im Hotel",
         "phrase": "im Hotel"
@@ -852,10 +852,10 @@
         "title": "Mit Karte bezahlen",
         "summary": "Abbuchung bei der Buchung",
         "summaryRequest": "Abbuchung erst, wenn das Hotel annimmt",
-        "explain": "Wir belasten Ihre Karte mit {now}, wenn Sie bestätigen. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
-        "explainSplit": "Wir belasten Ihre Karte mit {now}, wenn Sie bestätigen; den Rest von {later} zahlen Sie im Hotel. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
-        "explainRequest": "Wir blockieren {now} auf Ihrer Karte. Lehnt das Hotel ab oder antwortet es nicht innerhalb von 24 Stunden, wird die Blockierung aufgehoben. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
-        "explainRequestSplit": "Wir blockieren {now} auf Ihrer Karte; den Rest von {later} zahlen Sie im Hotel. Lehnt das Hotel ab oder antwortet es nicht innerhalb von 24 Stunden, wird die Blockierung aufgehoben. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
+        "explain": "Wir belasten Ihre Karte mit dem Gesamtbetrag, wenn Sie bestätigen. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
+        "explainSplit": "Wir belasten Ihre Karte mit dem jetzt fälligen Betrag, wenn Sie bestätigen; den Rest zahlen Sie im Hotel. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
+        "explainRequest": "Wir blockieren den Gesamtbetrag auf Ihrer Karte. Lehnt das Hotel ab oder antwortet es nicht innerhalb von 24 Stunden, wird die Blockierung aufgehoben. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
+        "explainRequestSplit": "Wir blockieren den jetzt fälligen Betrag auf Ihrer Karte; den Rest zahlen Sie im Hotel. Lehnt das Hotel ab oder antwortet es nicht innerhalb von 24 Stunden, wird die Blockierung aufgehoben. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
         "boxNow": "Jetzt belastet",
         "boxHold": "Jetzt blockiert",
         "boxCharged": "Abbuchung",
@@ -905,7 +905,8 @@
       "continueShort": "Weiter",
       "priceDetails": "Preisdetails",
       "taxes": "Steuern und Gebühren",
-      "included": "Inklusive"
+      "included": "Inklusive",
+      "chargedIn": "Das Hotel rechnet in der Währung {currency} ab: <b>{amount}</b>. Die angezeigten {shown} beruhen auf dem heutigen Wechselkurs."
     },
     "checkingPrice": "Preis wird geprüft …",
     "busyConfirm": "Buchung wird bestätigt …",

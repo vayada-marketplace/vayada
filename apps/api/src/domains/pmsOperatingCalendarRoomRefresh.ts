@@ -15,6 +15,7 @@ import {
   type PmsStartingSellableLimitInput,
   type RoomFactsCommandAudit,
 } from "@vayada/domain-pms";
+import { narrowingAllowsChange, type AuthorityNarrowing } from "@vayada/backend-auth";
 import type { QueryResult, QueryResultRow } from "pg";
 
 import { firstRunInventoryHorizon } from "./hotelFirstRunCalendar.js";
@@ -452,6 +453,8 @@ export type PmsRoomChangeCommand = Readonly<{
   propertyId: string;
   roomTypeId: string;
   audit: RoomFactsCommandAudit;
+  /** An AI request's limits (VAY-2522), on commands that carry them. */
+  narrowing?: AuthorityNarrowing | null;
 }>;
 
 /**
@@ -473,6 +476,12 @@ export function followRoomChangesInCalendar<
   return async (command) => {
     const result = await run(command);
     if (command.audit.actor.kind !== "user") return result;
+    // The refresh checks the user's rights again (preview, calendar save, inventory build) without
+    // an AI request's limits. It touches only this property, so it runs only where they allow a
+    // change (VAY-2522).
+    if ("narrowing" in command && !narrowingAllowsChange(command.narrowing, command.propertyId)) {
+      return result;
+    }
     try {
       if (await roomsAwaitNames(ports.pool, command.propertyId, command.roomTypeId)) return result;
       const refreshed = await refreshPmsOperatingCalendarRooms(ports, {

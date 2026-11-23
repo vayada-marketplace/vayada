@@ -63,7 +63,15 @@ async function execute(
   const fingerprint = sha256(serializeSetPhysicalRoomOperationalLabelFingerprint(command));
   try {
     await client.query("BEGIN");
-    if (!(await lockAuthorizedPmsPhysicalRoomScope(client, command, occurredAt))) {
+    // A person's request: the route refuses AI requests until this command carries their limits
+    // (VAY-2522).
+    if (
+      !(await lockAuthorizedPmsPhysicalRoomScope(
+        client,
+        { ...command, narrowing: null },
+        occurredAt,
+      ))
+    ) {
       await client.query("ROLLBACK");
       return failure({ code: "setup_scope_unavailable" });
     }

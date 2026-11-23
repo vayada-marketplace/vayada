@@ -1312,6 +1312,20 @@ describe("api config", () => {
     ).toBeUndefined();
   });
 
+  it("loads the Maps key editor only with both the key name and the credentials (VAY-2589)", () => {
+    const keyName = "projects/vayada-maps/locations/global/keys/key-1";
+    expect(loadConfig({}).googleMapsKeyEditor).toBeUndefined();
+    expect(
+      loadConfig({
+        GOOGLE_MAPS_BROWSER_KEY_NAME: ` ${keyName} `,
+        GOOGLE_MAPS_KEY_EDITOR_CREDENTIALS: '{"type":"service_account"}',
+      }).googleMapsKeyEditor,
+    ).toEqual({ keyName, credentialsJson: '{"type":"service_account"}' });
+    expect(
+      loadConfig({ GOOGLE_MAPS_BROWSER_KEY_NAME: keyName }).googleMapsKeyEditor,
+    ).toBeUndefined();
+  });
+
   it("reads the custom domains routed to the new booking frontend with their properties", () => {
     expect(loadConfig({}).bookingCustomDomainRoutes).toEqual(new Map());
     expect(
