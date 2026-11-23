@@ -922,7 +922,10 @@ function emailCopy(input: BookingLifecycleEmailInput) {
   if (input.kind === "host_new_booking" || input.kind === "host_review_required") {
     const reviewRequired = input.kind === "host_review_required";
     // VAY-2099: the hotel has until the request's deadline to answer; after it the request expires.
-    const answerBy = text(record(booking.bookingMetadata)["hostResponseDeadlineAt"]);
+    // Older target bookings carry only the expiry the pending-booking sweep reads.
+    const metadata = record(booking.bookingMetadata);
+    const deadline = text(metadata["hostResponseDeadlineAt"]) ?? text(metadata["pendingExpiresAt"]);
+    const answerBy = deadline && Number.isFinite(Date.parse(deadline)) ? deadline : null;
     return {
       template: reviewRequired ? "booking_host_review_required" : "booking_host_new_booking",
       subject: reviewRequired
@@ -930,6 +933,8 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         : `New confirmed booking - ${booking.bookingReference}`,
       text: [
         reviewRequired ? "A new booking request requires review." : "A new booking is confirmed.",
+        // VAY-2099: the PMS link opens under the property selected there; name the right one.
+        ...(reviewRequired && booking.propertyName ? [`Property: ${booking.propertyName}`] : []),
         `Guest: ${name}`,
         `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         `Total: ${money(booking.totalAmount, booking.currency)}`,
