@@ -108,7 +108,7 @@ const statement: PayoutStatement = {
       grossMinor: "320000000",
       feeMinor: "44800000",
       netMinor: "275200000",
-      bookingReference: "VAY-7KQ2C",
+      bookingReference: "VAY-0A1B2C3D4E5F40718293A4B5C6D7E8F9",
       checkOut: "2026-11-28",
       occurredAt: "2026-11-24T08:00:00Z",
       fees: { planMinor: "25600000", vayadaMinor: "19200000", vayadaPercent: 6 },
@@ -229,7 +229,7 @@ describe("Settings › Payouts (VAY-2584)", () => {
     ]);
     const [charge, payout, refund, dispute, fee, returned] = lines.map(textOf);
     expect(charge).toContain("Card payment");
-    expect(charge).toContain("VAY-7KQ2C");
+    expect(charge).toContain("VAY-0A1B2C3D4E5F40718293A4B5C6D7E8F9");
     expect(charge).toContain("3,200,000");
     expect(charge).toContain("−448,000");
     expect(charge).toContain("2,752,000");

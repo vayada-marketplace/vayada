@@ -385,10 +385,10 @@ function StatementLines({
   const column = "shrink-0 text-right";
   return (
     <div className="mt-3">
-      <div className="hidden gap-3 pb-2 text-xs font-semibold text-gray-500 lg:flex">
+      <div className="hidden gap-3 pb-2 text-xs font-semibold text-gray-500 xl:flex">
         <span className="w-24 shrink-0">{t("settings.payouts.colDate")}</span>
         <span className="min-w-0 flex-1">{t("settings.payouts.colWhat")}</span>
-        <span className="w-24 shrink-0">{t("settings.payouts.colBooking")}</span>
+        <span className="w-36 shrink-0">{t("settings.payouts.colBooking")}</span>
         <span className="w-24 shrink-0">{t("settings.payouts.colCheckOut")}</span>
         <span className={`w-28 ${column}`}>{t("settings.payouts.colGross")}</span>
         <span className={`w-[104px] ${column}`}>{t("settings.payouts.colFees")}</span>
@@ -408,15 +408,16 @@ function StatementLines({
               data-testid="statement-line"
               data-kind={line.kind}
             >
-              {/* Phones and tablets: what it is and what you get, then the details. */}
-              <div className="lg:hidden">
+              {/* Phones, tablets and narrow windows: what it is and what you get, then the details. */}
+              <div className="xl:hidden">
                 <div className="flex items-baseline justify-between gap-3 text-sm">
                   <span className="min-w-0 font-medium text-gray-900">{label}</span>
                   <span className={`shrink-0 font-semibold ${TONE[figures.tone]}`}>
                     {figures.net}
                   </span>
                 </div>
-                <p className="mt-0.5 text-xs text-gray-500">
+                {/* Booking references are long ("VAY-" and 32 characters): they wrap, never overflow. */}
+                <p className="mt-0.5 text-xs text-gray-500 [overflow-wrap:anywhere]">
                   {[day(line.occurredAt), line.bookingReference, line.checkOut && checkOut]
                     .filter(Boolean)
                     .join(" · ")}
@@ -433,10 +434,10 @@ function StatementLines({
                 )}
               </div>
               {/* Desktop: one row per line, columns lined up. */}
-              <div className="hidden items-baseline gap-3 text-sm text-gray-900 lg:flex">
+              <div className="hidden items-baseline gap-3 text-sm text-gray-900 xl:flex">
                 <span className="w-24 shrink-0">{day(line.occurredAt)}</span>
                 <span className="min-w-0 flex-1">{label}</span>
-                <span className="w-24 shrink-0">{booking}</span>
+                <span className="w-36 shrink-0 [overflow-wrap:anywhere]">{booking}</span>
                 <span className="w-24 shrink-0">{checkOut}</span>
                 <span
                   className={`w-28 ${column} ${isNegative(line.grossMinor) && figures.amount ? "text-red-600" : ""}`}

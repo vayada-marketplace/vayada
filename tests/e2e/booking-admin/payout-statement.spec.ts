@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import {
   mockBookingAdminAuthenticatedSession,
   mockBookingAdminShellRoutes,
@@ -14,6 +14,18 @@ import {
 // Monday payout and every line that adds to or takes from it. The browser clock is fixed: dates leave
 // out the year only within the current year.
 const NOW = new Date("2026-11-25T10:00:00Z");
+
+/** Statement text that runs past its own box (long booking references must wrap). */
+const overflowingInLines = (page: Page) =>
+  page.evaluate(() =>
+    [
+      ...document.querySelectorAll(
+        "[data-testid=statement-line] span, [data-testid=statement-line] p",
+      ),
+    ]
+      .filter((el) => el.getClientRects().length > 0 && el.scrollWidth > el.clientWidth + 1)
+      .map((el) => el.textContent),
+  );
 
 test("the owner sees what is owed, each payout and every deduction, on desktop and phone", async ({
   page,
@@ -47,6 +59,8 @@ test("the owner sees what is owed, each payout and every deduction, on desktop a
   await expect(lines.nth(4)).toContainText("Answered dispute lost");
   await expect(lines.nth(5)).toContainText("+1,750,000");
   await expect(lines.nth(6)).toContainText("The Mon 9 Nov payout came back from the bank.");
+  await expect(lines.nth(0)).toContainText("VAY-0A1B2C3D4E5F40718293A4B5C6D7E8F9");
+  expect(await overflowingInLines(page)).toEqual([]);
   await page.screenshot({ path: testInfo.outputPath("payouts-desktop.png"), fullPage: true });
   // Booking Admin scrolls inside its own container: a second shot for the statement.
   await page
@@ -73,6 +87,7 @@ test("the owner sees what is owed, each payout and every deduction, on desktop a
   await expect(
     lines.nth(0).getByText("Card payment", { exact: true }).filter({ visible: true }),
   ).toHaveCount(1);
+  expect(await overflowingInLines(page)).toEqual([]);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
