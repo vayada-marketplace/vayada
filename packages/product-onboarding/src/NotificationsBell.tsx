@@ -14,7 +14,6 @@ import {
   XCircleIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
-import { useTranslation } from "@/lib/i18n";
 import {
   NOTIFICATION_TABS,
   badgeLabel,
@@ -27,10 +26,11 @@ import {
   type NotificationGroup,
   type NotificationRow,
   type NotificationTab,
+  type Translate,
 } from "./notificationRows";
-import type { HostNotification } from "@/services/api/bookingNotificationsClient";
+import type { HostNotification, HostNotificationSyncAlert } from "./hostNotifications";
 import type { useHostNotifications } from "./useHostNotifications";
-import type { useNotificationActions } from "./useNotificationActions";
+import type { SyncRetryState } from "./useSyncRetry";
 
 const TAB_LABEL: Record<NotificationTab, string> = {
   all: "notifications.tab.all",
@@ -71,20 +71,33 @@ const HOVER_MARK_BUTTON =
   "pointer-events-none absolute right-0 top-0 inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-semibold text-primary-600 opacity-0 shadow-sm transition-opacity hover:bg-gray-50 focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 [@media(hover:none)]:hidden";
 
 type Notifications = ReturnType<typeof useHostNotifications>;
-type Actions = ReturnType<typeof useNotificationActions>;
 
-/** Booking Admin's bell and notifications panel (VAY-2349): a dropdown from 768 px, a full-width sheet
- * under the header on phones. */
+/** What the bell's buttons do in the app that shows it: links (Booking Admin and PMS open different pages)
+ * and the shared Retry sync (useSyncRetry). */
+export type NotificationActions = {
+  act: (key: string, read: boolean, action: NotificationAction) => void;
+  retrySync: (alert: HostNotificationSyncAlert) => Promise<void>;
+  openChannelManager: (alert: HostNotificationSyncAlert) => Promise<void>;
+  sync: SyncRetryState;
+  resetSync: () => void;
+};
+
+/** The notifications bell and panel (VAY-2349), in Booking Admin's and PMS's top bars (VAY-2591): a
+ * dropdown from 768 px, a full-width sheet under the header on phones. Each app passes its own translations
+ * (the `notifications.*` and `layout.header.notifications` keys). */
 export default function NotificationsBell({
   hotelName,
   notifications,
   actions,
+  t,
+  locale,
 }: {
   hotelName: string;
   notifications: Notifications;
-  actions: Actions;
+  actions: NotificationActions;
+  t: Translate;
+  locale: string;
 }) {
-  const { t, locale } = useTranslation();
   const { feed, status, markRead, markUnread, markDone, markAllRead } = notifications;
   const { sync, resetSync, retrySync, openChannelManager } = actions;
   const [open, setOpen] = useState(false);
@@ -119,7 +132,9 @@ export default function NotificationsBell({
     if (!open) resetSync();
   }, [open, resetSync]);
 
-  if (status === "unavailable") return null;
+  // Nothing until the first read answers: people the feed refuses (PMS front desk without the Booking
+  // Engine) never see the bell flash up and vanish.
+  if (status === "unavailable" || (status === "loading" && !feed)) return null;
 
   const unread = feed?.unread.all ?? 0;
   // Red with nothing unread: the sync error was read but is still failing (a dot without a count).
@@ -344,7 +359,11 @@ export default function NotificationsBell({
                       {alert.canViewDetails && (
                         <button
                           type="button"
-                          onClick={() => void openChannelManager(alert)}
+                          onClick={() => {
+                            // In PMS the page changes under the header: close the panel too.
+                            setOpen(false);
+                            void openChannelManager(alert);
+                          }}
                           className="inline-flex h-[30px] items-center rounded-[7px] border border-red-200 bg-white px-3 text-[13px] font-medium text-red-800 hover:bg-red-50"
                         >
                           {t("notifications.sync.viewDetails")}
@@ -379,6 +398,7 @@ export default function NotificationsBell({
                   {grouped.map((item) => (
                     <Row
                       key={item.key}
+                      t={t}
                       row={notificationRow(item, context)}
                       done={item.done}
                       todo={item.category === "needs_action" && !item.done}
@@ -409,6 +429,7 @@ export default function NotificationsBell({
  * that needs action has its own action in brand blue and "Mark as done"; in the Needs action tab it is an
  * amber "To do" card. */
 function Row({
+  t,
   row,
   done,
   todo,
@@ -418,6 +439,7 @@ function Row({
   onMarkDone,
   onAction,
 }: {
+  t: Translate;
   row: NotificationRow;
   done: boolean;
   todo: boolean;
@@ -427,7 +449,6 @@ function Row({
   onMarkDone: (key: string) => void;
   onAction: (row: NotificationRow, action: NotificationAction) => void;
 }) {
-  const { t } = useTranslation();
   const { icon: Icon, tile } = TONE[row.tone];
   const action = row.action;
   const unread = !row.read;

@@ -12,8 +12,8 @@ import {
   notificationRow,
   relativeTime,
   syncAlertText,
-} from "./notificationRows";
-import { withMarks } from "./useHostNotifications";
+} from "@vayada/product-onboarding/notificationRows";
+import { withMarks } from "@vayada/product-onboarding/useHostNotifications";
 
 // VAY-2349: what the bell's rows say, with the English catalog.
 const messages = en as Record<string, string>;
