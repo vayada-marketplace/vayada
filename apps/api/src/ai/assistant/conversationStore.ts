@@ -109,15 +109,18 @@ export type ConversationStore = {
    * turn as stopped; that task sees it at its next heartbeat. False when nothing was running.
    */
   stopTurn(owner: ConversationOwner, conversationId: string, turnId?: string): Promise<boolean>;
-  /** `contractSha256`: the request contract this user's next question would use. */
+  /**
+   * `contractSha256`: the request contract this user's next question would use; null when no
+   * model can be asked (AI off), then only a stored reason (too long) makes a chat read-only.
+   */
   read(
     owner: ConversationOwner,
     conversationId: string,
-    contractSha256: string,
+    contractSha256: string | null,
   ): Promise<ConversationView | undefined>;
   list(
     owner: ConversationOwner,
-    contractSha256: string,
+    contractSha256: string | null,
     page: { limit: number; before?: { lastActivityAt: string; id: string } },
   ): Promise<ConversationSummary[]>;
 };
@@ -564,9 +567,10 @@ function ownerValues(owner: ConversationOwner): string[] {
 
 function readOnlyReason(
   conversation: { contract_sha256: string; read_only_reason: "too_long" | null },
-  contractSha256: string,
+  contractSha256: string | null,
 ): ReadOnlyReason | null {
   if (conversation.read_only_reason) return conversation.read_only_reason;
+  if (contractSha256 === null) return null;
   return conversation.contract_sha256 === contractSha256 ? null : "contract_changed";
 }
 

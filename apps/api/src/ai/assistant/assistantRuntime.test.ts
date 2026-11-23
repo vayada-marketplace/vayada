@@ -48,7 +48,12 @@ type Step = (input: AiStepInput, options: AiStepOptions) => Promise<AiStepResult
 
 function runtimeWith(
   steps: Step[],
-  options: { toolsFor?: AssistantToolsFor; timeZoneOf?: () => Promise<string | null> } = {},
+  options: {
+    toolsFor?: AssistantToolsFor;
+    timeZoneOf?: () => Promise<string | null>;
+    /** No model can be asked (AI off). */
+    noRoute?: boolean;
+  } = {},
 ) {
   const memory = memoryConversationStore();
   const conversations: string[] = [];
@@ -61,7 +66,7 @@ function runtimeWith(
   const runtime = createAssistantRuntime({
     store: memory.store,
     provider: {
-      routeFor: () => SONNET,
+      routeFor: () => (options.noRoute ? undefined : SONNET),
       step: async (_task, input, stepOptions) => {
         const next = steps.shift();
         if (!next) throw new Error("no more steps");
@@ -229,5 +234,15 @@ describe("assistant runtime (VAY-2518)", () => {
       expect.stringMatching(/^[0-9a-f]{64}$/),
     );
     expect(list).toHaveBeenCalledWith(owner, read.mock.calls[0]![2], { limit: 5 });
+  });
+
+  it("with no model to ask, reads chats without a contract to compare, so none reads as changed", async () => {
+    const { runtime, memory } = runtimeWith([], { noRoute: true });
+    const read = vi.spyOn(memory.store, "read").mockResolvedValue(undefined);
+    const list = vi.spyOn(memory.store, "list").mockResolvedValue([]);
+    await runtime.read(scope, "11111111-1111-4111-8111-111111111111");
+    await runtime.list(scope, { limit: 5 });
+    expect(read.mock.calls[0]![2]).toBeNull();
+    expect(list.mock.calls[0]![1]).toBeNull();
   });
 });

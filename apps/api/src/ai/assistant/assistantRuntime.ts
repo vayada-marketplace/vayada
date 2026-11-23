@@ -122,14 +122,16 @@ export function createAssistantRuntime(config: {
       app: scope.app,
     };
     const route = config.provider.routeFor(ASSISTANT_TASK);
-    // With AI off no chat can continue; the panel says AI is off.
+    // With no model to ask (AI off), there is no contract to compare a chat with: chats read as
+    // they are, not as "can't continue"; a question is refused as unavailable, and the panel says
+    // AI is off.
     const contractSha256 = route
       ? requestContract({
           route,
           systemPrompt: instructions,
           tools: tools.map((tool) => tool.definition),
         }).sha256
-      : "";
+      : null;
     return { owner, tools, contractSha256 };
   }
 
