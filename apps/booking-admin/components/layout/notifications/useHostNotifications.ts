@@ -96,14 +96,16 @@ export function withMarks(
   return { ...next, badge };
 }
 
-function pendingMarks(
+/** Applies the marks still on their way: a running "Mark all read" first, then each row's own mark. */
+function withPendingMarks(
+  feed: HostNotificationFeed,
   pending: Pending | null,
   hotelId: string,
-): Map<string, NotificationMark> | "all" | null {
-  if (!pending || pending.hotelId !== hotelId) return null;
-  if (pending.all > 0) return "all";
-  if (pending.keys.size === 0) return null;
-  return new Map(Array.from(pending.keys, ([key, { mark }]) => [key, mark]));
+): HostNotificationFeed {
+  if (!pending || pending.hotelId !== hotelId) return feed;
+  const all = pending.all > 0 ? withMarks(feed, "all") : feed;
+  if (pending.keys.size === 0) return all;
+  return withMarks(all, new Map(Array.from(pending.keys, ([key, { mark }]) => [key, mark])));
 }
 
 /** The selected property's notifications: read now, every 60 s while the tab is visible, on page change
@@ -132,8 +134,7 @@ export function useHostNotifications(
         const next = await client.load(propertyId);
         if (id !== request.current) return;
         // Marks still on their way to the server stay applied.
-        const marks = pendingMarks(pending.current, propertyId);
-        setFeed(marks ? withMarks(next, marks) : next);
+        setFeed(withPendingMarks(next, pending.current, propertyId));
         setStatus("ready");
       } catch (error) {
         if (id !== request.current) return;

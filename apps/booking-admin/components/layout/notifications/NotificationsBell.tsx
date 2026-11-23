@@ -63,6 +63,12 @@ const SECONDARY_BUTTON =
 // A needs-action item's own action (VAY-2591): brand blue.
 const PRIMARY_BUTTON =
   "inline-flex h-[30px] items-center rounded-[7px] bg-primary-600 px-3 text-[13px] font-medium text-white hover:bg-primary-700";
+// On touch screens (no hover) the mark button sits with the row's buttons, under the text.
+const TOUCH_MARK_BUTTON =
+  "hidden h-[30px] items-center gap-1.5 rounded-[7px] border border-gray-300 bg-white px-3 text-[13px] font-medium text-primary-600 hover:bg-gray-50 [@media(hover:none)]:inline-flex";
+// With a mouse it takes the label's place while the row is hovered, or while it has keyboard focus.
+const HOVER_MARK_BUTTON =
+  "pointer-events-none absolute right-0 top-0 inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-semibold text-primary-600 opacity-0 shadow-sm transition-opacity hover:bg-gray-50 focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 [@media(hover:none)]:hidden";
 
 type Notifications = ReturnType<typeof useHostNotifications>;
 type Actions = ReturnType<typeof useNotificationActions>;
@@ -379,7 +385,11 @@ export default function NotificationsBell({
                       card={group === "todo"}
                       onMarkRead={(key) => void markRead([key])}
                       onMarkUnread={(key) => void markUnread([key])}
-                      onMarkDone={(key) => void markDone([key])}
+                      onMarkDone={(key) => {
+                        void markDone([key]);
+                        // Its button goes with it: keep the focus in the panel.
+                        panel.current?.focus();
+                      }}
                       onAction={act}
                     />
                   ))}
@@ -394,9 +404,10 @@ export default function NotificationsBell({
 }
 
 /** One notification (VAY-2591): unread rows are light blue with a "New" label, read rows white with "Read",
- * done rows say "Done". Hovering (or focusing) the row turns the label into "Mark as read" or "Mark as
- * unread"; on touch screens that button always shows. An item that needs action has its own action in brand
- * blue and "Mark as done"; in the Needs action tab it is an amber "To do" card. */
+ * done rows say "Done". Hovering the row turns the label into "Mark as read", "Mark as unread" or "Mark as
+ * not done" (keyboard users tab to it); on touch screens that button always shows, under the text. An item
+ * that needs action has its own action in brand blue and "Mark as done"; in the Needs action tab it is an
+ * amber "To do" card. */
 function Row({
   row,
   done,
@@ -435,6 +446,31 @@ function Row({
     : done
       ? "notifications.status.done"
       : "notifications.status.read";
+  // Unread: mark read. Done: undo it for the team ("Mark as not done"). Read: mark unread.
+  const mark = unread
+    ? { label: "notifications.markRead", named: "notifications.markReadNamed", run: onMarkRead }
+    : done
+      ? {
+          label: "notifications.markNotDone",
+          named: "notifications.markNotDoneNamed",
+          run: onMarkUnread,
+        }
+      : {
+          label: "notifications.markUnread",
+          named: "notifications.markUnreadNamed",
+          run: onMarkUnread,
+        };
+  const markButton = (className: string) => (
+    <button
+      type="button"
+      onClick={() => mark.run(row.key)}
+      aria-label={t(mark.named, { title: row.title })}
+      className={className}
+    >
+      {unread && <CheckIcon className="h-3.5 w-3.5" aria-hidden="true" />}
+      {t(mark.label)}
+    </button>
+  );
   return (
     <li
       data-testid="notification-row"
@@ -461,6 +497,7 @@ function Row({
             className={`text-sm ${unread ? "font-semibold text-gray-900" : "font-medium text-gray-600"}`}
           >
             {unread && <span className="sr-only">{t("notifications.unread")}: </span>}
+            {done && !unread && <span className="sr-only">{t("notifications.status.done")}: </span>}
             {row.title}
           </p>
           {row.amount && (
@@ -475,52 +512,44 @@ function Row({
           {row.detail}
         </p>
         <p className="text-xs text-gray-500">{row.meta}</p>
-        {(action || todo) && (
-          <div className="mt-2 flex flex-wrap gap-2">
-            {action && (
-              <button
-                type="button"
-                onClick={() => onAction(row, action)}
-                className={todo ? PRIMARY_BUTTON : SECONDARY_BUTTON}
-              >
-                {label}
-              </button>
-            )}
-            {todo && (
-              <button
-                type="button"
-                onClick={() => onMarkDone(row.key)}
-                aria-label={t("notifications.markDoneNamed", { title: row.title })}
-                className={SECONDARY_BUTTON}
-              >
-                <CheckIcon className="h-3.5 w-3.5" aria-hidden="true" />
-                {t("notifications.markDone")}
-              </button>
-            )}
-          </div>
-        )}
+        <div
+          className={`mt-2 flex-wrap gap-2 ${action || todo ? "flex" : "hidden [@media(hover:none)]:flex"}`}
+        >
+          {action && (
+            <button
+              type="button"
+              onClick={() => onAction(row, action)}
+              className={todo ? PRIMARY_BUTTON : SECONDARY_BUTTON}
+            >
+              {label}
+            </button>
+          )}
+          {todo && (
+            <button
+              type="button"
+              onClick={() => onMarkDone(row.key)}
+              aria-label={t("notifications.markDoneNamed", { title: row.title })}
+              className={SECONDARY_BUTTON}
+            >
+              <CheckIcon className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("notifications.markDone")}
+            </button>
+          )}
+          {markButton(TOUCH_MARK_BUTTON)}
+        </div>
       </div>
       <div className="relative flex shrink-0 items-start justify-end">
         <span
           aria-hidden="true"
-          className={`flex h-5 items-center gap-1 rounded-md px-1.5 text-[11px] font-semibold transition-opacity group-focus-within:opacity-0 group-hover:opacity-0 [@media(hover:none)]:hidden ${
+          data-testid="notification-status"
+          className={`flex h-5 items-center gap-1 rounded-md px-1.5 text-[11px] font-semibold transition-opacity [@media(hover:hover)]:group-hover:opacity-0 ${
             unread ? "bg-primary-50 text-primary-600" : done ? "text-green-700" : "text-gray-500"
           }`}
         >
           {done && !unread && <CheckIcon className="h-3 w-3" />}
           {t(status)}
         </span>
-        <button
-          type="button"
-          onClick={() => (unread ? onMarkRead(row.key) : onMarkUnread(row.key))}
-          aria-label={t(unread ? "notifications.markReadNamed" : "notifications.markUnreadNamed", {
-            title: row.title,
-          })}
-          className="pointer-events-none absolute right-0 top-0 inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-semibold text-primary-600 opacity-0 shadow-sm transition-opacity hover:bg-gray-50 focus-visible:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:static [@media(hover:none)]:opacity-100"
-        >
-          {unread && <CheckIcon className="h-3.5 w-3.5" aria-hidden="true" />}
-          {t(unread ? "notifications.markRead" : "notifications.markUnread")}
-        </button>
+        {markButton(HOVER_MARK_BUTTON)}
       </div>
     </li>
   );

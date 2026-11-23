@@ -293,9 +293,9 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
     await bell(page).click();
 
     // "New" turns into "Mark as read" while the row is hovered.
-    await expect(rows(page).first()).toContainText("New");
+    await expect(rows(page).first().getByTestId("notification-status")).toHaveText("New");
     await rows(page).first().hover();
-    await rows(page).first().getByRole("button", { name: "Mark “New booking” as read" }).click();
+    await rows(page).first().getByRole("button", { name: "Mark as read: New booking" }).click();
     await expect
       .poll(() => marks)
       .toEqual([{ keys: ["booking-event:e0000000-0000-4000-8000-000000000001"] }]);
@@ -357,9 +357,9 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
     const modified = rows(page).nth(2);
     await expect(modified).toContainText("Booking modified");
     await expect(modified).not.toHaveAttribute("data-unread", "true");
-    await expect(modified).toContainText("Read");
+    await expect(modified.getByTestId("notification-status")).toHaveText("Read");
     await modified.hover();
-    const unread = modified.getByRole("button", { name: "Mark “Booking modified” as unread" });
+    const unread = modified.getByRole("button", { name: "Mark as unread: Booking modified" });
     await expect(unread).toHaveCSS("opacity", "1");
     await page.screenshot({ path: testInfo.outputPath("notifications-hover-read-1440.png") });
     await unread.click();
@@ -371,7 +371,7 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
     // Unread again: hovering offers "Mark as read".
     await modified.hover();
     await expect(
-      modified.getByRole("button", { name: "Mark “Booking modified” as read" }),
+      modified.getByRole("button", { name: "Mark as read: Booking modified" }),
     ).toBeVisible();
   });
 
@@ -399,7 +399,7 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
     await page.screenshot({
       path: testInfo.outputPath("notifications-needs-action-todo-1440.png"),
     });
-    await missed.getByRole("button", { name: "Mark “Payment not received” as done" }).click();
+    await missed.getByRole("button", { name: "Mark as done: Payment not received" }).click();
     await expect
       .poll(() => marks)
       .toEqual([{ keys: ["booking-event:e0000000-0000-4000-8000-000000000002"] }]);
@@ -413,12 +413,49 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
     const done = rows(page).filter({ hasText: "Payment not received" });
     await expect(done).toHaveAttribute("data-done", "true");
     await expect(done).not.toHaveAttribute("data-unread", "true");
-    await expect(done).toContainText("Done");
-    await expect(done.getByRole("button", { name: /as done$/ })).toHaveCount(0);
+    await expect(done.getByTestId("notification-status")).toHaveText("Done");
+    await expect(done.getByRole("button", { name: /^Mark as done/ })).toHaveCount(0);
     await expect(done.getByRole("button", { name: "Contact guest" })).not.toHaveCSS(
       "background-color",
       "rgb(30, 62, 219)",
     );
+    // The undo, for the whole team: "Mark as not done" puts it back in Needs action.
+    const undo: unknown[] = [];
+    await page.route(UNREAD_ROUTE, (route) => {
+      undo.push(route.request().postDataJSON());
+      return route.fulfill({ status: 204 });
+    });
+    await done.hover();
+    await done.getByRole("button", { name: "Mark as not done: Payment not received" }).click();
+    await expect
+      .poll(() => undo)
+      .toEqual([{ keys: ["booking-event:e0000000-0000-4000-8000-000000000002"] }]);
+    await tab(/^Needs action/).click();
+    await expect(rows(page)).toHaveCount(3);
+  });
+
+  test("marking a payment it showed as read unread brings no toast (VAY-2591)", async ({
+    page,
+  }) => {
+    const feed = fullFeed();
+    feed.items[1] = { ...feed.items[1]!, read: true };
+    feed.unread = { all: 2, bookings: 1, needsAction: 1, updates: 0 };
+    await setUp(page, [feed]);
+    const marks: unknown[] = [];
+    await page.route(UNREAD_ROUTE, (route) => {
+      marks.push(route.request().postDataJSON());
+      return route.fulfill({ status: 204 });
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/settings");
+    await bell(page).click();
+    const missed = rows(page).filter({ hasText: "Payment not received" });
+    await missed.hover();
+    await missed.getByRole("button", { name: "Mark as unread: Payment not received" }).click();
+    await expect.poll(() => marks).toHaveLength(1);
+    await expect(missed).toHaveAttribute("data-unread", "true");
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId("notification-toast")).toHaveCount(0);
   });
 
   test("View booking opens Reservations filtered to that booking without PMS access", async ({
@@ -870,12 +907,17 @@ test.describe("Booking Admin notifications bell on touch screens (VAY-2591)", ()
     expect(await page.evaluate(() => matchMedia("(hover: none)").matches)).toBe(true);
     await bell(page).tap();
     await expect(panel(page)).toBeVisible();
+    const first = rows(page).first();
+    const markRead = first.getByRole("button", { name: "Mark as read: New booking" });
+    await expect(markRead).toBeVisible();
+    // The label stays, and the button sits under the text, not squeezed next to it.
+    await expect(first.getByTestId("notification-status")).toHaveText("New");
+    const title = await first.locator("p").first().boundingBox();
+    const button = await markRead.boundingBox();
+    expect(button!.y).toBeGreaterThan(title!.y + title!.height);
     await expect(
-      rows(page).first().getByRole("button", { name: "Mark “New booking” as read" }),
-    ).toHaveCSS("opacity", "1");
-    await expect(
-      rows(page).nth(2).getByRole("button", { name: "Mark “Booking modified” as unread" }),
-    ).toHaveCSS("opacity", "1");
+      rows(page).nth(2).getByRole("button", { name: "Mark as unread: Booking modified" }),
+    ).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("notifications-touch-390.png") });
   });
 });
