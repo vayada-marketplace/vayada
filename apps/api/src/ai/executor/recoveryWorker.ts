@@ -15,9 +15,20 @@ export function startAiChangeRecoveryWorker(options: {
 }): { runNow(): Promise<void>; close(): Promise<void> } {
   let activeRun: Promise<void> | undefined;
   let closing = false;
+  // Each half on its own: a failing expiry must not stop take-overs, nor the other way round.
   const sweep = async () => {
-    const expired = await options.executor.expirePending();
-    const recovered = await options.executor.recover();
+    let expired = 0;
+    let recovered = 0;
+    try {
+      expired = await options.executor.expirePending();
+    } catch (error) {
+      options.logger.error({ err: error }, "Closing unanswered AI changes failed");
+    }
+    try {
+      recovered = await options.executor.recover();
+    } catch (error) {
+      options.logger.error({ err: error }, "Taking over AI change runs failed");
+    }
     if (expired + recovered > 0) {
       options.logger.info(
         { expired, recovered },

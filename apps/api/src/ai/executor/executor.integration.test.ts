@@ -34,6 +34,8 @@ const url = process.env["TEST_DATABASE_URL"];
 const PREFIX = `vay2524-${randomUUID().slice(0, 8)}`;
 const org = randomUUID();
 const property = randomUUID();
+// A second property of the account: a change for the first must not reach it.
+const otherProperty = randomUUID();
 const user = randomUUID();
 const conversation = randomUUID();
 const DISABLED = "postgresql://integration-test-disabled";
@@ -44,10 +46,13 @@ describe.skipIf(!url)("the executor of AI changes on PostgreSQL (VAY-2524)", () 
   const admin = new pg.Client({ connectionString: url });
   const store = createPgAiOperationStore({ connectionString: url ?? DISABLED, max: 4 });
   const triage = createPgPmsInboxTriagePort({ connectionString: url ?? DISABLED, max: 4 });
-  // The real command, which the test can make break once (a lost database connection).
+  // The real command, which the test can make break once (a lost database connection), and which
+  // shows the AI's limits each command was given.
   let breakNext = false;
+  const narrowings: unknown[] = [];
   const port: PmsInboxTriagePort = {
     async transition(input) {
+      narrowings.push(input.narrowing);
       if (breakNext) {
         breakNext = false;
         throw new Error("connection lost");
@@ -56,11 +61,22 @@ describe.skipIf(!url)("the executor of AI changes on PostgreSQL (VAY-2524)", () 
     },
   };
   const log = memoryAiActionLog();
+  const runFailures: unknown[] = [];
   let app: ReturnType<typeof buildApp>;
   let identity: IdentityRepository;
   let authorizationResolver: ReturnType<typeof createAuthorizationResolver>;
   const executor = (holder: string, leaseMs = 60_000) =>
-    createAiChangeExecutor({ app, store, identity, authorizationResolver, log, holder, leaseMs });
+    createAiChangeExecutor({
+      app,
+      store,
+      identity,
+      authorizationResolver,
+      log,
+      holder,
+      leaseMs,
+      onLogFailure: (error) => runFailures.push(error),
+      onRunFailure: (error) => runFailures.push(error),
+    });
 
   beforeAll(async () => {
     const endpoint = new URL(url!);
@@ -80,17 +96,23 @@ describe.skipIf(!url)("the executor of AI changes on PostgreSQL (VAY-2524)", () 
        VALUES ($1, 'pms', 'property-management', 'active')`,
       [org],
     );
-    await admin.query(
-      `INSERT INTO hotel_catalog.properties (id, public_id, display_name) VALUES ($1::uuid, $2, $2)`,
+    for (const [id, label] of [
       [property, PREFIX],
-    );
-    await admin.query(
-      `INSERT INTO identity.organization_resource_links
-         (organization_id, product, resource_type, resource_id, relationship)
-       VALUES ($1::uuid, 'hotel_catalog', 'property', $2::text, 'owner'),
-              ($1::uuid, 'pms', 'pms_property', $2::text, 'owner')`,
-      [org, property],
-    );
+      [otherProperty, `${PREFIX}-other`],
+    ] as const) {
+      await admin.query(
+        `INSERT INTO hotel_catalog.properties (id, public_id, display_name)
+         VALUES ($1::uuid, $2, $2)`,
+        [id, label],
+      );
+      await admin.query(
+        `INSERT INTO identity.organization_resource_links
+           (organization_id, product, resource_type, resource_id, relationship)
+         VALUES ($1::uuid, 'hotel_catalog', 'property', $2::text, 'owner'),
+                ($1::uuid, 'pms', 'pms_property', $2::text, 'owner')`,
+        [org, id],
+      );
+    }
     await admin.query(`INSERT INTO identity.users (id, email) VALUES ($1, $2)`, [
       user,
       `${PREFIX}@example.test`,
@@ -153,7 +175,9 @@ describe.skipIf(!url)("the executor of AI changes on PostgreSQL (VAY-2524)", () 
       await admin.query(`DELETE FROM ${table} WHERE organization_id = $1`, [org]);
     await admin.query(`DELETE FROM identity.external_identities WHERE user_id = $1`, [user]);
     await admin.query(`DELETE FROM identity.users WHERE id = $1`, [user]);
-    await admin.query(`DELETE FROM hotel_catalog.properties WHERE id = $1`, [property]);
+    await admin.query(`DELETE FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])`, [
+      [property, otherProperty],
+    ]);
     await admin.query(`DELETE FROM identity.organizations WHERE id = $1`, [org]);
     await admin.query("COMMIT");
     await admin.end();
@@ -191,16 +215,20 @@ describe.skipIf(!url)("the executor of AI changes on PostgreSQL (VAY-2524)", () 
       )
     ).rows[0]!.n;
 
-  const ask = (threadId: string, requestScope = "turn-1") =>
+  const ask = (threadId: string, requestScope = "turn-1", channel: "in_app" | "mcp" = "in_app") =>
     store.propose(
       {
         organizationId: org,
         propertyId: property,
         userId: user,
-        surface: "in_app",
-        conversationId: conversation,
-        requestScope,
-        client: "vayada:pms",
+        ...(channel === "mcp"
+          ? { surface: "mcp" as const, connectionId: conversation, client: "claude.ai" }
+          : {
+              surface: "in_app" as const,
+              conversationId: conversation,
+              requestScope,
+              client: "vayada:pms",
+            }),
         action: threadMarkDone,
         arguments: { propertyId: property, threadId, expectedThreadVersion: 4 },
       },
@@ -243,8 +271,53 @@ describe.skipIf(!url)("the executor of AI changes on PostgreSQL (VAY-2524)", () 
         idempotencyKeyHash: sha256(routeKey(operation.id)),
         propertyId: property,
         userId: user,
+        recordsChanged: [{ type: "thread", id: threadId }],
       }),
     ]);
+    // What the route itself wrote down: the operation as correlation, the logged request as cause.
+    const audit = await admin.query<{ correlation: string; causation: string }>(
+      `SELECT correlation_id AS correlation, causation_id AS causation
+         FROM platform.product_audit_events
+        WHERE target_resource_type = 'message_thread' AND target_resource_id = $1`,
+      [threadId],
+    );
+    expect(audit.rows).toEqual([
+      { correlation: `op_${operation.id}`, causation: logged[0]!.requestId },
+    ]);
+    // The command was held to the operation's property only, though the user has two.
+    expect(narrowings.at(-1)).toEqual({ access: "change", propertyIds: [property] });
+    expect(runFailures).toEqual([]);
+  });
+
+  it("runs an MCP change on its connection", async () => {
+    const threadId = await newThread();
+    const { operation } = await ask(threadId, "turn-1", "mcp");
+    expect(await executor("tab-a").startAndRun(operation.id)).toMatchObject({ status: "done" });
+    expect(log.rows.filter((row) => row.operationId === operation.id)).toEqual([
+      expect.objectContaining({
+        surface: "mcp",
+        client: "claude.ai",
+        connectionId: conversation,
+        conversationId: null,
+        outcome: "ok",
+      }),
+    ]);
+  });
+
+  it("never fails a taken-over run on a refusal: the earlier request may have gone out", async () => {
+    const threadId = await newThread();
+    const { operation } = await ask(threadId);
+    await store.start(operation.id, { holder: "dead-worker", ms: 1 }, new Date());
+    // Meanwhile a person changes the conversation; whether the dead worker's request went out
+    // nobody knows, so the refusal the take-over gets says nothing about it.
+    await admin.query(`UPDATE pms.message_threads SET version = 9 WHERE id = $1`, [threadId]);
+    await pause(10);
+    await executor("recovery").recover(50);
+    expect(await store.find(operation.id)).toMatchObject({
+      status: "running",
+      attempts: 2,
+      errorCode: null,
+    });
   });
 
   it("gives a resumed run (the AI SDK, a Mastra workflow) the stored outcome, never a second run", async () => {

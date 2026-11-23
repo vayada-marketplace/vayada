@@ -484,18 +484,27 @@ delegation that writes:
   property, can't change anything), narrowed to the operation's property, on the operation's channel,
   with `op_<id>` as its tool-call and correlation id;
 - the request is `changeRequest(action, arguments, "op_<id>:<step>")`, so the route sees the key
-  `op_<id>:<step>:<action>` on every attempt; the lease is renewed before the step;
-- the route's answer decides the outcome: 2xx is `done` with the action's allow-listed answer; any
-  other 4xx is `failed` with the route's code (it refused, nothing changed, e.g.
-  `thread_version_conflict` after a person's edit); a 5xx, a thrown request or a 409 "still in
-  progress" leaves the run `running` for the recovery job, which sends the same key again. Before
-  any request: an unknown action (`unknown_action`), arguments that no longer fit
-  (`invalid_input`) and a user who is no longer allowed (`not_allowed`) fail at once;
-- every request writes one `ai_tool_calls` row with the operation id, `op_<id>` as correlation id
-  and the key's hash, the same hash as the route's `platform.idempotency_keys` row.
+  `op_<id>:<step>:<action>` on every attempt. Before it goes out the lease is renewed and a "sent"
+  step (no status yet) is recorded; the lease is renewed while the request runs, and the executor
+  stops waiting before the lease could run out (the run stays running);
+- the route's answer decides the outcome. 2xx is `done` with the action's allow-listed answer. A
+  first attempt that sent nothing before (no take-over, no recorded step) fails on the route's
+  refusal (another 4xx, e.g. `thread_version_conflict` after a person's edit), or before any
+  request on an unknown action (`unknown_action`), arguments that no longer fit (`invalid_input`) or
+  a user who is no longer allowed (`not_allowed`). A 5xx, a 429, a thrown request, a timeout or a
+  "try again / key already used" code (`busy_try_again`, `command_in_progress`,
+  `idempotency_conflict`, `idempotency_key_conflict`) leaves the run running for the recovery job,
+  which sends the same key again. Once a request may have gone out, only the route's success ends
+  the run: "failed" always means the change certainly did not happen, and a run that never gets a
+  success gives up after 5 attempts (`gave_up`, outcome unknown);
+- every request writes one `ai_tool_calls` row with the operation id, `op_<id>` as correlation id,
+  the key's hash (the same hash as the route's `platform.idempotency_keys` row) and, when done, the
+  records its path names (`threadId` -> a `thread`). The route's own audit row carries `op_<id>` as
+  correlation id and the logged request id as causation.
 
-The recovery job (`recoveryWorker.ts`) closes unanswered changes and takes over expired runs every
-30 seconds; the API wires it with the answer endpoint (PR 3). One known limit: the inbox routes answer
+The recovery job (`recoveryWorker.ts`) closes unanswered changes and takes over expired runs, one
+at a time, every 30 seconds; the API wires it with the answer endpoint (PR 3), which also checks who
+answers, the kill switch and a revoked connection before it calls `startAndRun`. One known limit: the inbox routes answer
 any command error with a 500, so a rare refusal inside the command's own transaction is retried until
 the run gives up (`gave_up`, outcome unknown) instead of failing at once.
 
