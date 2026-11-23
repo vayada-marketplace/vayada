@@ -169,10 +169,23 @@ test("Settings has a Payouts card for everyone; it opens the statement, and staf
   await expect(phoneCard).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("settings-payouts-card-phone.png") });
 
-  // Staff who aren't the owner see the card; the page tells them payouts are the owner's.
+  // Staff who aren't the owner (a hotel manager) see the card; the page tells them payouts are the
+  // owner's.
+  await page.route("**/api/identity/staff/self-access", (route) =>
+    route.fulfill({
+      json: {
+        membershipId: "booking-admin-manager-membership",
+        roleKey: "hotel_manager",
+        permissions: ["booking.settings.manage"],
+      },
+    }),
+  );
   await page.unroute(PAYOUT_STATEMENT_ROUTE);
   await mockPayoutStatement(page, 403);
-  await phoneCard.click();
+  await page.reload();
+  const staffCard = page.getByRole("main").getByRole("link", { name: /^Payouts/ });
+  await staffCard.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await staffCard.click();
   await expect(page.getByTestId("payout-statement-owner-only")).toContainText(
     "Only the account owner can see payouts",
   );
