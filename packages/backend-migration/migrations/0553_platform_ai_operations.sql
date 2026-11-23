@@ -5,13 +5,15 @@
 -- The one executor of AI changes runs it; the model, the AI SDK, Mastra and the browser only create
 -- or answer it.
 --
--- An Ask-first change starts "pending" and waits up to 15 minutes for the person's Yes
--- (expires_at); a Yes starts it ("running") for exactly one caller, under a lease, and a later caller
--- joins that run. A run whose lease ran out (a deploy, a crash) is taken over by the recovery job,
--- which runs the same steps again with the same keys: each step's Idempotency-Key is derived from
--- the operation id and the step, so the route returns its stored answer instead of changing twice.
--- A retried or regenerated tool call with the same arguments finds the row by its business key
--- (a hash of who, where, the action and its arguments) and gets the same operation back.
+-- An Ask-first change starts "pending" and waits up to 15 minutes (or its preview's own expiry) for
+-- the person's Yes; a Yes starts it ("running") for exactly one caller under a lease whose token is
+-- new at every start and take-over, and a later caller joins that run. A run whose lease ran out (a
+-- deploy, a crash) is taken over by the recovery job, which runs the same steps again with the same
+-- keys: each step's Idempotency-Key is derived from the operation id and the step, so the route
+-- returns its stored answer instead of changing twice; after 5 attempts it gives up. A retried or
+-- regenerated tool call with the same arguments in the same request scope (the in-app turn) finds
+-- the row by its business key and gets the same operation back; at most one pending or running row
+-- has a key.
 --
 -- arguments are the AI's checked input to the action; they can hold text a person or the AI wrote
 -- (a booking note), so rows are deleted after 90 days by the API's retention worker, with the
@@ -35,16 +37,20 @@ CREATE TABLE platform.ai_operations (
   action_version   INTEGER     NOT NULL CHECK (action_version >= 1),
   action_group     TEXT        NOT NULL CHECK (action_group IN ('ask', 'do')),
   business_key     TEXT        NOT NULL CHECK (business_key ~ '^[0-9a-f]{64}$'),
+  -- What tells a retry from a new request (the in-app turn); part of the business key.
+  request_scope    TEXT        CHECK (request_scope ~ '^[A-Za-z0-9:._-]{1,128}$'),
   arguments        JSONB       NOT NULL
                      CHECK (jsonb_typeof(arguments) = 'object'
                             AND octet_length(arguments::text) <= 32768),
   status           TEXT        NOT NULL
                      CHECK (status IN ('pending', 'running', 'done', 'failed', 'closed')),
   -- Why a pending change never ran: the person said No, nobody answered, the connection or
-  -- conversation was closed, or AI was switched off.
+  -- conversation was closed, AI was switched off, or what it would change changed since it asked.
   close_reason     TEXT        CHECK (close_reason IN ('declined', 'expired', 'revoked',
-                                                       'ai_switched_off')),
+                                                       'ai_switched_off', 'changed')),
   expires_at       TIMESTAMPTZ,
+  -- The route's own preview the Yes binds to, where the action has one.
+  preview_sha256   TEXT        CHECK (preview_sha256 ~ '^[0-9a-f]{64}$'),
   lease_owner      TEXT        CHECK (lease_owner ~ '^[A-Za-z0-9:._-]{1,128}$'),
   lease_expires_at TIMESTAMPTZ,
   -- How many times a run was started or taken over.
@@ -83,9 +89,12 @@ CREATE TABLE platform.ai_operations (
   )
 );
 
--- A retried tool call finds its operation (recent rows of one business key).
+-- A retried tool call finds its operation (recent rows of one business key); at most one row of a
+-- key is pending or running.
 CREATE INDEX idx_platform_ai_operations_business_key
   ON platform.ai_operations (business_key, created_at DESC);
+CREATE UNIQUE INDEX uq_platform_ai_operations_live_business_key
+  ON platform.ai_operations (business_key) WHERE status IN ('pending', 'running');
 -- The recovery job: runs whose lease ran out.
 CREATE INDEX idx_platform_ai_operations_lease
   ON platform.ai_operations (lease_expires_at) WHERE status = 'running';

@@ -8,11 +8,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createPgAiActionLogRetentionStore } from "../actionLog/aiActivity.js";
 import {
+  AiOperationStoreError,
   canonicalJson,
   createPgAiOperationStore,
+  MAX_ATTEMPTS,
   operationBusinessKey,
   PENDING_ANSWER_MS,
-  SAME_CHANGE_MS,
+  RETRY_JOIN_MS,
+  storedArguments,
   type ProposedChange,
 } from "./operationStore.js";
 
@@ -23,8 +26,8 @@ const USER = randomUUID();
 const CONVERSATION = randomUUID();
 const T0 = new Date("2026-12-01T09:00:00.000Z");
 const at = (ms: number) => new Date(T0.getTime() + ms);
-const A = { owner: "task-a:1", ms: 60_000 };
-const B = { owner: "task-b:1", ms: 60_000 };
+const A = { holder: "task-a", ms: 60_000 };
+const B = { holder: "task-b", ms: 60_000 };
 
 let seq = 0;
 /** A change with arguments of its own, so tests don't find each other's rows. */
@@ -35,6 +38,7 @@ function change(overrides: Partial<ProposedChange> = {}): ProposedChange {
     userId: USER,
     surface: "in_app",
     conversationId: CONVERSATION,
+    requestScope: "turn-1",
     client: "vayada:pms",
     action: { name: "thread_mark_done", version: 1, group: "ask" },
     arguments: {
@@ -45,6 +49,14 @@ function change(overrides: Partial<ProposedChange> = {}): ProposedChange {
     ...overrides,
   };
 }
+
+const step = (n: number, statusCode = 200) => ({
+  step: n,
+  requestId: randomUUID(),
+  idempotencyKeySha256: "a".repeat(64),
+  statusCode,
+  at: T0.toISOString(),
+});
 
 describe("the business key (VAY-2524)", () => {
   it("is the same for the same change, whatever the key order, and differs otherwise", () => {
@@ -58,17 +70,51 @@ describe("the business key (VAY-2524)", () => {
     for (const other of [
       { ...base, arguments: { ...base.arguments, expectedThreadVersion: 99 } },
       { ...base, conversationId: randomUUID() },
+      { ...base, requestScope: "turn-2" },
       { ...base, userId: randomUUID() },
       { ...base, action: { ...base.action, version: 2 } },
     ]) {
       expect(operationBusinessKey(other)).not.toBe(operationBusinessKey(base));
     }
   });
+
+  it("hashes exactly the JSON it stores: dates as text, no undefined members", () => {
+    const base = change();
+    const day = (date: string) => ({
+      ...base,
+      arguments: { ...base.arguments, on: new Date(date) },
+    });
+    expect(operationBusinessKey(day("2026-12-10"))).not.toBe(
+      operationBusinessKey(day("2026-12-11")),
+    );
+    expect(
+      operationBusinessKey({ ...base, arguments: { ...base.arguments, reason: undefined } }),
+    ).toBe(operationBusinessKey(base));
+    expect(() =>
+      operationBusinessKey({ ...base, arguments: { ...base.arguments, n: BigInt(1) } }),
+    ).toThrow(AiOperationStoreError);
+  });
+
+  it("refuses arguments the database would refuse while quoting them", () => {
+    for (const bad of [
+      { note: "a\u0000b" },
+      { note: "half \ud800 pair" },
+      { note: "x".repeat(40_000) },
+    ]) {
+      expect(() => storedArguments({ propertyId: PROPERTY, ...bad })).toThrow(
+        AiOperationStoreError,
+      );
+    }
+  });
 });
 
 describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
   const admin = new pg.Client({ connectionString: URL_ });
-  const store = createPgAiOperationStore({ connectionString: URL_ ?? "", max: 6 });
+  // The pool connects on first use: without a database the suite skips before that.
+  const store = createPgAiOperationStore({
+    connectionString: URL_ ?? "postgresql://integration-test-disabled",
+    max: 6,
+  });
 
   beforeAll(async () => {
     if (!/(^|[_-])test([_-]|$)/i.test(new URL(URL_!).pathname)) {
@@ -101,7 +147,23 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
     await admin.end();
   });
 
-  it("writes an Ask-first change as pending, waiting 15 minutes for the answer", async () => {
+  /** Proposes, starts as A and finishes, for tests about ended changes. */
+  async function ended(asked: ProposedChange, outcome: "done" | "failed", withStep = true) {
+    const { operation } = await store.propose(asked, T0);
+    const started = (await store.start(operation.id, A, at(1_000)))!.operation;
+    if (withStep) await store.recordStep(operation.id, started.leaseOwner!, step(1));
+    await store.finish(
+      operation.id,
+      started.leaseOwner!,
+      outcome === "done"
+        ? { status: "done", result: { ok: 1 } }
+        : { status: "failed", errorCode: "x" },
+      at(2_000),
+    );
+    return operation.id;
+  }
+
+  it("writes an Ask-first change as pending, waiting 15 minutes or its preview's expiry", async () => {
     const asked = change();
     const { operation, created } = await store.propose(asked, T0);
     expect(created).toBe(true);
@@ -109,19 +171,34 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
       status: "pending",
       group: "ask",
       action: "thread_mark_done",
-      actionVersion: 1,
       surface: "in_app",
       conversationId: CONVERSATION,
       connectionId: null,
+      requestScope: "turn-1",
       businessKey: operationBusinessKey(asked),
       arguments: asked.arguments,
       expiresAt: at(PENDING_ANSWER_MS).toISOString(),
+      previewSha256: null,
       attempts: 0,
       steps: [],
     });
+    const preview = "b".repeat(64);
+    expect(
+      (await store.propose(change({ previewSha256: preview, expiresInMs: 600_000 }), T0)).operation,
+    ).toMatchObject({ previewSha256: preview, expiresAt: at(600_000).toISOString() });
+    await expect(store.propose(change({ expiresInMs: PENDING_ANSWER_MS + 1 }), T0)).rejects.toThrow(
+      AiOperationStoreError,
+    );
   });
 
-  it("gives a retried or regenerated tool call the same change, never a second one", async () => {
+  it("refuses arguments for another property", async () => {
+    const asked = change();
+    await expect(
+      store.propose({ ...asked, arguments: { ...asked.arguments, propertyId: randomUUID() } }, T0),
+    ).rejects.toThrow(/another property/);
+  });
+
+  it("gives a retried or regenerated tool call the same change; a new request gets its own", async () => {
     const asked = change();
     const first = await store.propose(asked, T0);
     const again = await store.propose(
@@ -129,11 +206,8 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
       at(5_000),
     );
     expect(again).toEqual({ operation: first.operation, created: false });
-    const other = await store.propose(
-      { ...asked, arguments: { ...asked.arguments, expectedThreadVersion: 1_000 } },
-      at(5_000),
-    );
-    expect(other.created).toBe(true);
+    const newTurn = await store.propose({ ...asked, requestScope: "turn-2" }, at(5_000));
+    expect(newTurn.created).toBe(true);
   });
 
   it("writes one change for copies of a tool call sent at once", async () => {
@@ -141,44 +215,78 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
     const results = await Promise.all(Array.from({ length: 5 }, () => store.propose(asked, T0)));
     expect(results.filter((result) => result.created)).toHaveLength(1);
     expect(new Set(results.map((result) => result.operation.id)).size).toBe(1);
-    const rows = await admin.query(
-      `SELECT count(*)::int AS n FROM platform.ai_operations WHERE business_key = $1`,
-      [operationBusinessKey(asked)],
-    );
-    expect(rows.rows[0].n).toBe(1);
   });
 
-  it("asks again after a No, an expiry or an hour; a done change is found within the hour", async () => {
+  it("joins a done change only while retries come, so the same request later runs again", async () => {
+    // Block, release, block again: the second block is a new request, not a retry of the first.
+    const asked = change();
+    const id = await ended(asked, "done");
+    expect(await store.propose(asked, at(RETRY_JOIN_MS - 1))).toMatchObject({
+      created: false,
+      operation: { id, status: "done", result: { ok: 1 } },
+    });
+    expect((await store.propose(asked, at(RETRY_JOIN_MS + 1))).created).toBe(true);
+  });
+
+  it("tells a retry about a No; asks again after an expiry or a change", async () => {
     const asked = change();
     const declined = await store.propose(asked, T0);
-    expect(await store.closePending(declined.operation.id, "declined", at(1_000))).toMatchObject({
-      status: "closed",
-      closeReason: "declined",
-    });
-    const second = await store.propose(asked, at(2_000));
-    expect(second.created).toBe(true);
-    // Unanswered past its expiry: a new question, not a dead card.
-    const third = await store.propose(asked, at(2_000 + PENDING_ANSWER_MS));
-    expect(third.created).toBe(true);
-    const started = await store.start(third.operation.id, A, at(2_000 + PENDING_ANSWER_MS));
-    expect(started?.won).toBe(true);
-    const finishedAt = at(3_000 + PENDING_ANSWER_MS);
-    expect(
-      await store.finish(
-        third.operation.id,
-        A.owner,
-        { status: "done", result: { ok: 1 } },
-        finishedAt,
-      ),
-    ).toBe(true);
-    const found = await store.propose(asked, at(SAME_CHANGE_MS));
-    expect(found).toMatchObject({
+    await store.closePending(declined.operation.id, "declined", at(1_000));
+    expect(await store.propose(asked, at(2_000))).toMatchObject({
       created: false,
-      operation: { id: third.operation.id, status: "done", result: { ok: 1 } },
+      operation: { id: declined.operation.id, closeReason: "declined" },
     });
-    expect(
-      (await store.propose(asked, at(4_000 + PENDING_ANSWER_MS + SAME_CHANGE_MS))).created,
-    ).toBe(true);
+
+    const changed = change();
+    const stale = await store.propose(changed, T0);
+    await store.closePending(stale.operation.id, "changed", at(1_000));
+    expect((await store.propose(changed, at(2_000))).created).toBe(true);
+
+    const unanswered = change();
+    const old = await store.propose(unanswered, T0);
+    const next = await store.propose(unanswered, at(PENDING_ANSWER_MS));
+    expect(next.created).toBe(true);
+    // The old card was closed when the new one was written: it can never start any more.
+    expect(await store.find(old.operation.id)).toMatchObject({
+      status: "closed",
+      closeReason: "expired",
+    });
+    expect(await store.start(old.operation.id, A, at(PENDING_ANSWER_MS - 1))).toMatchObject({
+      won: false,
+      operation: { status: "closed" },
+    });
+  });
+
+  it("joins a failed change only if it sent a request", async () => {
+    const sent = change();
+    const id = await ended(sent, "failed", true);
+    expect(await store.propose(sent, at(3_000))).toMatchObject({
+      created: false,
+      operation: { id },
+    });
+    const refused = change();
+    await ended(refused, "failed", false);
+    expect((await store.propose(refused, at(3_000))).created).toBe(true);
+  });
+
+  it("joins a running change however old, and never holds two live rows of one change", async () => {
+    const asked = change();
+    const { operation } = await store.propose(asked, T0);
+    await store.start(operation.id, A, at(1_000));
+    expect(await store.propose(asked, at(10 * RETRY_JOIN_MS))).toMatchObject({
+      created: false,
+      operation: { id: operation.id, status: "running" },
+    });
+    await expect(
+      admin.query(
+        `INSERT INTO platform.ai_operations
+           (organization_id, property_id, user_id, surface, conversation_id, client, action,
+            action_version, action_group, business_key, arguments, status, expires_at)
+         VALUES ($1, $2, $3, 'in_app', $4, 'x', 'thread_mark_done', 1, 'ask', $5, '{}', 'pending',
+                 now() + interval '1 minute')`,
+        [ORG, PROPERTY, USER, CONVERSATION, operationBusinessKey(asked)],
+      ),
+    ).rejects.toMatchObject({ code: "23505" });
   });
 
   it("starts a change for exactly one caller: a double click or a second tab joins the run", async () => {
@@ -203,76 +311,86 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
     expect(await store.start(randomUUID(), A, at(1_000))).toBeNull();
   });
 
-  it("never starts a change that expired or was closed", async () => {
-    const expired = await store.propose(change(), T0);
-    expect(await store.start(expired.operation.id, A, at(PENDING_ANSWER_MS))).toMatchObject({
+  it("closes a change answered after its expiry as expired", async () => {
+    const late = await store.propose(change(), T0);
+    expect(await store.start(late.operation.id, A, at(PENDING_ANSWER_MS))).toMatchObject({
       won: false,
-      operation: { status: "pending" },
+      operation: { status: "closed", closeReason: "expired" },
     });
-    const closed = await store.propose(change(), T0);
-    await store.closePending(closed.operation.id, "revoked", at(1_000));
-    expect(await store.start(closed.operation.id, A, at(2_000))).toMatchObject({
-      won: false,
-      operation: { status: "closed", closeReason: "revoked" },
-    });
-    expect(await store.closePending(closed.operation.id, "declined", at(3_000))).toBeNull();
+    const lateNo = await store.propose(change(), T0);
+    expect(
+      await store.closePending(lateNo.operation.id, "declined", at(PENDING_ANSWER_MS)),
+    ).toMatchObject({ status: "closed", closeReason: "expired" });
+    expect(await store.closePending(lateNo.operation.id, "declined", at(1))).toBeNull();
   });
 
-  it("lets only the run's lease holder renew, record and finish it", async () => {
+  it("lets only the current lease token renew, record and finish a run", async () => {
     const { operation } = await store.propose(change(), T0);
-    await store.start(operation.id, A, at(1_000));
-    const step = {
-      step: 1,
-      requestId: randomUUID(),
-      idempotencyKeySha256: "a".repeat(64),
-      statusCode: 200,
-      at: at(2_000).toISOString(),
-    };
-    expect(await store.renewLease(operation.id, B, at(2_000))).toBe(false);
-    expect(await store.recordStep(operation.id, B.owner, step)).toBe(false);
-    expect(
-      await store.finish(operation.id, B.owner, { status: "failed", errorCode: "x" }, T0),
-    ).toBe(false);
-    expect(await store.renewLease(operation.id, A, at(2_000))).toBe(true);
-    expect(await store.recordStep(operation.id, A.owner, step)).toBe(true);
+    const token = (await store.start(operation.id, A, at(1_000)))!.operation.leaseOwner!;
+    expect(token).toMatch(/^task-a:[0-9a-f]{16}$/);
+    // The same holder name with another token (a second run of the same process) is a stranger.
+    const stranger = "task-a:0000000000000000";
+    expect(await store.renewLease(operation.id, stranger, 60_000, at(2_000))).toBe(false);
+    expect(await store.recordStep(operation.id, stranger, step(1))).toBe(false);
+    expect(await store.finish(operation.id, stranger, { status: "done", result: null }, T0)).toBe(
+      false,
+    );
+    expect(await store.renewLease(operation.id, token, 60_000, at(2_000))).toBe(true);
+    // A replayed step replaces its record; the cursor never goes back.
+    expect(await store.recordStep(operation.id, token, step(1))).toBe(true);
+    expect(await store.recordStep(operation.id, token, step(2))).toBe(true);
+    expect(await store.recordStep(operation.id, token, step(1, 409))).toBe(true);
+    const recorded = await store.find(operation.id);
+    expect(recorded?.stepCursor).toBe(2);
+    expect(recorded?.steps.map((entry) => [entry.step, entry.statusCode])).toEqual([
+      [2, 200],
+      [1, 409],
+    ]);
+    await expect(store.recordStep(operation.id, token, step(21))).rejects.toThrow(
+      AiOperationStoreError,
+    );
+    await expect(
+      store.finish(operation.id, token, { status: "failed", errorCode: "Not A Code" }, T0),
+    ).rejects.toThrow(AiOperationStoreError);
+    // An answer too large to keep is not kept; the change still counts as done.
     expect(
       await store.finish(
         operation.id,
-        A.owner,
-        { status: "failed", errorCode: "changed" },
+        token,
+        { status: "done", result: { text: "x".repeat(40_000) } },
         at(3_000),
       ),
     ).toBe(true);
     expect(await store.find(operation.id)).toMatchObject({
-      status: "failed",
-      errorCode: "changed",
-      stepCursor: 1,
-      steps: [step],
+      status: "done",
+      result: null,
       leaseOwner: null,
       leaseExpiresAt: null,
       finishedAt: at(3_000).toISOString(),
     });
-    expect(await store.finish(operation.id, A.owner, { status: "done", result: null }, T0)).toBe(
-      false,
-    );
   });
 
-  it("takes over a run whose lease ran out exactly once; the stale worker can't finish it", async () => {
+  it("takes over a run whose lease ran out exactly once; the stale worker can't write", async () => {
     const { operation } = await store.propose(change(), T0);
-    await store.start(operation.id, { owner: A.owner, ms: 1_000 }, T0);
-    const before = await store.takeOverExpired(B, at(500), 50);
-    expect(before.map((row) => row.id)).not.toContain(operation.id);
+    const stale = (await store.start(operation.id, { holder: "task-a", ms: 1_000 }, T0))!.operation
+      .leaseOwner!;
+    expect((await store.takeOverExpired(B, at(500), 50)).map((row) => row.id)).not.toContain(
+      operation.id,
+    );
     const [byB, byC] = await Promise.all([
       store.takeOverExpired(B, at(2_000), 50),
-      store.takeOverExpired({ owner: "task-c:1", ms: 60_000 }, at(2_000), 50),
+      store.takeOverExpired({ holder: "task-c", ms: 60_000 }, at(2_000), 50),
     ]);
     const takers = [byB, byC].filter((rows) => rows.some((row) => row.id === operation.id));
     expect(takers).toHaveLength(1);
     const taken = takers[0]!.find((row) => row.id === operation.id)!;
     expect(taken).toMatchObject({ status: "running", attempts: 2, id: operation.id });
+    expect(taken.leaseOwner).not.toBe(stale);
     // The same id, so the same step keys: the route answers the run's first request again.
+    expect(await store.renewLease(operation.id, stale, 60_000, at(2_500))).toBe(false);
+    expect(await store.recordStep(operation.id, stale, step(1))).toBe(false);
     expect(
-      await store.finish(operation.id, A.owner, { status: "done", result: null }, at(3_000)),
+      await store.finish(operation.id, stale, { status: "done", result: null }, at(3_000)),
     ).toBe(false);
     expect(
       await store.finish(
@@ -284,11 +402,28 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
     ).toBe(true);
   });
 
+  it("gives up a run that keeps running out of its lease", async () => {
+    const { operation } = await store.propose(change(), T0);
+    await store.start(operation.id, { holder: "task-a", ms: 1 }, T0);
+    for (let attempt = 2; attempt <= MAX_ATTEMPTS; attempt++) {
+      const taken = await store.takeOverExpired({ holder: "task-b", ms: 1 }, at(attempt * 10), 500);
+      expect(taken.find((row) => row.id === operation.id)?.attempts).toBe(attempt);
+    }
+    const last = await store.takeOverExpired(B, at(1_000), 500);
+    expect(last.map((row) => row.id)).not.toContain(operation.id);
+    expect(await store.find(operation.id)).toMatchObject({
+      status: "failed",
+      errorCode: "gave_up",
+      attempts: MAX_ATTEMPTS,
+      leaseOwner: null,
+    });
+  });
+
   it("closes changes nobody answered in time", async () => {
     const { operation } = await store.propose(change(), T0);
-    expect(await store.expirePending(at(PENDING_ANSWER_MS - 1), 1_000)).toBeGreaterThanOrEqual(0);
+    await store.expirePending(at(PENDING_ANSWER_MS - 1), 1_000);
     expect((await store.find(operation.id))?.status).toBe("pending");
-    expect(await store.expirePending(at(PENDING_ANSWER_MS), 1_000)).toBeGreaterThanOrEqual(1);
+    await store.expirePending(at(PENDING_ANSWER_MS), 1_000);
     expect(await store.find(operation.id)).toMatchObject({
       status: "closed",
       closeReason: "expired",
@@ -296,7 +431,7 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
     });
   });
 
-  it("refuses a row whose state doesn't add up", async () => {
+  it("refuses a row whose state doesn't add up, without the row in the error", async () => {
     const { operation } = await store.propose(change(), T0);
     await expect(
       admin.query(`UPDATE platform.ai_operations SET status = 'done' WHERE id = $1::uuid`, [
@@ -309,6 +444,32 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
         [operation.id],
       ),
     ).rejects.toMatchObject({ code: "23514" });
+    const secret = "guest wrote: room 12 smells";
+    const error = await store
+      .propose(change({ client: "not a client", arguments: { propertyId: PROPERTY, secret } }), T0)
+      .then(
+        () => null,
+        (caught: unknown) => caught as AiOperationStoreError,
+      );
+    expect(error).toBeInstanceOf(AiOperationStoreError);
+    expect(error).toMatchObject({ code: "23514" });
+    expect(JSON.stringify({ ...error, message: error?.message })).not.toContain(secret);
+  });
+
+  it("goes with its property", async () => {
+    const property = randomUUID();
+    await admin.query(
+      `INSERT INTO hotel_catalog.properties (id, public_id, display_name)
+       VALUES ($1::uuid, $2, 'AI changes hotel 2')`,
+      [property, `ai-changes-${property}`],
+    );
+    const asked = change({ propertyId: property });
+    const { operation } = await store.propose(
+      { ...asked, arguments: { ...asked.arguments, propertyId: property } },
+      T0,
+    );
+    await admin.query(`DELETE FROM hotel_catalog.properties WHERE id = $1::uuid`, [property]);
+    expect(await store.find(operation.id)).toBeNull();
   });
 
   it("deletes changes after 90 days, with the text their arguments carry", async () => {

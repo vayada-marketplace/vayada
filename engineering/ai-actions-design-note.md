@@ -440,19 +440,30 @@ running with an expired lease --> resumed by the recovery job (same steps, same 
 ([`apps/api/src/ai/executor/operationStore.ts`](../apps/api/src/ai/executor/operationStore.ts)):
 
 - **Business key:** a hash of the account, property, user, surface, connection or conversation, the
-  action and version, and the change's full checked arguments (keys sorted). A retried or regenerated
-  tool call with the same arguments gets the same operation for an hour while it is pending, running
-  or done; after a No, an expiry or a failure the same arguments ask again (a new card). This one rule
-  covers the per-action keys of plan 3.4.0 (a block's rooms and dates, a note's booking and text); an
-  action can get a narrower key when one needs it. Copies sent at once write one row (advisory lock
-  on the key).
+  request scope (the in-app turn: a regenerated step stays in its turn, a new question is a new
+  turn), the action and version, and exactly the JSON of the change's arguments as stored (keys
+  sorted). This one rule covers the per-action keys of plan 3.4.0; an action can get a narrower key
+  when one needs it. Copies sent at once write one row (advisory lock on the key), and at most one
+  row of a key is pending or running (unique index).
+- **Which retries join:** a running change always; a pending one until it expires; for 10 minutes a
+  change that ended done, declined, revoked or with AI switched off, or failed after it sent a
+  request. After that, or after an expiry or a "changed" close, the same request asks again (a new
+  card), so a deliberate repeat (block, release, block again) is never swallowed.
 - **States** as above, enforced by the table's checks. `start` moves a pending change to running for
-  exactly one caller, under a lease; every other caller gets the row as it is and joins the run. Only
-  the lease holder renews, records a step (request id, key hash, status code: no answer text) or
-  finishes; the recovery job takes over a run whose lease ran out, once, and runs the same steps with
-  the same keys (`op_<id>:<step>`, bound to the action).
-- **Expiry** after 15 minutes closes a pending change (`expired`); No, revoke and AI switched off close
-  it with their reason.
+  exactly one caller; every other caller gets the row and joins the run. Each start and take-over
+  gets a new lease token, and only that token renews, records a step (request id, key hash, status
+  code: no answer text; a replayed step replaces its record) or finishes, so a stalled worker can't
+  write after a take-over. The recovery job takes over a run whose lease ran out, once, with the same
+  step keys (`op_<id>:<step>`, bound to the action); after 5 attempts it gives up (`failed`,
+  `gave_up`). `failed` otherwise means the change certainly did not happen; an outcome the executor
+  can't be sure of stays running for the recovery job.
+- **Expiry:** 15 minutes, or sooner when the route's own preview expires sooner; the row keeps that
+  preview's digest for the Yes. An answer after the expiry closes the row as `expired`; No, revoke,
+  AI switched off and "changed since" (a stale preview at the Yes) close it with their reason.
+- **Arguments** must be plain JSON for the change's property (no NUL, no broken characters, at most
+  32 KB); database errors are rethrown without the row, so the text never reaches a log. The
+  preconditions travel inside the arguments (the action's expected-version fields); the undo record
+  (VAY-2559) will point to its operation.
 - **Retention:** 90 days (plan 3.6), by the AI retention worker; with the account, the property or the
   user the rows go at once.
 
