@@ -13,6 +13,7 @@ function item(key: string, kind: HostNotification["kind"], read = false): HostNo
     category: kind === "payment_not_received" ? "needs_action" : "bookings",
     occurredAt: "2026-10-25T11:00:00Z",
     read,
+    done: false,
   };
 }
 

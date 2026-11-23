@@ -13,14 +13,26 @@ export const NOTIFICATIONS_POLL_MS = 60_000;
 /** A focus and a visibility change on returning to the tab come together: one read is enough. */
 const READ_SPACING_MS = 2_000;
 
-type Client = Pick<typeof bookingNotificationsClient, "load" | "markRead" | "markAllRead">;
+type Client = Pick<
+  typeof bookingNotificationsClient,
+  "load" | "markRead" | "markUnread" | "markDone" | "markAllRead"
+>;
+
+/** What a mark does to an item (VAY-2591): read, unread (on a done item: no longer done), or done (needs-action
+ * items only; a done item is read). */
+export type NotificationMark = "read" | "unread" | "done";
 
 /** loading until the first read; unavailable when there is no property or the person may not read its
  * notifications (the bell then hides); failed when a read went wrong (the next one tries again). */
 export type NotificationsStatus = "loading" | "ready" | "failed" | "unavailable";
 
-/** Marks sent but not yet confirmed by a later read: per key, and "all" while a Mark all read runs. */
-type Pending = { hotelId: string; keys: Map<string, number>; all: number };
+/** Marks sent but not yet confirmed by a later read: per key the latest mark and how many are on their way,
+ * and "all" while a Mark all read runs. */
+type Pending = {
+  hotelId: string;
+  keys: Map<string, { mark: NotificationMark; count: number }>;
+  all: number;
+};
 
 /** Red: the channel sync is failing, read or not (it stays red until it is fixed), or a missed payment is
  * unread. */
@@ -33,42 +45,65 @@ function hasUrgent(feed: HostNotificationFeed): boolean {
 
 /** Applies marks made on this page before the next read confirms them: the rows, the unread counts (which
  * cover all 30 days, beyond the 50 rows) and the badge. */
-export function withRead(
+export function withMarks(
   feed: HostNotificationFeed,
-  keys: ReadonlySet<string> | "all",
+  marks: ReadonlyMap<string, NotificationMark> | "all",
 ): HostNotificationFeed {
-  const marked = (key: string) => keys === "all" || keys.has(key);
+  const markOf = (key: string): NotificationMark | undefined =>
+    marks === "all" ? "read" : marks.get(key);
   const unread = { ...feed.unread };
-  const take = (category: string) => {
-    unread.all -= 1;
-    if (category === "bookings") unread.bookings -= 1;
-    else if (category === "needs_action") unread.needsAction -= 1;
-    else unread.updates -= 1;
+  const count = (category: string, step: 1 | -1) => {
+    unread.all += step;
+    if (category === "bookings") unread.bookings += step;
+    else if (category === "needs_action") unread.needsAction += step;
+    else unread.updates += step;
   };
   const items = feed.items.map((item) => {
-    if (item.read || !marked(item.key)) return item;
-    take(item.category);
-    return { ...item, read: true };
+    const mark = markOf(item.key);
+    if (mark === "read" || (mark === "done" && item.category !== "needs_action")) {
+      if (item.read) return item;
+      count(item.category, -1);
+      return { ...item, read: true };
+    }
+    if (mark === "done") {
+      if (item.done) return item;
+      if (!item.read) count(item.category, -1);
+      return { ...item, read: true, done: true };
+    }
+    if (mark === "unread") {
+      if (!item.read) return item;
+      count(item.category, 1);
+      return { ...item, read: false, done: false };
+    }
+    return item;
   });
   let syncAlert = feed.syncAlert;
-  if (syncAlert && !syncAlert.read && marked(syncAlert.key)) {
-    take("needs_action");
+  const alertMark = syncAlert ? markOf(syncAlert.key) : undefined;
+  if (syncAlert && !syncAlert.read && (alertMark === "read" || alertMark === "done")) {
+    count("needs_action", -1);
     syncAlert = { ...syncAlert, read: true };
+  } else if (syncAlert && syncAlert.read && alertMark === "unread") {
+    count("needs_action", 1);
+    syncAlert = { ...syncAlert, read: false };
   }
-  if (keys === "all") Object.assign(unread, { all: 0, bookings: 0, needsAction: 0, updates: 0 });
+  if (marks === "all") Object.assign(unread, { all: 0, bookings: 0, needsAction: 0, updates: 0 });
   for (const key of Object.keys(unread) as (keyof typeof unread)[])
     unread[key] = Math.max(0, unread[key]);
   const next = { ...feed, items, syncAlert, unread };
   // A red badge from an item beyond the 50 rows stays red until the next read.
-  const hiddenUrgent = feed.badge === "red" && !hasUrgent(feed) && keys !== "all";
+  const hiddenUrgent = feed.badge === "red" && !hasUrgent(feed) && marks !== "all";
   const badge = hasUrgent(next) ? "red" : unread.all === 0 ? "none" : hiddenUrgent ? "red" : "blue";
   return { ...next, badge };
 }
 
-function pendingMarks(pending: Pending | null, hotelId: string): Set<string> | "all" | null {
+function pendingMarks(
+  pending: Pending | null,
+  hotelId: string,
+): Map<string, NotificationMark> | "all" | null {
   if (!pending || pending.hotelId !== hotelId) return null;
   if (pending.all > 0) return "all";
-  return pending.keys.size > 0 ? new Set(Array.from(pending.keys.keys())) : null;
+  if (pending.keys.size === 0) return null;
+  return new Map(Array.from(pending.keys, ([key, { mark }]) => [key, mark]));
 }
 
 /** The selected property's notifications: read now, every 60 s while the tab is visible, on page change
@@ -98,7 +133,7 @@ export function useHostNotifications(
         if (id !== request.current) return;
         // Marks still on their way to the server stay applied.
         const marks = pendingMarks(pending.current, propertyId);
-        setFeed(marks ? withRead(next, marks) : next);
+        setFeed(marks ? withMarks(next, marks) : next);
         setStatus("ready");
       } catch (error) {
         if (id !== request.current) return;
@@ -140,15 +175,23 @@ export function useHostNotifications(
 
   /** Runs a mark: shown at once, and kept over reads that started before it was saved. */
   const mark = useCallback(
-    async (keys: string[] | "all", send: (propertyId: string) => Promise<void>) => {
+    async (
+      keys: string[] | "all",
+      kind: NotificationMark,
+      send: (propertyId: string) => Promise<void>,
+    ) => {
       if (!propertyId) return;
       if (pending.current?.hotelId !== propertyId)
         pending.current = { hotelId: propertyId, keys: new Map(), all: 0 };
       const marks = pending.current;
       if (keys === "all") marks.all += 1;
-      else for (const key of keys) marks.keys.set(key, (marks.keys.get(key) ?? 0) + 1);
+      else
+        for (const key of keys)
+          marks.keys.set(key, { mark: kind, count: (marks.keys.get(key)?.count ?? 0) + 1 });
       setFeed((current) =>
-        current ? withRead(current, keys === "all" ? "all" : new Set(keys)) : current,
+        current
+          ? withMarks(current, keys === "all" ? "all" : new Map(keys.map((key) => [key, kind])))
+          : current,
       );
       try {
         await send(propertyId);
@@ -158,8 +201,8 @@ export function useHostNotifications(
         if (keys === "all") marks.all -= 1;
         else
           for (const key of keys) {
-            const left = (marks.keys.get(key) ?? 1) - 1;
-            if (left > 0) marks.keys.set(key, left);
+            const entry = marks.keys.get(key);
+            if (entry && entry.count > 1) marks.keys.set(key, { ...entry, count: entry.count - 1 });
             else marks.keys.delete(key);
           }
         // A read already on its way may have started before the mark was saved: drop it. The next
@@ -173,14 +216,30 @@ export function useHostNotifications(
   const markRead = useCallback(
     async (keys: string[]) => {
       if (keys.length === 0) return;
-      await mark(keys, (id) => client.markRead(id, keys));
+      await mark(keys, "read", (id) => client.markRead(id, keys));
+    },
+    [client, mark],
+  );
+
+  const markUnread = useCallback(
+    async (keys: string[]) => {
+      if (keys.length === 0) return;
+      await mark(keys, "unread", (id) => client.markUnread(id, keys));
+    },
+    [client, mark],
+  );
+
+  const markDone = useCallback(
+    async (keys: string[]) => {
+      if (keys.length === 0) return;
+      await mark(keys, "done", (id) => client.markDone(id, keys));
     },
     [client, mark],
   );
 
   const markAllRead = useCallback(
     async (seen: HostNotificationFeed) => {
-      await mark("all", (id) =>
+      await mark("all", "read", (id) =>
         client.markAllRead(id, {
           before: seen.generatedAt,
           syncAlertKey: seen.syncAlert?.key ?? null,
@@ -190,5 +249,5 @@ export function useHostNotifications(
     [client, mark],
   );
 
-  return { feed, status, reload: load, markRead, markAllRead };
+  return { feed, status, reload: load, markRead, markUnread, markDone, markAllRead };
 }

@@ -13,7 +13,7 @@ import {
   relativeTime,
   syncAlertText,
 } from "./notificationRows";
-import { withRead } from "./useHostNotifications";
+import { withMarks } from "./useHostNotifications";
 
 // VAY-2349: what the bell's rows say, with the English catalog.
 const messages = en as Record<string, string>;
@@ -58,6 +58,7 @@ function item(overrides: Partial<HostNotification>): HostNotification {
     category: "bookings",
     occurredAt: "2026-10-25T11:48:00Z",
     read: false,
+    done: false,
     booking,
     ...overrides,
   };
@@ -251,16 +252,47 @@ describe("notification rows (VAY-2349)", () => {
       unread: { all: 3, bookings: 2, needsAction: 1, updates: 0 },
       badge: "red",
     });
-    const one = withRead(current, new Set(["m"]));
+    const one = withMarks(current, new Map([["m", "read"]]));
     expect(one.unread).toEqual({ all: 2, bookings: 2, needsAction: 0, updates: 0 });
     expect(one.badge).toBe("blue");
     // A missed payment beyond the 50 rows made it red: red until the next read.
-    const hidden = withRead(feed({ ...current, items: [item({})] }), new Set([item({}).key]));
+    const hidden = withMarks(
+      feed({ ...current, items: [item({})] }),
+      new Map([[item({}).key, "read"]]),
+    );
     expect(hidden.badge).toBe("red");
-    const all = withRead(current, "all");
+    const all = withMarks(current, "all");
     expect(all.unread).toEqual({ all: 0, bookings: 0, needsAction: 0, updates: 0 });
     expect(all.items.every((entry) => entry.read)).toBe(true);
     expect(all.badge).toBe("none");
+  });
+
+  it("marks rows unread and done at once, and done leaves Needs action (VAY-2591)", () => {
+    const missed = item({ key: "m", kind: "payment_not_received", category: "needs_action" });
+    const booked = item({ key: "b", read: true });
+    const current = feed({
+      items: [missed, booked],
+      unread: { all: 1, bookings: 0, needsAction: 1, updates: 0 },
+      badge: "red",
+    });
+    // Done: read and done, no longer red, and out of the Needs action tab but still in All.
+    const done = withMarks(current, new Map([["m", "done"]]));
+    expect(done.items[0]).toMatchObject({ read: true, done: true });
+    expect(done.unread).toEqual({ all: 0, bookings: 0, needsAction: 0, updates: 0 });
+    expect(done.badge).toBe("none");
+    expect(itemsForTab(done.items, "needs_action")).toEqual([]);
+    expect(itemsForTab(done.items, "all").map((entry) => entry.key)).toEqual(["m", "b"]);
+    // Done only applies to items that need action: a booking just reads as read.
+    expect(withMarks(current, new Map([["b", "done"]])).items[1]).toMatchObject({ done: false });
+    // Unread: a read row counts again; on a done item it is the undo, back in Needs action and red.
+    const unread = withMarks(current, new Map([["b", "unread"]]));
+    expect(unread.items[1]!.read).toBe(false);
+    expect(unread.unread).toEqual({ all: 2, bookings: 1, needsAction: 1, updates: 0 });
+    const undone = withMarks(done, new Map([["m", "unread"]]));
+    expect(undone.items[0]).toMatchObject({ read: false, done: false });
+    expect(undone.unread.needsAction).toBe(1);
+    expect(undone.badge).toBe("red");
+    expect(itemsForTab(undone.items, "needs_action").map((entry) => entry.key)).toEqual(["m"]);
   });
 
   it("keeps the badge red while a read sync error is still failing", () => {
@@ -279,11 +311,11 @@ describe("notification rows (VAY-2349)", () => {
       unread: { all: 2, bookings: 1, needsAction: 1, updates: 0 },
       badge: "red",
     });
-    const read = withRead(failing, new Set([syncAlert.key]));
+    const read = withMarks(failing, new Map([[syncAlert.key, "read"]]));
     expect(read.syncAlert?.read).toBe(true);
     expect(read.unread).toEqual({ all: 1, bookings: 1, needsAction: 0, updates: 0 });
     expect(read.badge).toBe("red");
-    const all = withRead(failing, "all");
+    const all = withMarks(failing, "all");
     expect(all.unread.all).toBe(0);
     expect(all.badge).toBe("red");
   });
@@ -322,6 +354,13 @@ describe("notification rows (VAY-2349)", () => {
       ],
     });
     expect(odd?.timeZone).toBe("UTC");
+    // VAY-2591: done comes from the API; one from before it says nothing, which is not done.
+    const legacy: Record<string, unknown> = { ...item({}) };
+    delete legacy.done;
+    expect(parseHostNotificationFeed({ ...feed(), items: [legacy] })?.items[0]?.done).toBe(false);
+    expect(
+      parseHostNotificationFeed({ ...feed(), items: [item({ done: true })] })?.items[0]?.done,
+    ).toBe(true);
     expect(odd?.items.map((entry) => entry.key)).toEqual([item({}).key]);
   });
 });

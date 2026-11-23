@@ -8,7 +8,8 @@ type Translate = (key: string, params?: Record<string, string | number>) => stri
 
 export type NotificationTab = "all" | "bookings" | "needs_action" | "updates";
 export const NOTIFICATION_TABS: NotificationTab[] = ["all", "bookings", "needs_action", "updates"];
-export type NotificationGroup = "today" | "yesterday" | "thisWeek" | "earlier";
+/** By day; the Needs action tab lists one "To do" group (VAY-2591). */
+export type NotificationGroup = "today" | "yesterday" | "thisWeek" | "earlier" | "todo";
 
 export type NotificationAction =
   | { kind: "view_booking"; reference: string; bookingId: string }
@@ -39,8 +40,10 @@ export function unreadForTab(feed: HostNotificationFeed, tab: NotificationTab): 
   return feed.unread.updates;
 }
 
+/** A done item leaves Needs action and stays in All, as read (VAY-2591). */
 export function itemsForTab(items: HostNotification[], tab: NotificationTab): HostNotification[] {
-  return tab === "all" ? items : items.filter((item) => item.category === tab);
+  if (tab === "all") return items;
+  return items.filter((item) => item.category === tab && !(tab === "needs_action" && item.done));
 }
 
 /** The calendar day of an instant in the property's time zone, as yyyy-mm-dd. */

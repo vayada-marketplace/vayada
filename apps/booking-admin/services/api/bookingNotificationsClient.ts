@@ -43,6 +43,9 @@ export type HostNotification = {
   category: HostNotificationCategory;
   occurredAt: string;
   read: boolean;
+  /** Someone on the property's team marked it done (VAY-2591); a done item is read. False from an API
+   * before that. */
+  done: boolean;
   booking?: HostNotificationBooking;
   promo?: { id: string; code: string; validUntil: string | null; uses: number; maxUses: number };
   /** The new member's name, or null when their account has none. */
@@ -123,6 +126,7 @@ function item(v: unknown): v is HostNotification {
     typeof v.occurredAt === "string" &&
     !Number.isNaN(Date.parse(v.occurredAt)) &&
     typeof v.read === "boolean" &&
+    (v.done === undefined || typeof v.done === "boolean") &&
     (v.booking === undefined ||
       (record(v.booking) &&
         typeof v.booking.reference === "string" &&
@@ -172,7 +176,7 @@ export function parseHostNotificationFeed(v: unknown): HostNotificationFeed | nu
   )
     return null;
   // A kind this version doesn't know (from a newer API), or a row it can't show, is skipped.
-  const items = v.items.filter(item);
+  const items = v.items.filter(item).map((entry) => ({ ...entry, done: entry.done === true }));
   return {
     ...(v as HostNotificationFeed),
     timeZone: knownTimeZone(v.timeZone),
@@ -196,6 +200,14 @@ export function createBookingNotificationsClient(http: Http) {
     // keepalive: a mark made right before a page change still reaches the API.
     async markRead(propertyId: string, keys: string[]): Promise<void> {
       await http.post(path(propertyId, "/read"), { keys }, { keepalive: true });
+    },
+    /** Removes the person's read marks; on a done item it also undoes "Mark as done" for the team. */
+    async markUnread(propertyId: string, keys: string[]): Promise<void> {
+      await http.post(path(propertyId, "/unread"), { keys }, { keepalive: true });
+    },
+    /** "Mark as done", for the property's whole team (needs-action items only). */
+    async markDone(propertyId: string, keys: string[]): Promise<void> {
+      await http.post(path(propertyId, "/done"), { keys }, { keepalive: true });
     },
     /** Marks what the person saw: items up to the feed's generatedAt, and the sync card it showed. */
     async markAllRead(
