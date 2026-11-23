@@ -688,16 +688,14 @@ export async function mockBookingAdminShellRoutes(
   );
   // The in-app assistant (VAY-2519) is switched off, as in production: its routes are not there (404), so
   // the header shows no "Ask AI". A context route, so a spec's own page.route wins.
-  await page
-    .context()
-    .route(/\/api\/ai\/assistant\//, (route) =>
-      route.request().method() === "OPTIONS"
-        ? fulfillCorsPreflight(route)
-        : route.fulfill({
-            status: 404,
-            json: { statusCode: 404, code: "not_found", message: "Not found" },
-          }),
-    );
+  await page.context().route(/\/api\/ai\/assistant\//, (route) =>
+    route.request().method() === "OPTIONS"
+      ? fulfillCorsPreflight(route)
+      : route.fulfill({
+          status: 404,
+          json: { statusCode: 404, code: "not_found", message: "Not found" },
+        }),
+  );
   // The header's notifications bell (VAY-2349): nothing yet. Specs that need a feed route their own.
   await page.route(
     /\/api\/booking\/properties\/[^/]+\/notifications(\/(read|read-all|unread|done))?$/,
