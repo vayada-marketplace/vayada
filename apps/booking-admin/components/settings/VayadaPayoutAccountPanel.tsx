@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { FeedbackAlert } from "@/components/ui";
 import { useTranslation } from "@/lib/i18n";
+import { formatMinor, formatPayoutDay } from "@/components/settings/payoutStatement";
 import {
   activePayoutDestination,
   PAYOUT_COUNTRIES,
@@ -13,6 +15,7 @@ import {
   type PayoutDestinationDetails,
   type SavedPayoutDestination,
 } from "@/services/api/financePayoutDestinationClient";
+import { getPayoutStatement } from "@/services/api/financePayoutStatementClient";
 
 const EMPTY: PayoutDestinationDetails = {
   accountHolder: "",
@@ -44,8 +47,10 @@ export function VayadaPayoutAccountPanel({
   /** Whether a payout account is saved, once known (the page's card banner uses it). */
   onAccountChange?: (saved: boolean) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [saved, setSaved] = useState<SavedPayoutDestination | null>(null);
+  // VAY-2584: the owner's next payout, next to the link to the statement (the link alone if unknown).
+  const [nextPayout, setNextPayout] = useState<string | null>(null);
   const [loadState, setLoadState] = useState<"loading" | "loaded" | "failed">("loading");
   const [editing, setEditing] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -84,6 +89,27 @@ export function VayadaPayoutAccountPanel({
   useEffect(load, [load]);
 
   const active = activePayoutDestination(saved);
+  const hasAccount = active !== null;
+  useEffect(() => {
+    if (!canEdit || !hasAccount) return;
+    let cancelled = false;
+    getPayoutStatement(propertyId).then(
+      (statement) => {
+        const totals = statement.totals[0];
+        if (!cancelled && totals)
+          setNextPayout(
+            t("settings.payouts.paymentsNext", {
+              date: formatPayoutDay(totals.nextPayout.on, locale),
+              amount: formatMinor(totals.nextPayout.amountMinor, totals.currency),
+            }),
+          );
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [canEdit, hasAccount, propertyId, t, locale]);
   const commandFor = (fingerprint: string) => {
     if (attempt.current?.fingerprint !== fingerprint)
       attempt.current = { fingerprint, commandId: crypto.randomUUID() };
@@ -315,6 +341,21 @@ export function VayadaPayoutAccountPanel({
           </div>
         )}
       </div>
+
+      {canEdit && active && (
+        <div
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-primary-50 px-4 py-3"
+          data-testid="payout-statement-link"
+        >
+          <Link
+            href="/settings/payouts"
+            className="text-[13px] font-semibold text-primary-600 hover:underline"
+          >
+            {t("settings.payouts.paymentsLink")} →
+          </Link>
+          {nextPayout && <span className="text-[13px] text-slate-600">{nextPayout}</span>}
+        </div>
+      )}
     </div>
   );
 }

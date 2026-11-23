@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import type { createPayoutDestinationCodec } from "./financePayoutDestinationCodec.js";
 import { recordBankTransferAudit } from "./financeBankTransferRepository.js";
+import { stripeAmountMinor } from "./stripeMoney.js";
 
 type Codec = Pick<ReturnType<typeof createPayoutDestinationCodec>, "decrypt">;
 type Queryable = Pick<pg.PoolClient, "query">;
@@ -65,6 +66,47 @@ export type VayadaPayout = {
   returnedAt: string | null;
   returnReason: string | null;
 };
+/** The hotel's own payout statement (VAY-2584): live money only, the same ledger and payouts Vayada
+ * staff see, without staff-only details (transfer references, return reasons, account approval). */
+export type VayadaPayoutStatement = {
+  /** One per currency the hotel was paid in (almost always one). */
+  totals: {
+    currency: string;
+    /** The next Monday payout: for stays checking out by `cutoff`, less what was paid out. */
+    nextPayout: {
+      on: string;
+      cutoff: string;
+      /** What goes out (whole rupiah for IDR; 0 when nothing is owed). */
+      amountMinor: string;
+      /** What is owed by the cut-off: below zero when refunds or disputes took more. */
+      balanceMinor: string;
+    };
+    /** Owed for stays checking out after the cut-off, or whose refund is still on its way. */
+    upcomingMinor: string;
+    /** Payouts sent and not returned by the bank. */
+    paidOutMinor: string;
+    firstPaidOn: string | null;
+  }[];
+  /** The account payouts go to now, masked to its last four characters. */
+  account: { accountLast4: string; countryCode: string } | null;
+  payouts: {
+    id: string;
+    currency: string;
+    amountMinor: string;
+    accountLast4: string;
+    startedOn: string;
+    paidOn: string | null;
+    returnedOn: string | null;
+    /** Started but not sent yet; sent; sent and returned by the bank; cancelled before sending. */
+    status: "sending" | "sent" | "returned" | "cancelled";
+  }[];
+  lines: (VayadaPayoutEntry & {
+    /** A card payment's fee in its parts (the plan's fee and vayada Payment's), when they add up. */
+    fees: { planMinor: string; vayadaMinor: string; vayadaPercent: number } | null;
+    /** The payout a payout line, or its return, belongs to. */
+    payoutId: string | null;
+  })[];
+};
 export type StartVayadaPayoutCommand = {
   propertyId: string;
   commandId: string;
@@ -102,6 +144,16 @@ export function vayadaPayoutCutoff(today: Date): string {
   const day = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
   day.setUTCDate(day.getUTCDate() - (day.getUTCDay() === 0 ? 7 : day.getUTCDay()));
   return day.toISOString().slice(0, 10);
+}
+
+/** The hotel's next payout day and the cut-off it pays to (VAY-2584): the coming Monday (today on a
+ * Monday) for stays checked out by the Sunday before; `weeksLater` moves it on by whole weeks. */
+export function vayadaNextPayout(today: Date, weeksLater = 0): { on: string; cutoff: string } {
+  const day = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  day.setUTCDate(day.getUTCDate() + ((8 - day.getUTCDay()) % 7) + 7 * weeksLater);
+  const on = day.toISOString().slice(0, 10);
+  day.setUTCDate(day.getUTCDate() - 1);
+  return { on, cutoff: day.toISOString().slice(0, 10) };
 }
 
 /** Banks pay rupiah in whole rupiah; Stripe counts IDR in hundredths. The rest stays owed. */
@@ -367,6 +419,113 @@ export function createVayadaPaymentPayoutRepository(connectionString: string, co
       };
     },
 
+    /** The hotel's own statement (VAY-2584): live money only, read the same way as `detail`, so
+     * every line and payout matches what Vayada staff see; the totals are taken at the hotel's
+     * next payout day instead of staff's last cut-off. */
+    async statement(input: { propertyId: string; today: Date }): Promise<VayadaPayoutStatement> {
+      const balancesAt = (next: { cutoff: string }) =>
+        hotels(pool, { livemode: true, cutoff: next.cutoff, propertyId: input.propertyId });
+      let next = vayadaNextPayout(input.today);
+      let balances = await balancesAt(next);
+      // A Monday whose payout has gone out (or with nothing owed): the next one is a week later.
+      if (
+        next.on === input.today.toISOString().slice(0, 10) &&
+        balances.every((balance) => balance.payNowMinor === "0")
+      ) {
+        next = vayadaNextPayout(input.today, 1);
+        balances = await balancesAt(next);
+      }
+      const [entries, payouts, current] = await Promise.all([
+        pool.query<
+          VayadaPayoutEntry & {
+            payoutId: string | null;
+            planFee: string | null;
+            vayadaFee: string | null;
+            vayadaPercent: string | null;
+          }
+        >(
+          `SELECT l.id::text, l.entry_kind AS kind, trim(l.currency) AS currency,
+             l.gross_minor::text AS "grossMinor", l.fee_minor::text AS "feeMinor",
+             l.net_minor::text AS "netMinor", b.public_reference AS "bookingReference",
+             COALESCE(b.check_out, l.stay_check_out)::text AS "checkOut",
+             to_char(l.occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS "occurredAt",
+             CASE WHEN l.entry_kind IN ('payout', 'payout_returned')
+               THEN split_part(l.source_key, ':', 2) END AS "payoutId",
+             CASE WHEN l.entry_kind = 'charge'
+               THEN p.payment_metadata->>'platformFeeAmount' END AS "planFee",
+             CASE WHEN l.entry_kind = 'charge'
+               THEN p.payment_metadata->>'vayadaPaymentFeeAmount' END AS "vayadaFee",
+             CASE WHEN l.entry_kind = 'charge'
+               THEN p.payment_metadata->>'vayadaPaymentFeePercent' END AS "vayadaPercent"
+           FROM finance.hotel_payout_ledger l
+           LEFT JOIN booking.guest_bookings b
+             ON b.id = l.guest_booking_id AND b.property_id = l.property_id
+           LEFT JOIN finance.payments p ON p.id = l.payment_id AND p.property_id = l.property_id
+           WHERE l.property_id=$1::uuid AND l.livemode
+           ORDER BY l.occurred_at DESC, l.id LIMIT 500`,
+          [input.propertyId],
+        ),
+        pool.query<VayadaPayout>(
+          `SELECT ${PAYOUT_COLUMNS}
+           FROM finance.hotel_payouts h
+           JOIN finance.payout_destinations d
+             ON d.id = h.payout_destination_id AND d.property_id = h.property_id
+           WHERE h.property_id=$1::uuid AND h.livemode
+           ORDER BY h.started_at DESC`,
+          [input.propertyId],
+        ),
+        destination(pool, input.propertyId),
+      ]);
+      const statementPayouts = payouts.rows.map((payout) => ({
+        id: payout.id,
+        currency: payout.currency,
+        amountMinor: payout.amountMinor,
+        accountLast4: payout.accountLast4,
+        startedOn: payout.startedAt.slice(0, 10),
+        paidOn: payout.paidOn,
+        returnedOn: payout.returnedAt?.slice(0, 10) ?? null,
+        status: payout.returnedAt
+          ? payout.sentAt
+            ? ("returned" as const)
+            : ("cancelled" as const)
+          : payout.sentAt
+            ? ("sent" as const)
+            : ("sending" as const),
+      }));
+      return {
+        totals: balances.map((balance) => {
+          const sent = statementPayouts.filter(
+            (payout) => payout.currency === balance.currency && payout.status === "sent",
+          );
+          return {
+            currency: balance.currency,
+            nextPayout: {
+              ...next,
+              amountMinor: balance.payNowMinor,
+              balanceMinor: balance.payableMinor,
+            },
+            upcomingMinor: balance.upcomingMinor,
+            paidOutMinor: sent
+              .reduce((sum, payout) => sum + BigInt(payout.amountMinor), 0n)
+              .toString(),
+            firstPaidOn:
+              sent
+                .map((payout) => payout.paidOn)
+                .filter((day): day is string => day !== null)
+                .sort()[0] ?? null,
+          };
+        }),
+        account: current
+          ? { accountLast4: current.accountLast4, countryCode: current.countryCode }
+          : null,
+        payouts: statementPayouts,
+        lines: entries.rows.map(({ planFee, vayadaFee, vayadaPercent, ...entry }) => ({
+          ...entry,
+          fees: chargeFees(entry, planFee, vayadaFee, vayadaPercent),
+        })),
+      };
+    },
+
     /** Starts a payout before any money moves: exactly what is owed now at the cut-off, to the
      * payout account the operator was shown. From here the hotel's balance no longer includes it,
      * so nobody can send it twice; a changed balance or account is refused with the new state. */
@@ -581,6 +740,33 @@ export function createVayadaPaymentPayoutRepository(connectionString: string, co
 
     close: () => pool.end(),
   };
+}
+
+/** A card payment's fee in its two parts as the payment recorded them (pricingCardPayment): the
+ * plan's fee and vayada Payment's. Null for other lines, or when the parts don't add up to the
+ * fee the ledger took. */
+function chargeFees(
+  entry: Pick<VayadaPayoutEntry, "kind" | "currency" | "feeMinor">,
+  planFee: string | null,
+  vayadaFee: string | null,
+  vayadaPercent: string | null,
+): VayadaPayoutStatement["lines"][number]["fees"] {
+  if (entry.kind !== "charge" || planFee === null || vayadaFee === null || vayadaPercent === null)
+    return null;
+  try {
+    const plan = stripeAmountMinor(planFee, entry.currency);
+    const vayada = stripeAmountMinor(vayadaFee, entry.currency);
+    const percent = Number(vayadaPercent);
+    if (
+      !Number.isFinite(percent) ||
+      percent < 0 ||
+      BigInt(plan + vayada) !== BigInt(entry.feeMinor)
+    )
+      return null;
+    return { planMinor: String(plan), vayadaMinor: String(vayada), vayadaPercent: percent };
+  } catch {
+    return null;
+  }
 }
 
 async function ledger(
