@@ -5,19 +5,19 @@ import { apiClient } from "@/services/api/client";
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDownIcon, ArrowTopRightOnSquareIcon, PlusIcon } from "@heroicons/react/24/outline";
+import { ChevronDownIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { authService } from "@/services/auth";
 import { settingsService, HotelSummary, SuperAdminHotel } from "@/services/settings";
 import { useTranslation, SUPPORTED_LANGUAGES } from "@/lib/i18n";
 import NavigationSearch from "./NavigationSearch";
 import DailyStatsStrip from "./DailyStatsStrip";
+import LivePill from "./LivePill";
 import NotificationsBell from "@vayada/product-onboarding/NotificationsBell";
 import NotificationToasts from "./notifications/NotificationToasts";
 import { useHostNotifications } from "@vayada/product-onboarding/useHostNotifications";
 import { bookingNotificationsClient } from "@/services/api/bookingNotificationsClient";
 import { useNotificationActions } from "./notifications/useNotificationActions";
 import ManagePropertiesModal from "./ManagePropertiesModal";
-import { buildBookingPreviewUrl } from "@/lib/utils/bookingPreviewUrl";
 import { SELECTED_HOTEL_CHANGED_EVENT } from "@/services/api/bookingHotelScope";
 
 function storeSelectedHotelId(hotelId: string): void {
@@ -38,7 +38,6 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
   const [profileOpen, setProfileOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
-  const [previewFeedback, setPreviewFeedback] = useState("");
   const [userName, setUserName] = useState("");
   const [userEmail, setUserEmail] = useState("");
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
@@ -102,26 +101,6 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
 
   // Check if the selected hotel is owned by another user (super admin managing someone else's hotel)
   const isManagingOtherHotel = isSuperAdmin && selectedHotel && "owner_email" in selectedHotel;
-
-  const handlePreview = () => {
-    const url = buildBookingPreviewUrl({
-      slug: selectedHotel?.slug ?? "",
-      template: process.env.NEXT_PUBLIC_BOOKING_URL_TEMPLATE,
-      location: window.location,
-    });
-    if (!url) {
-      setPreviewFeedback(t("admin.finishBookingSetupBeforePreviewingYourBookingPage"));
-      return;
-    }
-
-    const previewWindow = window.open(url, "_blank");
-    if (!previewWindow) {
-      setPreviewFeedback(t("admin.yourBrowserBlockedThePreviewAllowPopUpsAndTry"));
-      return;
-    }
-    previewWindow.opener = null;
-    setPreviewFeedback("");
-  };
 
   return (
     <header className="relative h-12 bg-white border-b border-gray-200 flex items-center justify-between px-4 shrink-0">
@@ -242,25 +221,15 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
 
       <NavigationSearch hotelId={selectedHotel?.id} />
 
-      {/* Right section: Preview + Notifications + Profile */}
+      {/* Right section: Live pill + Notifications + Profile */}
       <div className="flex items-center gap-2">
-        {/* Preview Button */}
-        <button
-          onClick={handlePreview}
-          className="flex items-center gap-1 px-2.5 py-1 text-[13px] font-medium text-primary-600 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 transition-colors"
-        >
-          <ArrowTopRightOnSquareIcon className="w-3.5 h-3.5" />
-          <span className="hidden md:inline">{t("layout.header.preview")}</span>
-        </button>
-
-        {previewFeedback && (
-          <div
-            role="alert"
-            className="absolute right-3 top-[calc(100%+0.375rem)] z-50 max-w-xs rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-gray-700 shadow-lg"
-          >
-            {previewFeedback}
-          </div>
-        )}
+        {/* Whether the booking page is live, replacing the Preview button (VAY-2594) */}
+        <LivePill
+          key={selectedHotel?.id}
+          hotelId={selectedHotel?.id}
+          propertyId={selectedHotel?.propertyId}
+          slug={selectedHotel?.slug}
+        />
 
         {/* Notifications bell and panel (VAY-2349) */}
         <NotificationsBell

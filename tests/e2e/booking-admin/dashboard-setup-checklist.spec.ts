@@ -10,6 +10,7 @@ import {
   BOOKING_PUBLICATION_PATH,
   bookingPublicationReviewMock,
   fulfillPublication,
+  mockBookingPublication,
   publicationOperationMock,
 } from "../support/bookingPublicationMocks";
 import { watchPageHealth } from "../support/pageHealth";
@@ -53,7 +54,9 @@ test("keeps today's dashboard while the checklist API isn't mounted (404)", asyn
   const banner = page.getByRole("status").filter({ hasText: "Your property setup isn't complete" });
   await expect(banner).toBeVisible();
   await expect(banner.getByRole("link", { name: "Resume setup" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Your booking page", exact: true })).toBeVisible();
+  // The page is live with nothing to fix: the header's pill says so, not a card (VAY-2594).
+  await expect(page.locator("header").getByRole("button", { name: /^Live/ })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Your booking page", exact: true })).toHaveCount(0);
   await expect(page.getByText(/Finish setting up/)).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("ba-dashboard-checklist-unavailable.png") });
   await assertHealthy();
@@ -62,6 +65,8 @@ test("keeps today's dashboard while the checklist API isn't mounted (404)", asyn
 test("shows the go-live list under the booking page card", async ({ page }, testInfo) => {
   const assertHealthy = watchPageHealth(page, testInfo);
   const writes = await mockSetupChecklist(page, goLiveChecklistFacts(BOOKING_ADMIN_PROPERTY_ID));
+  // Not published yet, as the go-live list says: the card offers Publish above the list.
+  await mockBookingPublication(page, BOOKING_ADMIN_PROPERTY_ID, "ready");
   await page.goto("/dashboard");
 
   const status = page.getByRole("region", { name: "Your booking page", exact: true });
@@ -158,14 +163,12 @@ test("Publish on the go-live list publishes, and the list then says the page is 
   const card = page.getByRole("region", { name: "Get ready to go live" });
   await expect(card).toBeVisible();
   await card.getByRole("button", { name: "Publish", exact: true }).click();
-  // The booking page card publishes; once it says online, the list reads again (VAY-2451).
-  await expect(
-    page.getByRole("region", { name: "Your booking page", exact: true }).getByRole("link", {
-      name: "Open booking page",
-    }),
-  ).toBeVisible();
+  // The booking page card publishes; once it says online, the list reads again (VAY-2451). Live with
+  // nothing to fix, the card goes and the header's pill says Live (VAY-2594).
+  await expect(page.locator("header").getByRole("button", { name: /^Live/ })).toBeVisible();
   await expect(page.getByRole("region", { name: "Your booking page is live" })).toBeVisible();
   await expect(card).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Your booking page", exact: true })).toHaveCount(0);
 });
 
 test("lays the go-live list out for phones", async ({ page }, testInfo) => {

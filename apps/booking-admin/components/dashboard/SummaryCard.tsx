@@ -1,74 +1,76 @@
 "use client";
 
-import { useId, type ReactNode } from "react";
-import {
-  sparklineShape,
-  type SummaryChange,
-  type SummaryComparison,
-} from "@/lib/utils/dashboardSummary";
+import { formatNumber } from "@/lib/utils";
+import { sparklinePath, type SummaryComparison } from "@/lib/utils/dashboardSummary";
 
 type Props = {
-  icon: ReactNode;
   label: string;
   value: string;
   comparison: SummaryComparison | null;
-  /** Formats a change without its sign, e.g. "18%", "LKR 22" or "1". */
-  formatChange: (change: SummaryChange) => string;
-  vsLabel: string;
+  locale: string;
   t: (key: string) => string;
   sparkline: number[];
   onClick?: () => void;
   ariaLabel?: string;
 };
 
+// The design's green and red for changes and trend lines (VAY-2594).
+const UP_TEXT = "text-[#0F7A3D]";
+const DOWN_TEXT = "text-[#B42318]";
+const UP_LINE = "#16A34A";
+const DOWN_LINE = "#D92D20";
+const FLAT_LINE = "#9CA3AF";
+
+/** A KPI card: label, trend line, value and the relative change against the previous period. */
 export function SummaryCard({
-  icon,
   label,
   value,
   comparison,
-  formatChange,
-  vsLabel,
+  locale,
   t,
   sparkline,
   onClick,
   ariaLabel,
 }: Props) {
+  const change = comparison?.kind === "change" ? comparison : null;
   const body = (
     <>
-      <div className="flex w-full items-start justify-between gap-3">
-        <span className="flex min-w-0 items-center gap-2 pt-1 text-[11px] font-semibold uppercase leading-tight tracking-wider text-gray-500">
-          <span className="shrink-0">{icon}</span>
+      <span className="flex w-full items-start justify-between gap-2">
+        <span className="pt-0.5 text-[11px] font-semibold uppercase leading-tight tracking-[0.06em] text-gray-500">
           {label}
         </span>
-        <Sparkline values={sparkline} />
-      </div>
-      <p className="mt-2 w-full truncate text-xl font-bold text-gray-900 md:text-2xl">{value}</p>
-      {comparison && (
-        <p
-          className={`mt-1 text-[13px] ${
-            comparison.kind !== "change"
-              ? "text-gray-500"
-              : comparison.up
-                ? "text-green-600"
-                : "text-red-500"
-          }`}
-        >
-          {comparison.kind === "noData"
-            ? t("dashboard.stats.noDataYet")
-            : comparison.kind === "unchanged"
-              ? t("dashboard.stats.samePeriod")
-              : `${comparison.up ? "↑ +" : "↓ -"}${formatChange(comparison)} ${vsLabel}`}
-        </p>
-      )}
+        <Sparkline
+          values={sparkline}
+          color={change ? (change.up ? UP_LINE : DOWN_LINE) : FLAT_LINE}
+        />
+      </span>
+      <span className="w-full truncate text-2xl font-bold tracking-tight text-gray-900">
+        {value}
+      </span>
+      <span className="flex min-h-4 w-full items-center justify-between gap-1.5">
+        {comparison && (
+          <span
+            className={`text-xs font-medium ${change ? (change.up ? UP_TEXT : DOWN_TEXT) : "text-gray-500"}`}
+          >
+            {changeText(comparison, locale, t)}
+          </span>
+        )}
+        {onClick && (
+          <span className="ml-auto shrink-0 text-xs font-medium text-primary-600">
+            {t("dashboard.stats.details")} ›
+          </span>
+        )}
+      </span>
     </>
   );
-  const className = "bg-white border border-gray-200 rounded-xl p-3 md:p-4 flex flex-col";
+  const className =
+    "flex flex-col gap-2.5 rounded-xl border border-gray-200 bg-white p-4 text-left text-gray-900";
   return onClick ? (
     <button
       type="button"
       onClick={onClick}
       aria-label={ariaLabel}
-      className={`${className} text-left hover:border-gray-300 hover:shadow-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary-300`}
+      className={`${className} cursor-pointer transition-all hover:border-gray-300 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-300`}
     >
       {body}
     </button>
@@ -77,45 +79,40 @@ export function SummaryCard({
   );
 }
 
+/** Always a relative change: "↑ 18% vs prev. period", never points or amounts (VAY-2594). */
+function changeText(
+  comparison: SummaryComparison,
+  locale: string,
+  t: (key: string) => string,
+): string {
+  if (comparison.kind === "noData") return t("dashboard.stats.noDataYet");
+  const vs = t("dashboard.stats.vsPreviousPeriod");
+  if (comparison.kind === "unchanged") return `± 0% ${vs}`;
+  if (comparison.percent === null) return `↑ ${t("dashboard.stats.upFromZero")}`;
+  const rounded = Math.round(comparison.percent);
+  const percent = rounded === 0 ? "<1" : formatNumber(rounded, locale);
+  return `${comparison.up ? "↑" : "↓"} ${percent}% ${vs}`;
+}
+
 // Decorative trend line: no axes, tooltips or hover states.
-function Sparkline({ values }: { values: number[] }) {
-  const gradientId = `sparkline-${useId().replace(/:/g, "")}`;
-  const shape = sparklineShape(values);
+function Sparkline({ values, color }: { values: number[]; color: string }) {
+  const path = sparklinePath(values);
   return (
     <svg
-      className="h-8 w-1/4 min-w-14 max-w-28 shrink-0 overflow-visible"
+      className="h-[26px] w-[72px] shrink-0 overflow-visible"
       viewBox="0 0 100 32"
       preserveAspectRatio="none"
       aria-hidden="true"
     >
-      {shape ? (
-        <>
-          <defs>
-            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#22C55E" stopOpacity={0.18} />
-              <stop offset="100%" stopColor="#22C55E" stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <path d={shape.area} fill={`url(#${gradientId})`} />
-          <path
-            d={shape.line}
-            fill="none"
-            stroke="#16A34A"
-            strokeWidth={1.75}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-          />
-        </>
-      ) : (
-        <path
-          d="M0,30 L100,30"
-          stroke="#D1D5DB"
-          strokeWidth={1.75}
-          strokeLinecap="round"
-          vectorEffect="non-scaling-stroke"
-        />
-      )}
+      <path
+        d={path ?? "M0,30 L100,30"}
+        fill="none"
+        stroke={path ? color : "#D1D5DB"}
+        strokeWidth={1.8}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+      />
     </svg>
   );
 }

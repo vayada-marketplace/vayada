@@ -37,6 +37,11 @@ function statusCard(page: Page): Locator {
   return page.getByRole("region", { name: "Your booking page" });
 }
 
+/** The header's Live / Offline pill (VAY-2594). */
+function livePill(page: Page, state: "Live" | "Offline"): Locator {
+  return page.locator("header").getByRole("button", { name: new RegExp(`^${state}`) });
+}
+
 async function capture(card: Locator, testInfo: TestInfo, name: string) {
   await card.screenshot({ path: testInfo.outputPath(`${name}.png`) });
 }
@@ -71,17 +76,23 @@ test("a ready hotel publishes its booking page from the dashboard and sees it go
   await expect(card.getByText("All 7 ready")).toBeVisible();
   await capture(card, testInfo, "booking-page-ready");
 
+  await expect(livePill(page, "Offline")).toBeVisible();
+
   await card.getByRole("button", { name: "Publish booking page" }).click();
-  await expect(card.getByText("Online", { exact: true })).toBeVisible();
-  await expect(
-    card.getByRole("link", { name: "hotel-alpenrose.booking.vayada.com" }),
-  ).toHaveAttribute("href", "https://hotel-alpenrose.booking.vayada.com");
-  await expect(card.getByRole("link", { name: "Open booking page" })).toHaveAttribute(
+  // Live with nothing to fix: the card goes, and the header's pill says Live (VAY-2594).
+  await expect(livePill(page, "Live")).toBeVisible();
+  await expect(card).toHaveCount(0);
+  await livePill(page, "Live").click();
+  const popover = page.getByRole("dialog", { name: "Your booking page" });
+  await expect(popover.getByRole("link", { name: "Open page" })).toHaveAttribute(
+    "href",
+    "https://hotel-alpenrose.booking.vayada.com",
+  );
+  await expect(popover.getByRole("link", { name: "Open page" })).toHaveAttribute(
     "target",
     "_blank",
   );
-  await expect(card.getByRole("button")).toHaveCount(0);
-  await capture(card, testInfo, "booking-page-online");
+  await page.screenshot({ path: testInfo.outputPath("booking-page-online.png") });
 
   expect(posts).toHaveLength(1);
   expect(posts[0]!.key).toMatch(/^booking-admin:[0-9a-f-]{36}$/);
@@ -90,6 +101,30 @@ test("a ready hotel publishes its booking page from the dashboard and sees it go
     expectedSourceManifestHash: expected.readiness.sourceManifestHash,
     expectedReadinessHash: expected.readiness.readinessHash,
   });
+});
+
+test("a live page guests can't open says so in one red line, with the fix (VAY-2594)", async ({
+  page,
+}, testInfo) => {
+  await openDashboard(page);
+  const review = await bookingPublicationReviewMock(BOOKING_ADMIN_PROPERTY_ID, "hidden", [
+    BLOCKERS[2]!,
+  ]);
+  await page.route(BOOKING_PUBLICATION_PATH, (route) =>
+    fulfillPublication(route, { json: review }),
+  );
+
+  await page.goto("/dashboard");
+  const banner = page.getByRole("status").filter({ hasText: "Your booking page is offline." });
+  await expect(banner).toContainText("Your booking page is offline. Guests can't book right now.");
+  const href = await banner.getByRole("link", { name: "Fix now →" }).getAttribute("href");
+  const url = new URL(href!, "http://localhost");
+  expect(url.pathname).toBe("/setup");
+  expect(url.searchParams.get("step")).toBe("payments");
+  expect(url.searchParams.get("returnTo")).toBe("/dashboard");
+  await expect(statusCard(page)).toHaveCount(0);
+  await expect(livePill(page, "Offline")).toBeVisible();
+  await capture(banner, testInfo, "booking-page-offline-banner");
 });
 
 test("a hotel that isn't ready sees what's missing and where in setup to fix it", async ({
@@ -303,4 +338,8 @@ test("owners who can't manage booking settings don't see the card", async ({ pag
   await expect(page.getByRole("heading", { name: "Booking Engine", level: 1 })).toBeVisible();
   await expect(statusCard(page)).toHaveCount(0);
   await expect(page.getByText("We couldn't check your booking page right now.")).toHaveCount(0);
+  // Nor the header's pill: without the page's status it has nothing to say.
+  await expect(page.locator("header").getByRole("button", { name: /^(Live|Offline)/ })).toHaveCount(
+    0,
+  );
 });

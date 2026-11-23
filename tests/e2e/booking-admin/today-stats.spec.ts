@@ -26,14 +26,21 @@ function stats(revenue: string, bookingCount: number, pageViewCount: number, cur
   };
 }
 
-const strip = (page: Page) => page.locator("header").getByRole("link", { name: /^Today/ });
+// The header strip, named after the Dashboard's range: the last 30 days until another is picked.
+const strip = (page: Page, range = "Last 30 days") =>
+  page.locator("header").getByRole("link", { name: new RegExp(`^${range}`) });
+const days = (url: URL) =>
+  (Date.parse(`${url.searchParams.get("periodEnd")}T00:00:00Z`) -
+    Date.parse(`${url.searchParams.get("periodStart")}T00:00:00Z`)) /
+    86_400_000 +
+  1;
 
 test.beforeEach(async ({ page }) => {
   await mockBookingAdminAuthenticatedSession(page);
   await mockBookingAdminShellRoutes(page);
 });
 
-test("shows today's Dashboard numbers next to the property and opens the Dashboard (VAY-2203)", async ({
+test("shows the Dashboard's last 30 days next to the property and opens the Dashboard (VAY-2203)", async ({
   page,
 }, testInfo) => {
   const reads: URL[] = [];
@@ -44,12 +51,11 @@ test("shows today's Dashboard numbers next to the property and opens the Dashboa
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/settings");
 
-  await expect(strip(page)).toContainText("Today");
+  await expect(strip(page)).toContainText("Last 30 days");
   await expect(strip(page)).toContainText("€240 revenue · 2 bookings · 18 page views");
   await page.screenshot({ path: testInfo.outputPath("today-strip-1440.png") });
-  // The Dashboard's Today read: one property-local day.
-  const today = reads[0].searchParams;
-  expect(today.get("periodStart")).toBe(today.get("periodEnd"));
+  // The Dashboard's own read: the 30 property-local days ending today (VAY-2594).
+  expect(days(reads[0])).toBe(30);
 
   // Read again after a page change (Design Studio itself never reads the stats).
   const before = reads.length;
@@ -63,6 +69,39 @@ test("shows today's Dashboard numbers next to the property and opens the Dashboa
   await strip(page).click();
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(strip(page)).toContainText("€240 revenue · 2 bookings · 18 page views");
+});
+
+test("follows the range picked on the Dashboard on every page, until a reload (VAY-2594)", async ({
+  page,
+}, testInfo) => {
+  // One booking per day of the range, so each range's numbers differ.
+  await page.route(STATS_ROUTE, (route) => {
+    const length = days(new URL(route.request().url()));
+    return route.fulfill({ json: stats(`${length * 10}.00`, length, length * 3) });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/dashboard");
+  await expect(strip(page)).toContainText("€300 revenue · 30 bookings · 90 page views");
+
+  await page.getByRole("button", { name: "7 days", exact: true }).click();
+  await expect(strip(page, "Last 7 days")).toContainText(
+    "€70 revenue · 7 bookings · 21 page views",
+  );
+  await page.getByRole("button", { name: "Today", exact: true }).click();
+  await expect(strip(page, "Today")).toContainText("€10 revenue · 1 booking · 3 page views");
+  await page.getByRole("button", { name: "90 days", exact: true }).click();
+  await expect(strip(page, "Last 90 days")).toContainText("€900 revenue · 90 bookings");
+  await page.screenshot({ path: testInfo.outputPath("strip-90-days-1440.png") });
+
+  await page
+    .getByRole("navigation", { name: "Main" })
+    .getByRole("link", { name: "Settings" })
+    .click();
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(strip(page, "Last 90 days")).toContainText("€900 revenue · 90 bookings");
+
+  await page.reload();
+  await expect(strip(page)).toContainText("€300 revenue · 30 bookings · 90 page views");
 });
 
 test("keeps all zeros for a new property", async ({ page }) => {
