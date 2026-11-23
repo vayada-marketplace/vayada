@@ -351,6 +351,10 @@ import {
   createCustomDomainDns,
 } from "./domains/bookingCustomDomainVerification.js";
 import {
+  createGoogleMapsKeyWebsites,
+  startMapsKeyWebsitesSync,
+} from "./domains/googleMapsKeyWebsites.js";
+import {
   createTargetFinancePropertySettingsRepository,
   createTargetFinancePublicHotelPropertyResolver,
   createXenditBankValidator,
@@ -3299,6 +3303,30 @@ app.addHook("onClose", async () => {
   if (aiSpendStart) clearTimeout(aiSpendStart);
   await activeAiSpendCheck;
   await aiBudgetPool.end();
+});
+
+// VAY-2589: Google refuses the booking page's Maps key on any website missing from its list, so the
+// hotel domains routed to the booking page (BOOKING_CUSTOM_DOMAIN_ROUTES) go onto it, a minute after
+// start and then hourly. A domain is routed before its hotel can verify it (when VAY-2579 drops the
+// per-domain routes, this must read the verified domains instead).
+const stopMapsKeyWebsitesSync = config.googleMapsKeyEditor
+  ? startMapsKeyWebsitesSync({
+      websites: createGoogleMapsKeyWebsites(config.googleMapsKeyEditor),
+      hosts: [...config.bookingCustomDomainRoutes.keys()],
+      report: (outcome) => {
+        if ("error" in outcome) {
+          app.log.warn({ err: outcome.error }, "Maps key website list check failed");
+        } else if (outcome.added.length > 0) {
+          app.log.info(
+            { domains: outcome.added },
+            "Added hotel domains to the Maps key's website list",
+          );
+        }
+      },
+    })
+  : undefined;
+app.addHook("onClose", async () => {
+  stopMapsKeyWebsitesSync?.();
 });
 
 // VAY-2304: the sweep behind the after-commit re-publish. It re-publishes every hotel whose prices

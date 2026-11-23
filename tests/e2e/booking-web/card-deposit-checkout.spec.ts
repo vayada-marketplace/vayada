@@ -84,7 +84,8 @@ test("says what the card pays now and what is left to pay at the hotel", async (
   await expect(orderTotal(page)).toHaveText("€240");
   await expect(
     page.getByText(
-      "We charge €72 to your card when you confirm, and you pay the rest, €168, at the hotel. You enter your card details in the next step.",
+      // VAY-2588: the sentence names no amount; the box beside it does.
+      "We charge the amount due now to your card when you confirm, and you pay the rest at the hotel. You enter your card details in the next step.",
     ),
   ).toBeVisible();
   const summary = page.getByRole("complementary", { name: "Your stay" });

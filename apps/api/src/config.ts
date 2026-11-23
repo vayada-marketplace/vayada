@@ -266,6 +266,10 @@ export type ApiConfig = {
   /** VAY-2568: hotel domains the ALB sends to the new booking frontend, each with the property it
    * belongs to (platform's next_booking_custom_domains). Only these can be verified. */
   bookingCustomDomainRoutes: ReadonlyMap<string, string>;
+  /** VAY-2589: the browser Maps key (projects/<project>/locations/global/keys/<id>) and the JSON key of
+   * the service account that may read and update it. With both, next-api adds hotels' booking domains
+   * to the key's website list; without them, nothing is added. */
+  googleMapsKeyEditor?: { keyName: string; credentialsJson: string };
   platformMediaServing?: PlatformMediaServingConfig;
   platformMediaCleanupEnabled: boolean;
   platformMediaCleanupIntervalMs: number;
@@ -349,6 +353,12 @@ function readBookingCustomDomainCloudflare(
   const apiToken = readOptionalEnv(env, "CLOUDFLARE_API_TOKEN");
   const zoneId = readOptionalEnv(env, "CLOUDFLARE_ZONE_ID");
   return apiToken && zoneId ? { apiToken, zoneId } : undefined;
+}
+
+function readGoogleMapsKeyEditor(env: NodeJS.ProcessEnv): ApiConfig["googleMapsKeyEditor"] {
+  const keyName = readOptionalEnv(env, "GOOGLE_MAPS_BROWSER_KEY_NAME");
+  const credentialsJson = readOptionalEnv(env, "GOOGLE_MAPS_KEY_EDITOR_CREDENTIALS");
+  return keyName && credentialsJson ? { keyName, credentialsJson } : undefined;
 }
 
 /** "host=propertyId,host=propertyId"; Terraform validates it, so a malformed entry is skipped. */
@@ -1578,6 +1588,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
     bookingCustomDomainCloudflare: readBookingCustomDomainCloudflare(env),
     bookingCustomDomainRoutes: readBookingCustomDomainRoutes(env),
+    googleMapsKeyEditor: readGoogleMapsKeyEditor(env),
     platformMediaServing,
     platformMediaCleanupEnabled: readBooleanEnv(env, "PLATFORM_MEDIA_CLEANUP_ENABLED", true),
     platformMediaCleanupIntervalMs: readPositiveIntegerEnv(
