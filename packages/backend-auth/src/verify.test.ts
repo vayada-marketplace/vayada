@@ -122,6 +122,27 @@ describe("createWorkOSVerifier", () => {
     }
   });
 
+  it("marks a token with any act claim as impersonated (staff signed in as the user)", async () => {
+    for (const act of [{ sub: "admin@vayada.com" }, "admin@vayada.com", null, {}]) {
+      const token = await signWorkOSTestToken({
+        sub: "user_impersonated",
+        client_id: WORKOS_CLIENT_ID,
+        sid: "session_impersonated",
+        act,
+      });
+      await expect(appVerifier()(token)).resolves.toMatchObject({
+        workosUserId: "user_impersonated",
+        impersonated: true,
+      });
+    }
+    const ownToken = await signWorkOSTestToken({
+      sub: "user",
+      client_id: WORKOS_CLIENT_ID,
+      sid: "session",
+    });
+    expect(await appVerifier()(ownToken)).not.toHaveProperty("impersonated");
+  });
+
   it("verifies a WorkOS access token that carries client_id instead of aud", async () => {
     const token = await signWorkOSTestToken({
       sub: "user_workos_hotel_owner",

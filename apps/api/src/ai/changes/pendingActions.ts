@@ -71,7 +71,10 @@ export type PendingActionView = {
   finishedAt: string | null;
   /** Null when vayada can't write it now (a record it names is gone or hidden). */
   card: ChangeCard | null;
-  /** Sent back with the Yes: it binds the Yes to this card. Only while it waits. */
+  /**
+   * Sent back with the Yes: it binds the Yes to this card. Only while it waits, and only to a
+   * session that may answer (not to staff signed in as the person).
+   */
   cardSha256: string | null;
 };
 
@@ -121,7 +124,7 @@ function sendError(
   return reply.status(refusal.statusCode).send(body);
 }
 
-/** Why this request may not answer: only the vayada apps' own signed-in sessions may. */
+/** Why this request may not see or answer: only the vayada apps' own signed-in sessions may. */
 function firstPartyProblem(
   request: FastifyRequest,
   context: RequestContext,
@@ -137,6 +140,9 @@ function firstPartyProblem(
   if (!origin || !allowedOrigins.includes(origin)) return "Answer in a vayada app.";
   return null;
 }
+
+/** Staff signed in as the person (WorkOS impersonation) may look at the card, never answer it. */
+const impersonated = (context: RequestContext) => context.actor.providerIdentity.impersonated;
 
 /** The person may make this change on this property now: its permissions and the property. */
 export function mayMakeChange(
@@ -186,7 +192,7 @@ export function pendingActionView(
   operation: AiOperation,
   card: ChangeCard | null,
   now: Date,
-  options: { notAllowed?: boolean } = {},
+  options: { notAllowed?: boolean; mayAnswer?: boolean } = {},
 ): PendingActionView {
   const waiting = stateOf(operation, now) === "needs_answer";
   const state = waiting && options.notAllowed ? "not_allowed" : stateOf(operation, now);
@@ -206,7 +212,10 @@ export function pendingActionView(
         : operation.startedAt,
     finishedAt: operation.finishedAt,
     card,
-    cardSha256: state === "needs_answer" && card ? cardSha256(operation, card) : null,
+    cardSha256:
+      state === "needs_answer" && card && options.mayAnswer !== false
+        ? cardSha256(operation, card)
+        : null,
   };
 }
 
@@ -240,11 +249,20 @@ export async function registerPendingActionRoutes(
   async function load(
     request: FastifyRequest<{ Params: Params }>,
     reply: FastifyReply,
+    answering: boolean,
   ): Promise<{ context: RequestContext; operation: AiOperation } | undefined> {
     const context = requireAuthContext(request);
     const problem = firstPartyProblem(request, context, options.allowedOrigins);
     if (problem) {
       sendError(reply, { statusCode: 403, code: "first_party_only", message: problem });
+      return undefined;
+    }
+    if (answering && impersonated(context)) {
+      sendError(reply, {
+        statusCode: 403,
+        code: "impersonated",
+        message: "You're signed in as someone else. Only they can answer.",
+      });
       return undefined;
     }
     const notFound = { statusCode: 404, code: "not_found", message: "No such change." } as const;
@@ -396,18 +414,19 @@ export async function registerPendingActionRoutes(
     }
   }
 
-  const viewOf = (settled: Settled) =>
+  const viewOf = (settled: Settled, context: RequestContext) =>
     pendingActionView(settled.operation, settled.card, now(), {
       notAllowed: settled.refusal?.code === "not_allowed",
+      mayAnswer: !impersonated(context),
     });
 
   app.get<{ Params: Params }>("/pending-actions/:id", async (request, reply) => {
-    const loaded = await load(request, reply);
+    const loaded = await load(request, reply, false);
     if (!loaded) return reply;
     try {
       const settled = await settle(loaded.context, loaded.operation, authorizationOf(request));
       if (settled.refusal?.statusCode === 503) return sendError(reply, settled.refusal);
-      return viewOf(settled);
+      return viewOf(settled, loaded.context);
     } catch (error) {
       return unavailable(request, reply, error);
     }
@@ -416,7 +435,7 @@ export async function registerPendingActionRoutes(
   app.post<{ Params: Params; Body: unknown }>(
     "/pending-actions/:id/answer",
     async (request, reply) => {
-      const loaded = await load(request, reply);
+      const loaded = await load(request, reply, true);
       if (!loaded) return reply;
       const body = request.body as { answer?: unknown; cardSha256?: unknown } | null;
       const invalid = (message: string) =>
@@ -455,7 +474,7 @@ export async function registerPendingActionRoutes(
         }
 
         const settled = await settle(context, operation, authorization);
-        if (settled.refusal) return sendError(reply, settled.refusal, viewOf(settled));
+        if (settled.refusal) return sendError(reply, settled.refusal, viewOf(settled, context));
         // A card that reads differently now (a renamed room, another preview) is not what the person
         // said yes to.
         if (cardSha256(operation, settled.card!) !== shownSha256) {

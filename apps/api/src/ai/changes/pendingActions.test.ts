@@ -2,7 +2,12 @@
 // the test world's people: only the person the AI asked, in a vayada app, with the rights now.
 import { randomUUID } from "node:crypto";
 
-import { backendAuthPlugin, createFakeVerifier, type PermissionKey } from "@vayada/backend-auth";
+import {
+  backendAuthPlugin,
+  createFakeVerifier,
+  type PermissionKey,
+  type VerifiedSession,
+} from "@vayada/backend-auth";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -106,10 +111,15 @@ const session = (workosUserId: string, workosOrgId: string, sessionId: string | 
   sessionId,
   expiresAt: Math.floor(Date.now() / 1000) + 3600,
 });
-const TOKENS = new Map([
+const TOKENS = new Map<string, VerifiedSession>([
   ["owner", session(`wos_${OWNER}`, "org_wos_a", "session_owner")],
   ["owner-machine", session(`wos_${OWNER}`, "org_wos_a", null)],
   ["member", session(`wos_${MEMBER}`, "org_wos_a", "session_member")],
+  // Staff signed in as the owner through WorkOS impersonation (the token's `act` claim).
+  [
+    "owner-impersonated",
+    { ...session(`wos_${OWNER}`, "org_wos_a", "session_impersonated"), impersonated: true },
+  ],
 ]);
 const CALENDAR: PermissionKey[] = ["pms.calendar.manage", "pms.calendar.read"];
 
@@ -241,6 +251,35 @@ describe("answering AI changes (VAY-2524)", () => {
       (await app!.inject({ method: "GET", url: `/api/ai/pending-actions/${op.id}` })).statusCode,
     ).toBe(401);
     expect(starts).toEqual([]);
+  });
+
+  it("lets staff signed in as the person see the card but never answer it", async () => {
+    const op = operation();
+    const { get, answer, starts, rows } = await setUp([op]);
+    const seen = await get(op.id, "owner-impersonated");
+    expect(seen.statusCode).toBe(200);
+    // The same card, without the digest a Yes needs: this session can't answer it.
+    expect(seen.json()).toMatchObject({
+      state: "needs_answer",
+      card: { question: "Block room 12 for 3 nights?" },
+      cardSha256: null,
+    });
+    const sha = (await get(op.id)).json<PendingActionView>().cardSha256;
+    expect(sha).toMatch(/^[0-9a-f]{64}$/);
+    for (const body of [{ answer: "yes", cardSha256: sha }, { answer: "no" }]) {
+      const response = await answer(op.id, body, "owner-impersonated");
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toMatchObject({
+        code: "impersonated",
+        message: "You're signed in as someone else. Only they can answer.",
+      });
+    }
+    expect(starts).toEqual([]);
+    expect(rows.get(op.id)).toMatchObject({ status: "pending" });
+    // The person's own session still answers the same card.
+    const own = await answer(op.id, { answer: "yes", cardSha256: sha });
+    expect(own.statusCode).toBe(200);
+    expect(starts).toEqual([op.id]);
   });
 
   it("refuses a change of another account the person is not in right now", async () => {
