@@ -445,15 +445,16 @@ running with an expired lease --> resumed by the recovery job (same steps, same 
   it. Copies sent at once write one row (advisory lock on the key), and at most one row of a key is
   pending or running (unique index).
 - **Which retries join:** a pending (until it expires) or running change always, from any turn, so
-  one change never has two live cards; a run that gave up (outcome unknown) for 24 hours, from any
-  turn. A change that ended done, declined, revoked, with AI switched off, or failed after it sent a
-  request is joined only by a retry in the same request scope (the in-app turn: a regenerated step
-  stays in its turn, a new question is a new turn), within 10 minutes of its end (2 minutes without
-  a scope, i.e. MCP), and only if nothing newer happened in its conversation or connection. So a
-  deliberate repeat (block, release, block again) asks again. The cost on MCP: a same-arguments
-  request within 2 minutes of a No gets the No back, not a new card. After an expiry or a "changed"
-  close the same request always asks again, and a new preview digest closes the old card as
-  `changed`.
+  one change never has two live cards. A change that ended done, declined, revoked, with AI switched
+  off, or failed after it sent a request or gave up (outcome unknown) is joined only by a retry in
+  the same request scope (the in-app turn: a regenerated step stays in its turn, a new question is a
+  new turn), within 10 minutes of its end (2 minutes without a scope, i.e. MCP), and only if nothing
+  new was asked in its conversation or connection after it ended (its own turn's other changes don't
+  count). So a deliberate repeat (block, release, block again) asks again, and a resumed turn that
+  retries its two answered changes joins both. The cost on MCP: a same-arguments request within 2
+  minutes of a No gets the No back, not a new card. After an expiry or a "changed" close the same
+  request always asks again; a new preview digest (compared only when both sides bring one, so the
+  digest must cover only the preview's content) closes the old card as `changed`.
 - **States** as above, enforced by the table's checks. `start` moves a pending change to running for
   exactly one caller; every other caller gets the row and joins the run. Each start and take-over
   gets a new lease token, handed only to the winner or the recovery job, and only that token renews,

@@ -216,9 +216,15 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
     });
   });
 
-  it("asks again when the card's preview changed", async () => {
+  it("asks again when the card's preview changed; a retry without a digest joins", async () => {
     const asked = change({ previewSha256: "c".repeat(64) });
     const first = await store.propose(asked, T0);
+    const withoutDigest: ProposedChange = { ...asked };
+    delete withoutDigest.previewSha256;
+    expect(await store.propose(withoutDigest, at(500))).toEqual({
+      operation: first.operation,
+      created: false,
+    });
     const second = await store.propose({ ...asked, previewSha256: "d".repeat(64) }, at(1_000));
     expect(second.created).toBe(true);
     expect(await store.find(first.operation.id)).toMatchObject({
@@ -481,7 +487,7 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
     });
   });
 
-  it("tells every retry about a run that gave up: nobody knows if it changed something", async () => {
+  it("tells a retry about a run that gave up; a new question asks again", async () => {
     const asked = change();
     const { operation } = await store.propose(asked, T0);
     await store.start(operation.id, { holder: "task-a", ms: 1 }, T0);
@@ -489,9 +495,32 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
       await store.takeOverExpired({ holder: "task-b", ms: 1 }, at(attempt * 10), 500);
     }
     expect((await store.find(operation.id))?.errorCode).toBe("gave_up");
-    expect(
-      await store.propose({ ...asked, requestScope: "turn-9" }, at(60 * 60_000)),
-    ).toMatchObject({ created: false, operation: { id: operation.id, errorCode: "gave_up" } });
+    // Nobody knows whether it changed something: the retry is told, never run again.
+    expect(await store.propose(asked, at(1_000))).toMatchObject({
+      created: false,
+      operation: { id: operation.id, errorCode: "gave_up" },
+    });
+    // The person checked and asks again in a new turn: a new card.
+    expect((await store.propose({ ...asked, requestScope: "turn-9" }, at(2_000))).created).toBe(
+      true,
+    );
+  });
+
+  it("retries both changes of one turn, answered, without asking twice", async () => {
+    const conversationId = randomUUID();
+    const block = change({ conversationId });
+    const note = change({ conversationId });
+    const blockId = await ended(block, "done");
+    const noteId = await ended(note, "done");
+    // The resumed turn retries both: each joins, though the other was asked after it.
+    expect(await store.propose(block, at(5_000))).toMatchObject({
+      created: false,
+      operation: { id: blockId },
+    });
+    expect(await store.propose(note, at(5_000))).toMatchObject({
+      created: false,
+      operation: { id: noteId },
+    });
   });
 
   it("closes changes nobody answered in time", async () => {

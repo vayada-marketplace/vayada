@@ -18,15 +18,14 @@ import type { ChangeAction } from "../actions/defineChangeAction.js";
 export const PENDING_ANSWER_MS = 15 * 60_000;
 /**
  * How long after it ended a retry (a resent call, a regenerated step, a resume) joins a change that
- * ended done, declined, revoked, with AI switched off, or failed after it sent a request: within its
- * request scope (the in-app turn), and only if nothing newer happened in the same conversation or
- * connection. A pending or running change is always joined (until a pending one expires).
+ * ended done, declined, revoked, with AI switched off, or failed after it sent a request or gave up:
+ * within its request scope (the in-app turn), and only if nothing new was asked in the same
+ * conversation or connection after it ended. A pending or running change is always joined (until a
+ * pending one expires).
  */
 export const RETRY_JOIN_MS = 10 * 60_000;
 /** The same, for a request without a scope (MCP): only quick resends join. */
 export const UNSCOPED_RETRY_JOIN_MS = 2 * 60_000;
-/** A run that gave up may or may not have changed something: every retry learns that. */
-export const GAVE_UP_JOIN_MS = 24 * 60 * 60_000;
 /** Runs taken over this often give up. */
 export const MAX_ATTEMPTS = 5;
 export const MAX_STEPS = 20;
@@ -365,49 +364,62 @@ export function createPgAiOperationStore(config: {
           `SELECT ${COLUMNS} FROM platform.ai_operations operation
             WHERE business_key = $1
               AND (status IN ('pending', 'running')
-                   -- An outcome nobody knows: every retry learns it, whatever its scope.
-                   OR (status = 'failed' AND error_code = 'gave_up'
-                       AND finished_at > $4::timestamptz)
                    OR (finished_at > $2::timestamptz
                        AND request_scope IS NOT DISTINCT FROM $3
                        AND (status = 'done'
                             OR (status = 'closed'
                                 AND close_reason IN ('declined', 'revoked', 'ai_switched_off'))
-                            OR (status = 'failed' AND jsonb_array_length(steps) > 0))
-                       -- A retry comes before anything else happens in its conversation or
-                       -- connection: "block, release, block again" asks again.
+                            -- It sent a request, or gave up (nobody knows if it changed anything).
+                            OR (status = 'failed'
+                                AND (jsonb_array_length(steps) > 0 OR error_code = 'gave_up')))
+                       -- A retry comes before anything new is asked in its conversation or
+                       -- connection after it ended ("block, release, block again" asks again);
+                       -- its own turn's other changes don't count.
                        AND NOT EXISTS (
                          SELECT 1 FROM platform.ai_operations later
                           WHERE later.user_id = operation.user_id
                             AND later.connection_id IS NOT DISTINCT FROM operation.connection_id
                             AND later.conversation_id IS NOT DISTINCT FROM operation.conversation_id
-                            AND later.created_at > operation.created_at)))
+                            AND later.created_at > operation.finished_at
+                            AND (operation.request_scope IS NULL
+                                 OR later.request_scope IS DISTINCT FROM operation.request_scope))))
             ORDER BY created_at DESC
             LIMIT 1`,
           [
             businessKey,
             new Date(now.getTime() - joinMs).toISOString(),
             change.requestScope ?? null,
-            new Date(now.getTime() - GAVE_UP_JOIN_MS).toISOString(),
           ],
         );
         const found = existing.rows[0];
+        // Only a digest given on both sides can differ: a retry that brings none joins the card.
         const newPreview =
           found?.status === "pending" &&
-          (found.previewSha256 ?? null) !== (change.previewSha256 ?? null);
-        if (found && !newPreview) {
-          await run(client, "COMMIT", []);
-          return { operation: toOperation(found), created: false };
-        }
+          found.previewSha256 !== null &&
+          change.previewSha256 !== undefined &&
+          found.previewSha256 !== change.previewSha256;
         if (found && newPreview) {
           // What the card shows changed: the old card can't be answered, a new one asks.
-          await run(
+          const closed = await run(
             client,
             `UPDATE platform.ai_operations
                 SET status = 'closed', close_reason = 'changed', finished_at = $2::timestamptz
               WHERE id = $1::uuid AND status = 'pending'`,
             [found.id, now.toISOString()],
           );
+          if ((closed.rowCount ?? 0) === 0) {
+            // A Yes started it in the meantime: join that run.
+            const current = await run<Row>(
+              client,
+              `SELECT ${COLUMNS} FROM platform.ai_operations WHERE id = $1::uuid`,
+              [found.id],
+            );
+            await run(client, "COMMIT", []);
+            return { operation: toOperation(current.rows[0]!), created: false };
+          }
+        } else if (found) {
+          await run(client, "COMMIT", []);
+          return { operation: toOperation(found), created: false };
         }
         const inserted = await run<Row>(
           client,
