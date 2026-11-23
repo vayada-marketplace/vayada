@@ -1708,6 +1708,7 @@
   "settings.cards.general.title": "General",
   "settings.cards.general.description": "Property details, contact and social links, default currency and languages.",
   "settings.cards.payments.description": "Guest payment methods, bank transfer details and payment provider.",
+  "settings.cards.payouts.description": "What vayada Payment pays you every Monday, and every amount taken off it.",
   "settings.cards.benefits.title": "Book Direct Benefits",
   "settings.cards.benefits.description": "Perks shown to guests to encourage direct bookings.",
   "settings.cards.policies.title": "Policies",

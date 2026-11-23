@@ -1708,6 +1708,7 @@
   "settings.cards.general.title": "Allgemein",
   "settings.cards.general.description": "Unterkunftsdaten, Kontakt- und Social-Media-Links, Standardwährung und Sprachen.",
   "settings.cards.payments.description": "Zahlungsmethoden für Gäste, Bankverbindung für Überweisungen und Zahlungsanbieter.",
+  "settings.cards.payouts.description": "Was vayada Payment Ihnen jeden Montag auszahlt, und jeder Betrag, der davon abgezogen wird.",
   "settings.cards.benefits.title": "Vorteile bei Direktbuchung",
   "settings.cards.benefits.description": "Vorteile, die Gästen angezeigt werden, um Direktbuchungen zu fördern.",
   "settings.cards.policies.title": "Richtlinien",

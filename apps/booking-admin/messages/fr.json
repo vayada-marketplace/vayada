@@ -1708,6 +1708,7 @@
   "settings.cards.general.title": "Général",
   "settings.cards.general.description": "Informations sur l'établissement, coordonnées et réseaux sociaux, devise par défaut et langues.",
   "settings.cards.payments.description": "Moyens de paiement des clients, coordonnées bancaires pour les virements et fournisseur de paiement.",
+  "settings.cards.payouts.description": "Ce que vayada Payment vous verse chaque lundi, et chaque montant déduit.",
   "settings.cards.benefits.title": "Avantages de la réservation directe",
   "settings.cards.benefits.description": "Avantages présentés aux clients pour encourager les réservations directes.",
   "settings.cards.policies.title": "Politiques",

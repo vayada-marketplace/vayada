@@ -1143,6 +1143,8 @@ test.describe("booking-admin settings no-legacy guard", () => {
       ["Booking rules", "/settings/booking-rules"],
       ["General", "/settings/general"],
       ["Payments", "/settings/payments"],
+      // VAY-2584: next to Payments, for everyone who sees Settings.
+      ["Payouts", "/settings/payouts"],
       ["Book Direct Benefits", "/settings/book-direct-benefits"],
       ["Policies", "/settings/policies"],
       ["Room Filters", "/settings/room-filters"],

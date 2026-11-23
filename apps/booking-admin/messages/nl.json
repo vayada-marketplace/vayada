@@ -1708,6 +1708,7 @@
   "settings.cards.general.title": "Algemeen",
   "settings.cards.general.description": "Accommodatiegegevens, contact- en sociale links, standaardvaluta en talen.",
   "settings.cards.payments.description": "Betaalmethoden voor gasten, bankgegevens voor overboekingen en betalingsaanbieder.",
+  "settings.cards.payouts.description": "Wat vayada Payment u elke maandag uitbetaalt, en elk bedrag dat ervan afgaat.",
   "settings.cards.benefits.title": "Voordelen van direct boeken",
   "settings.cards.benefits.description": "Voordelen die gasten zien om direct boeken te stimuleren.",
   "settings.cards.policies.title": "Beleid",

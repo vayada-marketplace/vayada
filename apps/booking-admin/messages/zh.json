@@ -1708,6 +1708,7 @@
   "settings.cards.general.title": "常规",
   "settings.cards.general.description": "物业信息、联系方式和社交链接、默认货币和语言。",
   "settings.cards.payments.description": "客人支付方式、银行转账信息和支付提供商。",
+  "settings.cards.payouts.description": "vayada Payment 每周一付给您的金额，以及从中扣除的每一笔金额。",
   "settings.cards.benefits.title": "直接预订优惠",
   "settings.cards.benefits.description": "向客人展示的优惠，鼓励直接预订。",
   "settings.cards.policies.title": "政策",

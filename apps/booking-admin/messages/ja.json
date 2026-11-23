@@ -1708,6 +1708,7 @@
   "settings.cards.general.title": "一般",
   "settings.cards.general.description": "施設情報、連絡先とSNSリンク、デフォルト通貨と言語。",
   "settings.cards.payments.description": "ゲストの支払い方法、銀行振込の口座情報、決済プロバイダー。",
+  "settings.cards.payouts.description": "vayada Paymentから毎週月曜日にお支払いする金額と、そこから差し引かれるすべての金額。",
   "settings.cards.benefits.title": "直接予約の特典",
   "settings.cards.benefits.description": "直接予約を促すためにゲストに表示される特典。",
   "settings.cards.policies.title": "ポリシー",

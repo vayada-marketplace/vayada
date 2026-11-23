@@ -143,3 +143,37 @@ test("Payments links the owner to the statement with the next payout", async ({
   await expect(page).toHaveURL(/\/settings\/payouts$/);
   await expect(page.getByTestId("statement-line")).toHaveCount(7);
 });
+
+test("Settings has a Payouts card for everyone; it opens the statement, and staff get the owner's note there", async ({
+  page,
+}, testInfo) => {
+  await page.clock.setFixedTime(NOW);
+  await mockBookingAdminAuthenticatedSession(page);
+  await mockBookingAdminShellRoutes(page);
+  await mockPayoutStatement(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/settings");
+  const card = page.getByRole("main").getByRole("link", { name: /^Payouts/ });
+  await expect(card).toHaveAttribute("href", "/settings/payouts");
+  await expect(card).toContainText("What vayada Payment pays you every Monday");
+  await page.screenshot({ path: testInfo.outputPath("settings-payouts-card-desktop.png") });
+  await card.click();
+  await expect(page).toHaveURL(/\/settings\/payouts$/);
+  await expect(page.getByTestId("statement-line")).toHaveCount(7);
+
+  // A phone shows the card too.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/settings");
+  const phoneCard = page.getByRole("main").getByRole("link", { name: /^Payouts/ });
+  await phoneCard.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await expect(phoneCard).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("settings-payouts-card-phone.png") });
+
+  // Staff who aren't the owner see the card; the page tells them payouts are the owner's.
+  await page.unroute(PAYOUT_STATEMENT_ROUTE);
+  await mockPayoutStatement(page, 403);
+  await phoneCard.click();
+  await expect(page.getByTestId("payout-statement-owner-only")).toContainText(
+    "Only the account owner can see payouts",
+  );
+});

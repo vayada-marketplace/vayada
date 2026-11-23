@@ -1708,6 +1708,7 @@
   "settings.cards.general.title": "Umum",
   "settings.cards.general.description": "Detail properti, kontak dan tautan media sosial, mata uang default, dan bahasa.",
   "settings.cards.payments.description": "Metode pembayaran tamu, detail transfer bank, dan penyedia pembayaran.",
+  "settings.cards.payouts.description": "Jumlah yang dicairkan vayada Payment kepada Anda setiap Senin, dan setiap potongannya.",
   "settings.cards.benefits.title": "Keuntungan Pesan Langsung",
   "settings.cards.benefits.description": "Keuntungan yang ditampilkan kepada tamu untuk mendorong pemesanan langsung.",
   "settings.cards.policies.title": "Kebijakan",

@@ -1708,6 +1708,7 @@
   "settings.cards.general.title": "Generale",
   "settings.cards.general.description": "Dati della struttura, contatti e social, valuta predefinita e lingue.",
   "settings.cards.payments.description": "Metodi di pagamento per gli ospiti, dati per il bonifico e fornitore di pagamenti.",
+  "settings.cards.payouts.description": "Quanto vayada Payment le paga ogni lunedì, e ogni importo detratto.",
   "settings.cards.benefits.title": "Vantaggi della prenotazione diretta",
   "settings.cards.benefits.description": "Vantaggi mostrati agli ospiti per incentivare le prenotazioni dirette.",
   "settings.cards.policies.title": "Politiche",
