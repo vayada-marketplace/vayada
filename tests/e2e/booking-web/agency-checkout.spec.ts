@@ -81,8 +81,11 @@ test("books a room of the stay by card, on the agency's address and in its look"
     escape,
   );
   const events: { hotelSlug: string; eventType: string; metadata: Record<string, unknown> }[] = [];
+  const views: { hotelSlug: string; eventType: string }[] = [];
   await page.route("**/api/booking-web/events", (route) => {
-    events.push(JSON.parse(route.request().postData()!));
+    const event = JSON.parse(route.request().postData()!);
+    // VAY-2592: the stay page's anonymous page view, counted for the stay's hotel.
+    (event.eventType === "page_view" ? views : events).push(event);
     return route.fulfill({ status: 204, body: "" });
   });
   let accepted: Request | undefined;
@@ -145,6 +148,9 @@ test("books a room of the stay by card, on the agency's address and in its look"
   expect(accepted?.headers()["x-vayada-agency-page"]).toBe(AGENCY_SLUG);
   expect(accepted?.postDataJSON()).not.toHaveProperty("via");
   expect(staysAsked(calls)).toEqual(new Set([escape]));
+  expect(views.length).toBeGreaterThan(0);
+  for (const view of views)
+    expect(view).toMatchObject({ hotelSlug: escape, eventType: "page_view" });
   // Its funnel events too, for this stay.
   const types = events.map((event) => event.eventType);
   expect(types).toEqual(

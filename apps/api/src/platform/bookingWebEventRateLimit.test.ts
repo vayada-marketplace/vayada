@@ -53,6 +53,27 @@ describe("Booking Web funnel event rate limit (VAY-2214)", () => {
     expect(limit(event("203.0.113.4", "s7", "hotel-b")).allowed).toBe(true);
   });
 
+  it("limits anonymous page views per address and hotel, with no session (VAY-2592)", () => {
+    const limit = createBookingWebEventRateLimit({ now: () => START, limits: small });
+    const view = (address: string, hotelSlug = "hotel-a") => ({
+      address,
+      sessionId: null,
+      hotelSlug,
+    });
+
+    // More than a session's limit from one address: page views have no session to count.
+    for (let index = 0; index < 3; index += 1)
+      expect(limit(view("203.0.113.1")).allowed).toBe(true);
+    expect(limit(view("203.0.113.1"))).toMatchObject({ allowed: false, scope: "address" });
+    expect(limit(view("203.0.113.2")).allowed).toBe(true);
+    expect(limit(view("203.0.113.3")).allowed).toBe(true);
+    expect(limit(view("203.0.113.4"))).toMatchObject({ allowed: false, scope: "hotel" });
+    // A consented event's session limit is unaffected by the page views before it.
+    expect(limit({ address: "203.0.113.9", sessionId: "s1", hotelSlug: "hotel-b" }).allowed).toBe(
+      true,
+    );
+  });
+
   it("caps all events, then starts a fresh window each minute", () => {
     let at = START;
     const limit = createBookingWebEventRateLimit({ now: () => at, limits: small });

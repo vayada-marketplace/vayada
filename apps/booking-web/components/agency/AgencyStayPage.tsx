@@ -21,7 +21,7 @@ import { useStayRooms, type StayRoomsModel } from "@/lib/hooks/useStayRooms";
 import { overviewHref, stayTypeName } from "@/lib/agencyOverview";
 import { calculateNights, ensureMinOneNight } from "@/lib/utils";
 import { hotelService } from "@/services/api/hotel";
-import { trackEvent } from "@/services/api/tracking";
+import { trackEvent, trackPageView } from "@/services/api/tracking";
 import { onAnalyticsAllowed } from "@/services/api/analyticsConsent";
 import { quoteMoneyAmount } from "@/services/api/replacementOffers";
 import { encodePick } from "@/lib/roomPicker";
@@ -89,6 +89,7 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
   // VAY-2462: the stay's funnel starts here, as on its own page (a session counts from its visit);
   // its events say they came through the agency's page. "Allow" starts a first visit then.
   useEffect(() => {
+    trackPageView(slug);
     trackEvent(slug, "page_visit", {});
     return onAnalyticsAllowed(slug, () => trackEvent(slug, "page_visit", {}));
   }, [slug]);

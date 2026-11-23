@@ -43,6 +43,25 @@ describe("Booking Web funnel event persistence", () => {
     expect(JSON.stringify(values)).not.toMatch(/hotel"|Safari|requestId|ipAddress|userAgent/);
   });
 
+  it("stores an anonymous page view with no session and no properties (VAY-2592)", async () => {
+    const sink = createPgBookingWebEventSink({ connectionString: "unused" });
+    await sink.recordTelemetryEvent({
+      ...event,
+      eventType: "page_view",
+      sessionId: null,
+      metadata: {},
+    });
+    const [, values] = query.mock.calls[0]! as [string, unknown[]];
+    expect(values).toEqual([
+      event.propertyId,
+      "page_view",
+      event.eventId,
+      null,
+      "{}",
+      event.occurredAt,
+    ]);
+  });
+
   it("stores nothing for bot traffic (VAY-2214)", async () => {
     const sink = createPgBookingWebEventSink({ connectionString: "unused" });
     await sink.recordTelemetryEvent({ ...event, userAgent: "Googlebot/2.1" });

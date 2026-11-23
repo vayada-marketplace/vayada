@@ -33,6 +33,14 @@ export type FunnelPaymentMethod = (typeof FUNNEL_PAYMENT_METHODS)[number];
  * the public endpoint stores nothing under another version, so a new consent text bumps it.
  * 2 (VAY-2213): the text names the hotel as responsible and links the privacy notice. */
 export const BOOKING_WEB_ANALYTICS_CONSENT_VERSION = 2;
+/**
+ * VAY-2592: one per booking page load, sent without asking the guest and without reading or
+ * writing anything on their device. It carries only the hotel's slug and this type; the API makes
+ * its id and keeps its time to the quarter hour. No session id, no consent fields, no properties.
+ * It counts page views and nothing else; the funnel keeps using consented `page_visit` events, so
+ * it is not a funnel event type.
+ */
+export const BOOKING_WEB_PAGE_VIEW_EVENT = "page_view";
 /** VAY-2462: where an event came from besides the stay's own booking page, the same for every
  * event type: its agency's page (`/stays/<slug>` on the agency's address). Absent otherwise. */
 export const FUNNEL_VIA = ["agency_page"] as const;
