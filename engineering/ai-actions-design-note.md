@@ -598,24 +598,31 @@ write can not escape a delegation narrowed to fewer properties). Beside the read
 - `body`: what the AI may send; the AI's input is one strict object of path parameters and these
   body fields, so the route's other fields (a room's number on the room update) stay out of reach;
 - `idempotency`: where the route reads its retry key, the `Idempotency-Key` header or body fields
-  (notes and room blocks take `commandId` and `idempotencyKey`); the executor fills it, and the AI
-  can never send it;
-- `preconditions`: body fields the route compares with the current state (expected versions); a
-  change to something that exists must have one;
+  (notes and room blocks take `commandId` and `idempotencyKey`); the executor fills it, bound to the
+  action (`<key>:<action name>`), and the AI can never send it;
+- `preconditions`: body fields the route compares with the current state (expected versions); only
+  a change declared `addsNew` (a note, a new block) has none. No read action returns these versions
+  yet: VAY-2524 decides who fills them (captured when the Ask-first card is shown, so the person's
+  Yes binds to what they saw) and the reads that expose them come with their batch;
 - `authoritySites`: every rights check inside the transaction, from
   [`authoritySites.ts`](../apps/api/src/ai/actions/authoritySites.ts); only checks that already take
   the AI's limits may be listed, so a change through any other can not be registered;
+- `permission` and `alsoNeeds`: every key the route checks;
 - `group: "ask"`: every AI change asks first until Undo exists (plan row 39).
 
 `changeRequest(action, input, key)` builds the one request a change makes; the executor (VAY-2524)
-sends it with the user's change delegation. The first batch (plan row 50): `booking_note_add`,
-`room_block_create`, `room_block_release`, `room_status_set`, `thread_mark_done`,
-`thread_follow_up`, `thread_reopen`. Their routes are on the delegation gate, but no surface offers
-them until the executor exists (the registry refuses one), and only the executor can mint a
-delegation that writes. `changeSafety.test.ts` runs each through its real route and the default gate:
-the owner's change delegation runs it with the AI's limits reaching the command's own check; a read
-delegation, a property outside the delegation, an assigned-only member on another property, another
-account and a user without the route's permission are refused.
+sends it with the user's change delegation. On the server, the delegation gate lets an AI write
+reach only a change's route, and the app then holds every delegated write to that change before the
+route runs (`delegatedWriteProblem`, a `preValidation` hook): no query, no field the change does not
+let the AI send, the retry key bound to the change and, for body keys, the request's own.
+
+The first batch (plan row 50): `booking_note_add`, `room_block_create`, `room_block_release`,
+`room_status_set`, `thread_mark_done`, `thread_follow_up`, `thread_reopen`. No surface offers them
+until the executor exists (the registry refuses one), and only the executor can mint a delegation
+that writes. `changeSafety.test.ts` runs each through its real route and the default gate: the owner's
+change delegation runs it with the AI's limits reaching the command's own check; a read delegation, a
+property outside the delegation, an assigned-only member on another property, another account, a user
+without one of the route's keys and a request that is not exactly the change are refused.
 
 ### 5.5 MCP connections
 

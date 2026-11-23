@@ -5,11 +5,13 @@ import { z } from "zod";
 import { AUTHORITY_SITES } from "./authoritySites.js";
 import { changeRequest, defineChangeAction } from "./defineChangeAction.js";
 import { ActionDefinitionError } from "./defineRouteAction.js";
+import { ROUTE_MANIFEST } from "../routeManifest.generated.js";
 import {
   AI_ACTIONS,
   aiActionRouteGate,
   assertChangeRegistry,
   CHANGE_ACTIONS,
+  delegatedWriteProblem,
   findChangeAction,
 } from "./registry.js";
 import { roomStatusSet } from "./roomStatusSet.js";
@@ -17,6 +19,8 @@ import { roomStatusSet } from "./roomStatusSet.js";
 const PROPERTY = "cccccccc-0000-4000-8000-000000000001";
 const BLOCK = "eeeeeeee-0000-4000-8000-000000000006";
 const KEY = "op_7d2f0c1e-1111-4222-8333-444455556666:1";
+const ROOM_TYPE = "eeeeeeee-0000-4000-8000-000000000002";
+const ROOM = "eeeeeeee-0000-4000-8000-000000000003";
 
 const base = {
   name: "test_release",
@@ -71,6 +75,27 @@ describe("defineChangeAction (VAY-2522)", () => {
     ["a body retry key without fields", { idempotency: { in: "body", fields: [] } }],
     ["a precondition that is not a body field", { preconditions: ["version"] }],
     ["a change to something that exists without a precondition", { preconditions: [] }],
+    ["a precondition on something said to be new", { addsNew: true }],
+    [
+      "a rule across body fields, which the input would lose",
+      {
+        body: z
+          .strictObject({ expectedVersion: z.string() })
+          .refine((body) => body.expectedVersion !== "0"),
+      },
+    ],
+    [
+      "a retry key field the AI could send on a header-key route",
+      {
+        idempotency: { in: "header" },
+        body: z.strictObject({ expectedVersion: z.string(), commandId: z.string() }),
+      },
+    ],
+    [
+      "a field that reaches an object's prototype",
+      { body: z.strictObject({ expectedVersion: z.string(), constructor: z.string() }) },
+    ],
+    ["a redefined property id", { pathParams: { blockId: z.uuid(), propertyId: z.string() } }],
     ["a body that keeps unknown keys", { body: z.looseObject({ expectedVersion: z.string() }) }],
     [
       "a body with a record",
@@ -87,7 +112,7 @@ describe("defineChangeAction (VAY-2522)", () => {
     );
   });
 
-  it("lets a new thing (POST) have no precondition", () => {
+  it("lets a change that adds something new have no precondition", () => {
     expect(() =>
       defineChangeAction({
         ...base,
@@ -96,6 +121,7 @@ describe("defineChangeAction (VAY-2522)", () => {
         pathParams: { guestBookingId: z.uuid() },
         body: z.strictObject({ body: z.string() }),
         preconditions: [],
+        addsNew: true,
       }),
     ).not.toThrow();
   });
@@ -116,7 +142,7 @@ describe("defineChangeAction (VAY-2522)", () => {
 });
 
 describe("changeRequest (VAY-2522)", () => {
-  it("puts the retry key where the route reads it", () => {
+  it("puts the retry key, bound to the action, where the route reads it", () => {
     const release = defineChangeAction(base);
     expect(
       changeRequest(release, { propertyId: PROPERTY, blockId: BLOCK, expectedVersion: "3" }, KEY),
@@ -126,8 +152,12 @@ describe("changeRequest (VAY-2522)", () => {
         method: "DELETE",
         routeUrl: "/api/pms/properties/:propertyId/room-blocks/:blockId",
         url: `/api/pms/properties/${PROPERTY}/room-blocks/${BLOCK}`,
-        body: { expectedVersion: "3", commandId: KEY, idempotencyKey: KEY },
-        idempotencyKey: KEY,
+        body: {
+          expectedVersion: "3",
+          commandId: `${KEY}:test_release`,
+          idempotencyKey: `${KEY}:test_release`,
+        },
+        idempotencyKey: `${KEY}:test_release`,
       },
     });
     const roomType = "eeeeeeee-0000-4000-8000-000000000002";
@@ -149,7 +179,7 @@ describe("changeRequest (VAY-2522)", () => {
       request: {
         method: "PUT",
         body: { expectedRevision: 2, changes: { status: "out_of_order" } },
-        idempotencyKey: KEY,
+        idempotencyKey: `${KEY}:room_status_set`,
       },
     });
   });
@@ -194,6 +224,21 @@ describe("the change registry (VAY-2522)", () => {
     ).toBe(false);
   });
 
+  it("lets the AI reach exactly the routes of registered actions, nothing else", () => {
+    const reachable = ROUTE_MANIFEST.filter((route) => {
+      const space = route.indexOf(" ");
+      return aiActionRouteGate.allowsRoute(route.slice(0, space), route.slice(space + 1));
+    });
+    expect(reachable.sort()).toEqual(
+      [...AI_ACTIONS, ...CHANGE_ACTIONS].map((action) => action.route).sort(),
+    );
+    expect(reachable).toHaveLength(10);
+  });
+
+  it("registers only changes defineChangeAction made", () => {
+    expect(() => assertChangeRegistry([{ ...roomStatusSet }], [])).toThrow(/defineChangeAction/);
+  });
+
   it("offers no change on any surface until Ask first exists (VAY-2524)", () => {
     expect(CHANGE_ACTIONS.filter((action) => action.surfaces.length > 0)).toEqual([]);
     const offered = defineChangeAction({ ...base, surfaces: ["in_app"] });
@@ -201,7 +246,7 @@ describe("the change registry (VAY-2522)", () => {
   });
 
   it("refuses a change whose name a read action already has", () => {
-    const clash = defineChangeAction({ ...base, name: AI_ACTIONS[0]!.name });
+    const clash = defineChangeAction({ ...base, name: AI_ACTIONS[0]!.name, version: 2 });
     expect(() => assertChangeRegistry([clash], AI_ACTIONS)).toThrow(/two versions/);
   });
 
@@ -211,5 +256,62 @@ describe("the change registry (VAY-2522)", () => {
       route: "PATCH /api/pms/properties/:propertyId/room-blocks/:blockId",
     });
     expect(() => assertChangeRegistry([edit], [])).toThrow(/later/);
+  });
+});
+
+describe("delegatedWriteProblem: a delegated write is held to its change (VAY-2522)", () => {
+  const key = `${KEY}:room_status_set`;
+  const write = (overrides: Record<string, unknown> = {}) => ({
+    method: "PUT",
+    routeUrl: roomStatusSet.routeUrl,
+    params: { propertyId: PROPERTY, roomTypeId: ROOM_TYPE, roomUnitId: ROOM },
+    query: {},
+    body: { expectedRevision: 2, changes: { status: "maintenance" } },
+    idempotencyKey: key,
+    ...overrides,
+  });
+
+  it("lets through exactly what the change lets the AI send", () => {
+    expect(delegatedWriteProblem(write())).toBeNull();
+  });
+
+  it.each([
+    ["another route", { routeUrl: "/api/pms/properties/:propertyId/room-blocks/:blockId" }],
+    ["another method on the route", { method: "DELETE" }],
+    ["the room's number", { body: { expectedRevision: 2, changes: { operationalLabel: "9" } } }],
+    [
+      "the room's floor next to its state",
+      { body: { expectedRevision: 2, changes: { status: "maintenance", floor: "3" } } },
+    ],
+    [
+      "a field of its own",
+      { body: { expectedRevision: 2, changes: { status: "maintenance" }, extra: 1 } },
+    ],
+    ["a body field for a path parameter", { body: { expectedRevision: 2, propertyId: PROPERTY } }],
+    ["a query", { query: { force: "1" } }],
+    ["no retry key", { idempotencyKey: undefined }],
+    ["a retry key of another change", { idempotencyKey: `${KEY}:room_block_release` }],
+    ["a body that is not an object", { body: [1] }],
+  ])("refuses %s", (_label, overrides) => {
+    expect(delegatedWriteProblem(write(overrides))).not.toBeNull();
+  });
+
+  it("holds a body retry key to the request's own", () => {
+    const release = `${KEY}:room_block_release`;
+    const body = { expectedVersion: "room-block-v2", commandId: release, idempotencyKey: release };
+    const blockWrite = {
+      method: "DELETE",
+      routeUrl: "/api/pms/properties/:propertyId/room-blocks/:blockId",
+      params: { propertyId: PROPERTY, blockId: BLOCK },
+      query: {},
+      body,
+      idempotencyKey: release,
+    };
+    expect(delegatedWriteProblem(blockWrite)).toBeNull();
+    expect(delegatedWriteProblem({ ...blockWrite, body: { ...body, commandId: "other" } })).toMatch(
+      /retry key/,
+    );
+    const withoutKey = { expectedVersion: body.expectedVersion, commandId: release };
+    expect(delegatedWriteProblem({ ...blockWrite, body: withoutKey })).toMatch(/retry key/);
   });
 });

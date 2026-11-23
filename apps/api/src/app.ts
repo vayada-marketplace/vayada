@@ -90,7 +90,7 @@ import type {
   BookingSettingsWriteRepository,
 } from "./routes/bookingSettings.js";
 import type { BookingPublicationRefreshPort } from "./domains/bookingPublicationProductionRuntime.js";
-import { aiActionRouteGate } from "./ai/actions/registry.js";
+import { aiActionRouteGate, delegatedWriteProblem } from "./ai/actions/registry.js";
 import { registerAiHotelRoutes } from "./routes/aiHotels.js";
 import { registerAiActivityRoutes } from "./routes/aiActivity.js";
 import type { AiActivityStore } from "./ai/actionLog/aiActivity.js";
@@ -598,6 +598,25 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
         entitlementRepository,
         propertyAccessRepository,
       ),
+    });
+    // The gate lets an AI write reach the route of an AI change; this holds the request itself to
+    // that change, so the AI never reaches the route's other fields (VAY-2522).
+    app.addHook("preValidation", async (request, reply) => {
+      if (!request.authContext?.delegation || request.method === "GET") return;
+      const header = request.headers["idempotency-key"];
+      const problem = delegatedWriteProblem({
+        method: request.method,
+        routeUrl: request.routeOptions.url,
+        params: request.params,
+        query: request.query,
+        body: request.body,
+        idempotencyKey: typeof header === "string" ? header : undefined,
+      });
+      if (problem) {
+        return reply
+          .status(403)
+          .send({ code: "delegation_refused", message: `Delegated request refused: ${problem}.` });
+      }
     });
   }
 

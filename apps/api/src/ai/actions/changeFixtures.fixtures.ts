@@ -1,7 +1,6 @@
 // Fake storage for every registered AI change (VAY-2522): the real routes run on it, as the
 // world's delegated users (actionTestWorld.fixtures.ts). Each records the commands its route
 // hands to storage, and plants FORBIDDEN in every answer field the change's allow-list drops.
-import type { PermissionKey } from "@vayada/backend-auth";
 import type { ManagePhysicalRoomCommand } from "@vayada/domain-pms";
 
 import type { buildApp } from "../../app.js";
@@ -19,8 +18,6 @@ export type ChangeFixture = {
   appOptions: () => Partial<AppOptions>;
   /** The AI's input for a property. */
   input: (propertyId: string) => Record<string, unknown>;
-  /** Permissions the route needs besides the change's own key. */
-  alsoNeeds?: readonly PermissionKey[];
   /** The commands the route handed to storage so far. */
   commands: () => readonly unknown[];
   /** For a command that carries the AI's limits to its own rights check: the last one's. */
@@ -131,7 +128,6 @@ const threadFixture = (action: string, extra: Record<string, unknown> = {}): Cha
   action,
   appOptions: () => ({ ...pmsRoutes(), pmsInboxTriagePort: triagePort }),
   input: (propertyId) => ({ propertyId, threadId: THREAD, expectedThreadVersion: 4, ...extra }),
-  alsoNeeds: ["pms.inbox.read"],
   commands: () => triageInputs,
   narrowing: () => triageInputs.at(-1)?.narrowing,
 });

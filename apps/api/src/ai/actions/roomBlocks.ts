@@ -46,14 +46,15 @@ export const roomBlockCreate = defineChangeAction({
     reason: z.string().trim().max(500).optional(),
   }),
   preconditions: [],
+  addsNew: true,
 });
 
 export const roomBlockRelease = defineChangeAction({
   ...shared,
   name: "room_block_release",
   description:
-    "Releases one room block of a property, so its rooms can be booked again. Send the block's " +
-    "current version. The person confirms it in vayada before it runs.",
+    "Releases one room block of a property, so its rooms can be booked again. The person " +
+    "confirms it in vayada before it runs.",
   route: "DELETE /api/pms/properties/:propertyId/room-blocks/:blockId",
   pathParams: { blockId: z.uuid() },
   body: z.strictObject({ expectedVersion: z.string().min(1).max(100) }),

@@ -15,6 +15,7 @@ export const bookingNoteAdd = defineChangeAction({
   // The route takes its retry key from the body; a new note has nothing to compare.
   idempotency: { in: "body", fields: ["commandId", "idempotencyKey"] },
   preconditions: [],
+  addsNew: true,
   authoritySites: [],
   group: "ask",
   permission: "pms.reservation.update",

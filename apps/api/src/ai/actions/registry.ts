@@ -11,7 +11,7 @@ import { classifyRoute } from "../routeClassification.js";
 import { ROUTE_MANIFEST } from "../routeManifest.generated.js";
 import { bookingNoteAdd } from "./bookingNoteAdd.js";
 import { calendarDays } from "./calendarDays.js";
-import type { ChangeAction } from "./defineChangeAction.js";
+import { isDefinedChangeAction, type ChangeAction } from "./defineChangeAction.js";
 import type { AiSurface, RouteAction } from "./defineRouteAction.js";
 import { propertiesList } from "./propertiesList.js";
 import { roomBlockCreate, roomBlockRelease } from "./roomBlocks.js";
@@ -44,6 +44,7 @@ const ACTION_ROUTES = new Set<string>(
 );
 const BY_KEY = new Map(AI_ACTIONS.map((action) => [action.key, action]));
 const CHANGE_BY_KEY = new Map(CHANGE_ACTIONS.map((action) => [action.key, action]));
+const CHANGE_BY_ROUTE = new Map(CHANGE_ACTIONS.map((action) => [action.route, action]));
 
 /**
  * The auth plugin's delegation gate: an AI may run exactly the routes of registered actions. A
@@ -59,6 +60,60 @@ export function findAction(key: string): RouteAction | undefined {
 
 export function findChangeAction(key: string): ChangeAction | undefined {
   return CHANGE_BY_KEY.get(key);
+}
+
+export type DelegatedWrite = {
+  method: string;
+  /** The route template Fastify matched. */
+  routeUrl: string | undefined;
+  params: unknown;
+  query: unknown;
+  body: unknown;
+  /** The request's one Idempotency-Key header. */
+  idempotencyKey: string | undefined;
+};
+
+/**
+ * Why a delegated write is not one the AI may make, or null. The app runs this on every
+ * delegated write before the route does (VAY-2522 review M1): the gate allows a route, and this
+ * holds the request to its change action, so the AI never reaches the route's other fields (a
+ * room's number on the room update) and every retry key belongs to the action it serves.
+ */
+export function delegatedWriteProblem(write: DelegatedWrite): string | null {
+  const action = CHANGE_BY_ROUTE.get(`${write.method} ${write.routeUrl}`);
+  if (!action) return "not the route of an AI change";
+  if (!isPlainObject(write.query) || Object.keys(write.query).length > 0) {
+    return "an AI change sends no query";
+  }
+  if (!isPlainObject(write.params) || !isPlainObject(write.body)) return "the request is malformed";
+  const key = write.idempotencyKey;
+  // changeRequest binds the executor's key to the action (routeIdempotencyKey).
+  if (!key?.endsWith(`:${action.name}`)) return "the retry key is not this change's";
+  const keyFields: readonly string[] =
+    action.idempotency.in === "body" ? action.idempotency.fields : [];
+  const input: Record<string, unknown> = { ...write.params };
+  for (const [field, value] of Object.entries(write.body)) {
+    if (keyFields.includes(field)) continue;
+    if (Object.hasOwn(input, field)) return "a body field stands in for a path parameter";
+    input[field] = value;
+  }
+  // The retry key goes only where the route reads it, and it is the request's own.
+  for (const field of keyFields) {
+    if (write.body[field] !== key) return "the retry key in the body is not the request's";
+  }
+  if (!action.input.safeParse(input).success) {
+    return "the request is not what this change lets the AI send";
+  }
+  return null;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    [Object.prototype, null].includes(Object.getPrototypeOf(value))
+  );
 }
 
 /** The surface a delegated context runs on, from its delegation (never from the caller). */
@@ -114,6 +169,9 @@ export function assertChangeRegistry(
 ): readonly ChangeAction[] {
   assertActionList([...readActions, ...actions]);
   for (const action of actions) {
+    if (!isDefinedChangeAction(action)) {
+      throw new Error(`AI change ${action.key} was not made by defineChangeAction`);
+    }
     if (action.surfaces.length > 0) {
       throw new Error(`AI change ${action.key} has a surface before Ask first exists (VAY-2524)`);
     }

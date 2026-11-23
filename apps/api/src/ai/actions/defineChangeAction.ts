@@ -23,7 +23,8 @@ import {
 export type ChangeMethod = "POST" | "PUT" | "PATCH" | "DELETE";
 const CHANGE_METHODS: ReadonlySet<string> = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
-/** Where the route reads its retry key. The executor fills it (operation id and step). */
+/** Where the route reads its retry key. The executor fills it (operation id and step); the AI
+ * never does. */
 export type ChangeIdempotency =
   | { in: "header" }
   /** Body fields the route reads the key from; the AI never sends them. */
@@ -44,16 +45,21 @@ export type ChangeActionDefinition<Output extends z.ZodType = z.ZodType> = {
   idempotency: ChangeIdempotency;
   /**
    * Body fields the route compares with the current state (expected versions), so a change a
-   * person made in the meantime is refused, not overwritten (VAY-2524). Empty only for a change
-   * that adds something new.
+   * person made in the meantime is refused, not overwritten. Who fills them, and from which read,
+   * is the executor's (VAY-2524). Empty only with `addsNew`.
    */
   preconditions: readonly string[];
+  /** The change only adds something new (a note, a block), so it has no state to compare. */
+  addsNew?: true;
   /** Every rights check inside the transaction (AUTHORITY_SITES); [] if the route's is the only one. */
   authoritySites: readonly AuthoritySite[];
   /** Every AI change asks first until Undo exists (plan row 39). */
   group: "ask";
   /** The permission key the route checks (proven by the generated change tests). */
   permission: PermissionKey;
+  /** Other keys the route also checks (proven the same way), so nothing offers it to a user the
+   * route refuses. */
+  alsoNeeds?: readonly PermissionKey[];
   /** The allow-list of the route's answer the AI gets back. */
   output: Output;
   /** Empty until the executor of AI changes and its surfaces exist (the registry checks). */
@@ -78,7 +84,26 @@ export type ChangeAction<Output extends z.ZodType = z.ZodType> = Readonly<
   }
 >;
 
-type ZodObjectDef = { type: string; shape?: Record<string, z.ZodType>; catchall?: z.ZodType };
+type ZodObjectDef = {
+  type: string;
+  shape?: Record<string, z.ZodType>;
+  catchall?: z.ZodType;
+  checks?: readonly unknown[];
+};
+/** Names the executor sets (retry keys) or that could reach an object's prototype. */
+const RESERVED_FIELDS = new Set([
+  "commandId",
+  "idempotencyKey",
+  "__proto__",
+  "constructor",
+  "prototype",
+]);
+/** Only change actions this module built may be registered (VAY-2522 review). */
+const defined = new WeakSet<object>();
+
+export function isDefinedChangeAction(action: object): boolean {
+  return defined.has(action);
+}
 const defOf = (schema: z.ZodType): ZodObjectDef =>
   (schema as unknown as { _zod: { def: ZodObjectDef } })._zod.def;
 
@@ -90,6 +115,11 @@ export function defineChangeAction<Output extends z.ZodType>(
 
   const [method, routeUrl] = splitRouteKey(definition.route);
   if (!CHANGE_METHODS.has(method)) fail("a change action needs a write route");
+  for (const name of ["propertyId", "hotelId"]) {
+    if (definition.pathParams && Object.hasOwn(definition.pathParams, name)) {
+      fail(`${name} is always a UUID; it can't be redefined`);
+    }
+  }
   const { pathParamNames, shape } = pathParamsShape(routeUrl, definition.pathParams, fail);
   // Account-wide writes would escape a delegation narrowed to some properties (VAY-2522).
   if (!pathParamNames.includes("propertyId")) fail("a change works on one property (:propertyId)");
@@ -98,9 +128,12 @@ export function defineChangeAction<Output extends z.ZodType>(
   // every value is spelled out (no unknown, record, loose object or transform).
   const body = defOf(definition.body);
   if (body.type !== "object") fail("the body must be an object");
+  // The input is rebuilt from the fields alone, so a rule on the whole body would be lost.
+  if (body.checks?.length) fail("the body may have no rule across its fields");
   assertAllowList(definition.body, key, "body");
   const bodyFields = Object.keys(body.shape ?? {});
   for (const field of bodyFields) {
+    if (RESERVED_FIELDS.has(field)) fail(`the AI may not send ${field}`);
     if (Object.hasOwn(shape, field)) fail(`body field ${field} clashes with a path parameter`);
     shape[field] = body.shape![field]!;
   }
@@ -118,8 +151,10 @@ export function defineChangeAction<Output extends z.ZodType>(
   for (const field of definition.preconditions) {
     if (!bodyFields.includes(field)) fail(`precondition ${field} is not a body field`);
   }
-  if (method !== "POST" && definition.preconditions.length === 0) {
-    fail("a change to something that exists needs a precondition");
+  // A change to something that exists must refuse a state it did not see; only "adds new" has
+  // nothing to compare.
+  if ((definition.preconditions.length === 0) !== (definition.addsNew === true)) {
+    fail("preconditions are needed unless, and only unless, it adds something new");
   }
 
   const sites = new Set<string>();
@@ -139,7 +174,7 @@ export function defineChangeAction<Output extends z.ZodType>(
     assertMcpSafeSlice(definition.output, key, definition.mcpReviewedFields ?? {});
   }
 
-  return Object.freeze({
+  const action = Object.freeze({
     ...definition,
     description,
     key,
@@ -149,6 +184,16 @@ export function defineChangeAction<Output extends z.ZodType>(
     bodyFields,
     input: z.strictObject(shape) as unknown as z.ZodType<Record<string, unknown>>,
   });
+  defined.add(action);
+  return action;
+}
+
+/**
+ * The retry key the route sees: the executor's key (operation id and step) bound to the action,
+ * so one key can never serve two different changes (VAY-2522 review L3).
+ */
+export function routeIdempotencyKey(action: Pick<ChangeAction, "name">, key: string): string {
+  return `${key}:${action.name}`;
 }
 
 export type ChangeRequest = {
@@ -182,8 +227,9 @@ export function changeRequest(
   for (const field of action.bodyFields) {
     if (parsed.data[field] !== undefined) body[field] = parsed.data[field];
   }
+  const routeKey = routeIdempotencyKey(action, idempotencyKey);
   if (action.idempotency.in === "body") {
-    for (const field of action.idempotency.fields) body[field] = idempotencyKey;
+    for (const field of action.idempotency.fields) body[field] = routeKey;
   }
   return {
     ok: true,
@@ -192,7 +238,7 @@ export function changeRequest(
       routeUrl: action.routeUrl,
       url: fillRouteTemplate(action.routeUrl, params),
       body,
-      idempotencyKey,
+      idempotencyKey: routeKey,
     },
   };
 }

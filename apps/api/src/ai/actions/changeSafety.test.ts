@@ -1,10 +1,12 @@
 // Refusal tests generated for every registered AI change (VAY-2522). Each change runs through its
 // real route, the app's default delegation gate, the real auth plugin and authorization resolver,
 // as a real delegated user of the test world, on the fake storage of its fixture:
-//   - the owner's change delegation runs it, and only the allow-listed answer comes back;
+//   - the owner's change delegation runs it, and only the allow-listed answer comes back; an
+//     assigned-only member runs it on their own property;
 //   - a command that carries the AI's limits to its own rights check gets them, narrowed;
 //   - refused: a read delegation, a property outside the delegation, an assigned-only member on
-//     another property, another hotel account, a user without the route's permission;
+//     another property, another hotel account, a user without one of the route's permissions;
+//   - the app holds the request itself to the change: no other field, no foreign retry key;
 //   - the AI's input is checked first, and the AI never sets the retry key.
 // The rights checks inside the transaction are tested on PostgreSQL in their domains
 // (pmsInboxTriageCommand, pmsPhysicalRoomManagementRepository, pmsOperatingCalendarRoomRefresh).
@@ -75,13 +77,20 @@ describe("every registered AI change has a fixture (VAY-2522)", () => {
       CHANGE_ACTIONS.map((a) => a.key).sort(),
     );
   });
+
+  it("checks that the AI's limits reach every change that lists a rights check", () => {
+    for (const fixture of CHANGE_FIXTURES) {
+      const action = CHANGE_ACTIONS.find((candidate) => candidate.key === fixture.action)!;
+      expect(Boolean(fixture.narrowing), action.key).toBe(action.authoritySites.length > 0);
+    }
+  });
 });
 
 describe.each(CHANGE_FIXTURES.map((fixture) => [fixture.action, fixture] as const))(
   "AI change %s",
   (key, fixture: ChangeFixture) => {
     const action: ChangeAction = CHANGE_ACTIONS.find((candidate) => candidate.key === key)!;
-    const granted: PermissionKey[] = [action.permission, ...(fixture.alsoNeeds ?? [])];
+    const granted: PermissionKey[] = [action.permission, ...(action.alsoNeeds ?? [])];
     // No `delegation` option: the app's own default gate (the registry) is what is tested.
     const withPermissions = (permissions: readonly PermissionKey[]) => {
       const app = buildApp({
@@ -103,6 +112,12 @@ describe.each(CHANGE_FIXTURES.map((fixture) => [fixture.action, fixture] as cons
       expectRouteRefusal(await response);
       expect(fixture.commands().length).toBe(before);
     };
+    const runsOnce = async (response: Promise<LightMyRequestResponse>) => {
+      const before = fixture.commands().length;
+      const done = await response;
+      expect(done.statusCode, done.body).toBeLessThan(300);
+      expect(fixture.commands().length).toBe(before + 1);
+    };
 
     it("runs for the owner's change delegation; only the allow-listed answer comes back", async () => {
       const before = fixture.commands().length;
@@ -117,17 +132,61 @@ describe.each(CHANGE_FIXTURES.map((fixture) => [fixture.action, fixture] as cons
       }
     });
 
+    it("runs for an assigned-only member on their own property", async () => {
+      await runsOnce(run(await changeContext(MEMBER, ORG_A, granted), P1));
+    });
+
     it.runIf(fixture.narrowing)(
       "hands the AI's limits to the command's own rights check",
       async () => {
-        await run(await changeContext(OWNER, ORG_A, granted), P1);
+        await runsOnce(run(await changeContext(OWNER, ORG_A, granted), P1));
         expect(fixture.narrowing!()).toEqual({ access: "change", propertyIds: [P1, P2] });
-        await run(await changeContext(OWNER, ORG_A, granted, [P2]), P2);
+        await runsOnce(run(await changeContext(OWNER, ORG_A, granted, [P2]), P2));
         expect(fixture.narrowing!()).toEqual({ access: "change", propertyIds: [P2] });
-        await run(await changeContext(MEMBER, ORG_A, granted), P1);
+        await runsOnce(run(await changeContext(MEMBER, ORG_A, granted), P1));
         expect(fixture.narrowing!()).toEqual({ access: "change", propertyIds: [P1] });
       },
     );
+
+    it("the app refuses a request that is not exactly the change", async () => {
+      const context = () => changeContext(OWNER, ORG_A, granted);
+      const built = changeRequest(action, fixture.input(P1), `op_${randomUUID()}:1`);
+      if (!built.ok) throw new Error(built.message);
+      const refused = async (request: typeof built.request) => {
+        const before = fixture.commands().length;
+        const response = await injectAsDelegate(app, { context: await context(), ...request });
+        expect(response.statusCode).toBe(403);
+        expect(response.json().code).toBe("delegation_refused");
+        expect(fixture.commands().length).toBe(before);
+      };
+      // A field the change does not let the AI send, also one the route itself would take.
+      await refused({ ...built.request, body: { ...built.request.body, smuggled: FORBIDDEN } });
+      // A retry key that is not bound to this change.
+      const loose = `op_${randomUUID()}:1`;
+      await refused({
+        ...built.request,
+        idempotencyKey: loose,
+        body:
+          action.idempotency.in === "body"
+            ? Object.fromEntries(
+                Object.entries(built.request.body).map(([field, value]) => [
+                  field,
+                  (action.idempotency as { fields: readonly string[] }).fields.includes(field)
+                    ? loose
+                    : value,
+                ]),
+              )
+            : built.request.body,
+      });
+      if (action.idempotency.in === "body") {
+        // The body's retry key must be the request's own.
+        const field = action.idempotency.fields[0]!;
+        await refused({
+          ...built.request,
+          body: { ...built.request.body, [field]: "other-key-1" },
+        });
+      }
+    });
 
     it("refuses a read delegation: only the executor's may write", async () => {
       const before = fixture.commands().length;
@@ -168,13 +227,14 @@ describe.each(CHANGE_FIXTURES.map((fixture) => [fixture.action, fixture] as cons
         ok: false,
       });
       const built = changeRequest(action, input, key);
-      expect(built).toMatchObject({ ok: true, request: { idempotencyKey: key } });
+      const routeKey = `${key}:${action.name}`;
+      expect(built).toMatchObject({ ok: true, request: { idempotencyKey: routeKey } });
       if (action.idempotency.in === "body") {
         for (const field of action.idempotency.fields) {
           expect(changeRequest(action, { ...input, [field]: "mine" }, key)).toMatchObject({
             ok: false,
           });
-          expect(built.ok && built.request.body[field]).toBe(key);
+          expect(built.ok && built.request.body[field]).toBe(routeKey);
         }
       }
     });
