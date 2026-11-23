@@ -139,7 +139,7 @@
       "availabilityUnavailableTooltip": "Ketersediaan tidak dapat dimuat"
     },
     "choice": {
-      "freeCancellation": "Pembatalan gratis",
+      "freeCancellation": "Tarif fleksibel",
       "nonRefundable": "Tidak dapat dikembalikan",
       "partialRefund": "Pengembalian sebagian",
       "mealNonRefundable": "{meal}, tidak dapat dikembalikan",
@@ -147,8 +147,8 @@
       "freeUntil": "Pembatalan gratis hingga {date}, 23.59 (waktu setempat)",
       "noRefund": "Tidak ada pengembalian dana jika Anda membatalkan atau tidak datang",
       "partialRefundTerms": "Jika Anda membatalkan, kami mengembalikan sebagian harga. Lihat ketentuan kami di langkah berikutnya",
-      "windowPassed": "Pembatalan gratis berakhir {days} hari sebelum kedatangan. Untuk tanggal ini, tidak ada pengembalian dana jika Anda membatalkan atau tidak datang",
-      "refundsPassed": "Pengembalian dana berakhir {days} hari sebelum kedatangan. Untuk tanggal ini, tidak ada pengembalian dana jika Anda membatalkan atau tidak datang",
+      "windowPassed": "Tidak ada pembatalan gratis untuk tanggal ini",
+      "refundsPassed": "Tidak ada pengembalian dana untuk tanggal ini",
       "freeEnded": "Pembatalan gratis sudah berakhir",
       "refundsEnded": "Tidak ada pengembalian dana lagi",
       "meal": {
@@ -592,7 +592,7 @@
       "freeEnded": "Pembatalan gratis berakhir pada {date}.",
       "noRefund": "Pengembalian dana berakhir pada {date}.",
       "nonRefundable": "Tidak dapat dikembalikan.",
-      "lateBooking": "Tidak dapat dikembalikan: dipesan kurang dari {days} sebelum kedatangan.",
+      "lateBooking": "Tidak ada pembatalan gratis: dipesan kurang dari {days} sebelum kedatangan.",
       "days": "{count} hari",
       "payFull": "Jika Anda membatalkan atau tidak datang, Anda membayar jumlah penuh ({amount}).",
       "beforeAccept": "Gratis ditarik sampai kami menjawab.",
@@ -615,7 +615,8 @@
         "refundsUntil": "{rooms}: pengembalian dana hingga akhir {date}.",
         "freeEnded": "{rooms}: pembatalan gratis telah berakhir.",
         "noRefund": "{rooms}: tidak ada pengembalian dana lagi.",
-        "nonRefundable": "{rooms}: tidak dapat dikembalikan."
+        "nonRefundable": "{rooms}: tidak dapat dikembalikan.",
+        "lateBooking": "{rooms}: tidak ada pembatalan gratis."
       }
     },
     "extras": {

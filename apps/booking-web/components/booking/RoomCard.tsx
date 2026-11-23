@@ -192,7 +192,7 @@ export default function RoomCard({
   });
   // A choice whose free cancellation (or last refund step, VAY-2406) has passed is hidden while
   // another choice of the same meal isn't ruled out (old VAY-370 rule, also while prices load);
-  // otherwise it stays, named non-refundable with the reason.
+  // otherwise it stays, under its own name with a short note (VAY-2587).
   const shown = all
     .filter(
       (choice) =>

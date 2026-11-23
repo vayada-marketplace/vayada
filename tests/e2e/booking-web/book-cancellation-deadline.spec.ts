@@ -69,6 +69,10 @@ for (const width of [1440, 390]) {
     );
     await expect(before).not.toContainText("Free cancellation ended");
     await expect(before).toContainText("All times are local hotel time (Switzerland).");
+    // VAY-2587: the rate is still the Flexible rate, and the summary says so.
+    await expect(page.getByRole("complementary", { name: "Your stay" })).toContainText(
+      /Flexible rate · 2 adults/i,
+    );
     // The consent says it first.
     await expect(
       page.getByRole("checkbox", {
@@ -134,7 +138,14 @@ async function openDetails(
           {
             roomTypeId: "double",
             name: "Double",
-            offers: [{ publicOfferKey: offerKey, currency: "EUR", mealPlan: "room_only" }],
+            offers: [
+              {
+                publicOfferKey: offerKey,
+                currency: "EUR",
+                mealPlan: "room_only",
+                cancellation: { kind: "free_until_days_before_arrival", days: stay.freeDays },
+              },
+            ],
           },
         ],
       },

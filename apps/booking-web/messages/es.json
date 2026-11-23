@@ -139,7 +139,7 @@
       "availabilityUnavailableTooltip": "No se puede consultar la disponibilidad"
     },
     "choice": {
-      "freeCancellation": "Cancelación gratuita",
+      "freeCancellation": "Tarifa flexible",
       "nonRefundable": "No reembolsable",
       "partialRefund": "Reembolso parcial",
       "mealNonRefundable": "{meal}, no reembolsable",
@@ -147,8 +147,8 @@
       "freeUntil": "Cancelación gratuita hasta el {date}, 23:59 (hora local)",
       "noRefund": "Sin reembolso si cancela o no se presenta",
       "partialRefundTerms": "Si cancela, le devolvemos parte del precio. Verá nuestras condiciones en el siguiente paso",
-      "windowPassed": "La cancelación gratuita termina {days, plural, one {# día} other {# días}} antes de la llegada. Para estas fechas, no hay reembolso si cancela o no se presenta",
-      "refundsPassed": "Los reembolsos terminan {days, plural, one {# día} other {# días}} antes de la llegada. Para estas fechas, no hay reembolso si cancela o no se presenta",
+      "windowPassed": "Sin cancelación gratuita para estas fechas",
+      "refundsPassed": "Sin reembolso para estas fechas",
       "freeEnded": "La cancelación gratuita ha terminado",
       "refundsEnded": "Ya no hay reembolso",
       "meal": {
@@ -592,7 +592,7 @@
       "freeEnded": "La cancelación gratuita terminó el {date}.",
       "noRefund": "Los reembolsos terminaron el {date}.",
       "nonRefundable": "No reembolsable.",
-      "lateBooking": "No reembolsable: reservada con menos de {days} de antelación a la llegada.",
+      "lateBooking": "Sin cancelación gratuita: reservada con menos de {days} de antelación a la llegada.",
       "days": "{count, plural, one {# día} other {# días}}",
       "payFull": "Si cancelas o no te presentas, pagas el importe total ({amount}).",
       "beforeAccept": "Puedes retirarla gratis hasta que respondamos.",
@@ -615,7 +615,8 @@
         "refundsUntil": "{rooms}: reembolso hasta el final del {date}.",
         "freeEnded": "{rooms}: la cancelación gratuita ha terminado.",
         "noRefund": "{rooms}: ya no hay reembolso.",
-        "nonRefundable": "{rooms}: no reembolsable."
+        "nonRefundable": "{rooms}: no reembolsable.",
+        "lateBooking": "{rooms}: sin cancelación gratuita."
       }
     },
     "extras": {

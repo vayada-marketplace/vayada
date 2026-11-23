@@ -54,7 +54,7 @@ export function headlineMinor(price: RoomPrice): string {
   return price.amountsMinor.reduce((low, amount) => (BigInt(amount) < BigInt(low) ? amount : low));
 }
 
-/** Option names, since the engine stores none: from the meal plan and the cancellation terms ("Free cancellation",
+/** Option names, since the engine stores none: from the meal plan and the cancellation terms ("Flexible rate",
  * "Breakfast included, non-refundable"), with the booking page's rule (VAY-2188). Without terms (still loading, or
  * failed) the meal plan and position name it. Later options with the same name are numbered. */
 export function optionNames(

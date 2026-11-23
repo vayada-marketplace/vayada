@@ -139,7 +139,7 @@
       "availabilityUnavailableTooltip": "Verfügbarkeit derzeit nicht abrufbar"
     },
     "choice": {
-      "freeCancellation": "Kostenlose Stornierung",
+      "freeCancellation": "Flexibler Tarif",
       "nonRefundable": "Nicht erstattbar",
       "partialRefund": "Teilerstattung",
       "mealNonRefundable": "{meal}, nicht erstattbar",
@@ -147,8 +147,8 @@
       "freeUntil": "Kostenlose Stornierung bis {date}, 23:59 Uhr (Ortszeit)",
       "noRefund": "Keine Erstattung bei Stornierung oder Nichterscheinen",
       "partialRefundTerms": "Bei Stornierung erstatten wir einen Teil des Preises. Unsere Bedingungen sehen Sie im nächsten Schritt",
-      "windowPassed": "Die kostenlose Stornierung endet {days, plural, one {# Tag} other {# Tage}} vor der Anreise. Für diese Daten gibt es keine Erstattung bei Stornierung oder Nichterscheinen",
-      "refundsPassed": "Erstattungen enden {days, plural, one {# Tag} other {# Tage}} vor der Anreise. Für diese Daten gibt es keine Erstattung bei Stornierung oder Nichterscheinen",
+      "windowPassed": "Keine kostenlose Stornierung für diese Daten",
+      "refundsPassed": "Keine Erstattung für diese Daten",
       "freeEnded": "Die kostenlose Stornierung ist abgelaufen",
       "refundsEnded": "Keine Erstattung mehr",
       "meal": {
@@ -593,7 +593,7 @@
       "freeEnded": "Die kostenlose Stornierung ist am {date} abgelaufen.",
       "noRefund": "Die Erstattung ist am {date} abgelaufen.",
       "nonRefundable": "Nicht erstattbar.",
-      "lateBooking": "Nicht erstattbar: weniger als {days} vor der Anreise gebucht.",
+      "lateBooking": "Keine kostenlose Stornierung: weniger als {days} vor der Anreise gebucht.",
       "days": "{count, plural, one {# Tag} other {# Tage}}",
       "payFull": "Wenn Sie stornieren oder nicht anreisen, zahlen Sie den Gesamtbetrag ({amount}).",
       "beforeAccept": "Bis wir antworten, können Sie kostenlos zurückziehen.",
@@ -616,7 +616,8 @@
         "refundsUntil": "{rooms}: Erstattung bis Ende {date}.",
         "freeEnded": "{rooms}: kostenlose Stornierung abgelaufen.",
         "noRefund": "{rooms}: keine Erstattung mehr.",
-        "nonRefundable": "{rooms}: nicht erstattbar."
+        "nonRefundable": "{rooms}: nicht erstattbar.",
+        "lateBooking": "{rooms}: keine kostenlose Stornierung."
       }
     },
     "extras": {
