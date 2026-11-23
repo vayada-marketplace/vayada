@@ -436,6 +436,26 @@ running with an expired lease --> resumed by the recovery job (same steps, same 
 - A Yes is refused, and the row closed, when the connection was revoked, the conversation closed
   or an AI kill switch is on.
 
+**Built (VAY-2524 PR1): the record.** `platform.ai_operations` (migration 0553) and its store
+([`apps/api/src/ai/executor/operationStore.ts`](../apps/api/src/ai/executor/operationStore.ts)):
+
+- **Business key:** a hash of the account, property, user, surface, connection or conversation, the
+  action and version, and the change's full checked arguments (keys sorted). A retried or regenerated
+  tool call with the same arguments gets the same operation for an hour while it is pending, running
+  or done; after a No, an expiry or a failure the same arguments ask again (a new card). This one rule
+  covers the per-action keys of plan 3.4.0 (a block's rooms and dates, a note's booking and text); an
+  action can get a narrower key when one needs it. Copies sent at once write one row (advisory lock
+  on the key).
+- **States** as above, enforced by the table's checks. `start` moves a pending change to running for
+  exactly one caller, under a lease; every other caller gets the row as it is and joins the run. Only
+  the lease holder renews, records a step (request id, key hash, status code: no answer text) or
+  finishes; the recovery job takes over a run whose lease ran out, once, and runs the same steps with
+  the same keys (`op_<id>:<step>`, bound to the action).
+- **Expiry** after 15 minutes closes a pending change (`expired`); No, revoke and AI switched off close
+  it with their reason.
+- **Retention:** 90 days (plan 3.6), by the AI retention worker; with the account, the property or the
+  user the rows go at once.
+
 ### 4.7 Ask first: the Yes/No
 
 The card is rendered by vayada from the stored operation: what will happen, to whom, the exact
