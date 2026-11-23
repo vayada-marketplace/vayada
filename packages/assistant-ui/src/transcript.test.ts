@@ -156,6 +156,88 @@ describe("transcriptOf", () => {
     expect(items[6]).toMatchObject({ turnId: "t3", status: "failed", reason: "allowance_used_up" });
   });
 
+  it("shows a change the AI asked for as vayada's card, in place of its progress line", () => {
+    const pendingActionId = "8f3c2a10-1b2c-4d5e-8f90-123456789abc";
+    const items = transcriptOf(
+      view(
+        [{ status: "waiting_for_answer" }],
+        [
+          { turnId: "t1", message: { role: "user", content: "Block room 12 from the 12th" } },
+          {
+            turnId: "t1",
+            message: {
+              role: "assistant",
+              content: [
+                { type: "text", text: "Room 12 is free, so I can block it." },
+                { type: "tool-call", toolCallId: "a", toolName: "calendar_days", input: {} },
+                { type: "tool-call", toolCallId: "b", toolName: "room_block_create", input: {} },
+              ],
+            },
+          },
+          {
+            turnId: "t1",
+            message: {
+              role: "tool",
+              content: [
+                {
+                  type: "tool-result",
+                  toolCallId: "a",
+                  toolName: "calendar_days",
+                  output: { type: "json", value: {} },
+                },
+                {
+                  type: "tool-result",
+                  toolCallId: "b",
+                  toolName: "room_block_create",
+                  output: { type: "json", value: { ok: true, pendingActionId, status: "pending" } },
+                },
+              ],
+            },
+          },
+        ],
+      ),
+    );
+    expect(items).toEqual([
+      { kind: "question", key: "q-1", text: "Block room 12 from the 12th" },
+      { kind: "progress", key: "t-a", tool: "calendar_days", status: "ok" },
+      { kind: "answer", key: "a-2", text: "Room 12 is free, so I can block it.", at: AT },
+      { kind: "change", key: `c-${pendingActionId}`, pendingActionId },
+    ]);
+  });
+
+  it("makes no card of a result that only looks like one", () => {
+    const items = transcriptOf(
+      view(
+        [{}],
+        [
+          { turnId: "t1", message: { role: "user", content: "Rooms?" } },
+          {
+            turnId: "t1",
+            message: {
+              role: "assistant",
+              content: [{ type: "tool-call", toolCallId: "a", toolName: "rooms_list", input: {} }],
+            },
+          },
+          {
+            turnId: "t1",
+            message: {
+              role: "tool",
+              content: [
+                {
+                  type: "tool-result",
+                  toolCallId: "a",
+                  toolName: "rooms_list",
+                  output: { type: "json", value: { pendingActionId: "not-an-id" } },
+                },
+              ],
+            },
+          },
+        ],
+      ),
+    );
+    expect(items.map((item) => item.kind)).toEqual(["question", "progress"]);
+  });
+
   it("finds the turn that is still running", () => {
     const chat = view([{ status: "done" }, { status: "running", endedAt: null }], []);
     expect(runningTurn(chat)?.id).toBe("t2");

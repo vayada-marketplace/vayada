@@ -1,13 +1,74 @@
 import type { Page } from "@playwright/test";
 import { fulfillCorsPreflight } from "./cors";
 
+/** A change the AI asked for, as `GET /api/ai/pending-actions/:id` returns it (VAY-2524). */
+export type PendingActionView = {
+  id: string;
+  state: string;
+  surface: string;
+  client: string;
+  propertyId: string;
+  action: string;
+  answerBy: string | null;
+  answeredAt: string | null;
+  finishedAt: string | null;
+  card: {
+    question: string;
+    doneTitle: string;
+    yesLabel: string;
+    details: { label: string; value: string }[];
+    effects: string[];
+  } | null;
+  cardSha256: string | null;
+};
+
+/** Board 03's room block, waiting for its answer until `answerBy`. */
+export function roomBlockAction(
+  id: string,
+  answerBy: string,
+  changes: Partial<PendingActionView> = {},
+): PendingActionView {
+  return {
+    id,
+    state: "needs_answer",
+    surface: "in_app",
+    client: "in_app_assistant",
+    propertyId: "f6853000-0000-4000-8000-000000000001",
+    action: "room_block_create@1",
+    answerBy,
+    answeredAt: null,
+    finishedAt: null,
+    card: {
+      question: "Block room 12 for 3 nights?",
+      doneTitle: "Blocked room 12 for 3 nights",
+      yesLabel: "Yes, block room 12",
+      details: [
+        { label: "Room", value: "12 · Deluxe Double" },
+        { label: "Nights", value: "Sat 12, Sun 13 and Mon 14 Dec" },
+        { label: "Reason", value: "Maintenance: shower repair" },
+      ],
+      effects: [
+        "Guests can't book room 12 on these nights.",
+        "If channels are connected, they get the new availability.",
+      ],
+    },
+    cardSha256: "a".repeat(64),
+    ...changes,
+  };
+}
+
 /**
  * A fake of the in-app assistant's API (VAY-2518 routes, apps/api routes/assistant.ts) for the
  * panel's browser specs (VAY-2519). The shared shell mocks answer every assistant route with 404
  * (switched off, as in production); `routeAssistant` switches it on for one page.
  */
 
-type ToolLine = { name: string; result?: "ok" | "failed" | "not_run" };
+type ToolLine = {
+  name: string;
+  result?: "ok" | "failed" | "not_run";
+  /** A change the AI asked for (VAY-2524): the result names the pending action. */
+  pendingActionId?: string;
+};
 type TurnShape = {
   question: string;
   tools?: ToolLine[];
@@ -88,8 +149,16 @@ export function chatView(
                     type: "tool-result",
                     toolCallId: `${turnId}-call-${call}`,
                     toolName: tool.name,
-                    output:
-                      tool.result === "ok"
+                    output: tool.pendingActionId
+                      ? {
+                          type: "json",
+                          value: {
+                            ok: true,
+                            pendingActionId: tool.pendingActionId,
+                            status: "pending",
+                          },
+                        }
+                      : tool.result === "ok"
                         ? { type: "json", value: { ok: true } }
                         : {
                             type: "error-json",
@@ -145,10 +214,53 @@ export async function routeAssistant(
     holdRead?: (conversationId: string) => Promise<void> | undefined;
     /** The chat as stored after Stop. */
     onStop?: (conversationId: string) => FakeChat | undefined;
+    /** The changes the AI asked for (VAY-2524 pending actions), by id, as the API shows them. */
+    pendingActions?: Record<string, PendingActionView>;
+    /** The answer route: the change as it is after the answer, or a refusal with it. */
+    onAnswer?: (
+      id: string,
+      body: { answer: "yes" | "no"; cardSha256?: string },
+    ) => { view: PendingActionView; refusal?: { statusCode: number; code: string } };
   } = {},
 ) {
   const chats = new Map((options.chats ?? []).map((chat) => [chat.id, chat]));
-  const seen = { turns: [] as TurnRequest[], stops: [] as unknown[], lists: [] as URL[] };
+  const seen = {
+    turns: [] as TurnRequest[],
+    stops: [] as unknown[],
+    lists: [] as URL[],
+    answers: [] as { id: string; body: unknown }[],
+  };
+  const actions = new Map(Object.entries(options.pendingActions ?? {}));
+  await page.route(/\/api\/ai\/pending-actions\//, async (route) => {
+    const request = route.request();
+    if (request.method() === "OPTIONS") return fulfillCorsPreflight(route);
+    const match = new URL(request.url()).pathname.match(
+      /\/api\/ai\/pending-actions\/([^/]+)(\/answer)?$/,
+    );
+    const id = match?.[1] ?? "";
+    if (request.method() === "POST" && match?.[2]) {
+      const body = request.postDataJSON() as { answer: "yes" | "no"; cardSha256?: string };
+      seen.answers.push({ id, body });
+      const answered = options.onAnswer?.(id, body);
+      if (!answered) return route.fulfill({ status: 503, json: { code: "unavailable" } });
+      actions.set(id, answered.view);
+      return answered.refusal
+        ? route.fulfill({
+            status: answered.refusal.statusCode,
+            json: {
+              statusCode: answered.refusal.statusCode,
+              code: answered.refusal.code,
+              message: "Refused.",
+              pendingAction: answered.view,
+            },
+          })
+        : route.fulfill({ json: answered.view });
+    }
+    const view = actions.get(id);
+    return view
+      ? route.fulfill({ json: view })
+      : route.fulfill({ status: 404, json: { statusCode: 404, code: "not_found" } });
+  });
   await page.route(/\/api\/ai\/assistant\//, async (route) => {
     const request = route.request();
     if (request.method() === "OPTIONS") return fulfillCorsPreflight(route);
