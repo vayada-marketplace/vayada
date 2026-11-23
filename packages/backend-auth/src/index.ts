@@ -188,11 +188,13 @@ export {
 } from "./plugin.js";
 
 // AI actions that run a route as the signed-in user (VAY-2506). The scope's AsyncLocalStorage is
-// private to delegatedScope.ts; only the auth plugin reads it.
+// private to delegatedScope.ts; only the auth plugin reads it. Writes need a "change" context,
+// which only the one executor of AI changes mints (VAY-2522, VAY-2524).
 export {
   delegatedPropertyIds,
   isDelegatedContext,
   narrowDelegatedContext,
+  resolveDelegatedChangeContext,
   resolveDelegatedContext,
   type DelegatedContextInput,
   type DelegatedContextOptions,

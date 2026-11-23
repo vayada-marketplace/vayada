@@ -8,7 +8,10 @@ import { describe, expect, it } from "vitest";
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 const DELEGATION_API =
-  /\b(injectAsDelegate|resolveDelegatedContext|narrowDelegatedContext|runDelegatedRead)\b|ai\/delegatedRead/;
+  /\b(injectAsDelegate|resolveDelegatedContext|resolveDelegatedChangeContext|narrowDelegatedContext|runDelegatedRead)\b|ai\/delegatedRead/;
+/** A "change" delegation may also write (VAY-2522): only the one executor of AI changes mints one. */
+const CHANGE_API = /\bresolveDelegatedChangeContext\b/;
+const EXECUTOR_DIR = "apps/api/src/ai/executor/";
 
 async function sourceFiles(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
@@ -26,19 +29,28 @@ async function sourceFiles(dir: string): Promise<string[]> {
   return files.flat();
 }
 
+/** Source files outside the allowed folders that mention the API. */
+async function usersOf(api: RegExp, allowed: readonly string[]): Promise<string[]> {
+  const roots = [join(repoRoot, "apps"), join(repoRoot, "packages")];
+  const files = (await Promise.all(roots.map(sourceFiles))).flat();
+  expect(files.length).toBeGreaterThan(500);
+  const users: string[] = [];
+  for (const file of files) {
+    const path = relative(repoRoot, file);
+    if (allowed.some((prefix) => path.startsWith(prefix))) continue;
+    if (api.test(await readFile(file, "utf8"))) users.push(path);
+  }
+  return users;
+}
+
 describe("delegation boundary (VAY-2506)", () => {
   it("is used only by apps/api/src/ai and defined only in backend-auth", async () => {
-    const roots = [join(repoRoot, "apps"), join(repoRoot, "packages")];
-    const files = (await Promise.all(roots.map(sourceFiles))).flat();
-    const users: string[] = [];
-    for (const file of files) {
-      const path = relative(repoRoot, file);
-      if (path.startsWith("apps/api/src/ai/") || path.startsWith("packages/backend-auth/src/")) {
-        continue;
-      }
-      if (DELEGATION_API.test(await readFile(file, "utf8"))) users.push(path);
-    }
-    expect(files.length).toBeGreaterThan(500);
-    expect(users).toEqual([]);
+    expect(
+      await usersOf(DELEGATION_API, ["apps/api/src/ai/", "packages/backend-auth/src/"]),
+    ).toEqual([]);
+  });
+
+  it("lets only the executor of AI changes mint a change delegation (VAY-2522)", async () => {
+    expect(await usersOf(CHANGE_API, [EXECUTOR_DIR, "packages/backend-auth/src/"])).toEqual([]);
   });
 });

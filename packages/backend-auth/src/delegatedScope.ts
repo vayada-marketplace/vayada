@@ -31,8 +31,14 @@ type DelegatedScope = {
 
 const NONCE_HEADER = "x-vayada-delegation-nonce";
 
-/** Phase 1 is read-only: write delegation is VAY-2522. */
-export type DelegatedMethod = "GET";
+/** GET runs on any delegation; a write only on a "change" one (VAY-2522). */
+export type DelegatedMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+const METHODS: ReadonlySet<string> = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
+
+/** What the routes accept (1-200 characters) narrowed to what the AI action log keeps. */
+const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{8,128}$/;
+/** A change's JSON body; no route an AI action calls takes more. */
+export const DELEGATED_BODY_MAX_BYTES = 64 * 1024;
 
 /**
  * Which routes may run under a delegated scope. The auth plugin asks it for every delegated
@@ -49,6 +55,13 @@ export type DelegatedInject = {
   routeUrl: string;
   /** Concrete URL to inject, e.g. "/api/pms/properties/<uuid>/rooms?from=2026-11-20". */
   url: string;
+  /** Writes only: the JSON body. */
+  body?: unknown;
+  /**
+   * Writes only, and required for them: sent as the request's one Idempotency-Key header, so a
+   * retry of the same change never runs twice (VAY-2524 sends operation id + step).
+   */
+  idempotencyKey?: string;
   /**
    * The request id the route sees: a fresh UUID for this one request. The AI action runner mints
    * it, so its log row and the route's own audit rows carry the same id (VAY-2508). Without it,
@@ -74,9 +87,36 @@ export async function injectAsDelegate(
   input: DelegatedInject,
 ): Promise<LightMyRequestResponse> {
   if (storage.getStore()) throw new DelegationRefusedError("nested delegated request");
-  if (input.method !== "GET") throw new DelegationRefusedError("only GET routes can be delegated");
+  if (!METHODS.has(input.method)) throw new DelegationRefusedError("unsupported method");
   if (!isMintedDelegatedContext(input.context) || !isDelegatedContext(input.context)) {
     throw new DelegationRefusedError("not a context resolveDelegatedContext returned");
+  }
+  const headers: Record<string, string> = {};
+  let payload: string | undefined;
+  if (input.method === "GET") {
+    if (input.body !== undefined || input.idempotencyKey !== undefined) {
+      throw new DelegationRefusedError("a read sends no body and no Idempotency-Key");
+    }
+  } else {
+    if (input.context.delegation?.access !== "change") {
+      throw new DelegationRefusedError("this delegation may only read");
+    }
+    if (typeof input.idempotencyKey !== "string" || !IDEMPOTENCY_KEY.test(input.idempotencyKey)) {
+      throw new DelegationRefusedError("a change needs a valid Idempotency-Key");
+    }
+    headers["idempotency-key"] = input.idempotencyKey;
+    if (input.body !== undefined) {
+      try {
+        payload = JSON.stringify(input.body);
+      } catch {
+        payload = undefined; // cycles and BigInts
+      }
+      if (typeof payload !== "string") throw new DelegationRefusedError("the body is not JSON");
+      if (Buffer.byteLength(payload) > DELEGATED_BODY_MAX_BYTES) {
+        throw new DelegationRefusedError("the body is too large");
+      }
+      headers["content-type"] = "application/json";
+    }
   }
   const age = Date.now() - Date.parse(input.context.audit.receivedAt);
   if (!(age >= 0 && age <= DELEGATED_CONTEXT_MAX_AGE_MS)) {
@@ -109,7 +149,8 @@ export async function injectAsDelegate(
           {
             method: input.method,
             url: input.url,
-            headers: { [NONCE_HEADER]: nonce.toString("base64url") },
+            headers: { ...headers, [NONCE_HEADER]: nonce.toString("base64url") },
+            ...(payload === undefined ? {} : { payload }),
           },
           (error, response) =>
             error || !response ? reject(error ?? new Error("No response")) : resolve(response),
@@ -153,6 +194,10 @@ export function takeDelegatedContext(
     throw new DelegationRefusedError(
       `route mismatch (${request.method} ${routeUrl ?? "<no route>"})`,
     );
+  }
+  // injectAsDelegate refuses this already; the hook checks again so no other path can (VAY-2522).
+  if (request.method !== "GET" && scope.context.delegation?.access !== "change") {
+    throw new DelegationRefusedError("this delegation may only read");
   }
   if (skipPathPrefixes.some((prefix) => request.url.startsWith(prefix))) {
     throw new DelegationRefusedError("path does not take user tokens");

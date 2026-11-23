@@ -525,6 +525,14 @@ The action calls the existing route in-process with Fastify `app.inject()` insid
   and on an MCP token `sid` is a WorkOS consent id. The consent id is stored on the connection
   instead.
 - The delegation can only narrow: fewer properties, read-only. It never adds a permission.
+- **Read or change (VAY-2522).** `delegation.access` is `"read"` for every context
+  `resolveDelegatedContext` returns; the caller cannot set it. Only `resolveDelegatedChangeContext`
+  returns `"change"`, and only the one executor of AI changes (`apps/api/src/ai/executor/`,
+  VAY-2524) may call it (a boundary test enforces this). `injectAsDelegate` and the auth hook refuse
+  POST, PUT, PATCH and DELETE on a read delegation. A change sends exactly one `Idempotency-Key`
+  (8-128 characters of `A-Za-z0-9._:-`) and a JSON body of at most 64 KiB; a read sends neither. The
+  route gate still allows only the routes of registered actions, so no write route is reachable
+  until a change action is registered.
 
 ### 5.3 What delegation never passes
 

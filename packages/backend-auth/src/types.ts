@@ -158,6 +158,12 @@ export type RequestDelegation = {
   conversationId?: string;
   /** The AI tool call this request serves; it is also the request id. */
   toolCallId: string;
+  /**
+   * What the delegation may do (VAY-2522). "read": GET routes only; every tool call gets this.
+   * "change": also writes; minted only by resolveDelegatedChangeContext, for the one executor that
+   * runs every AI change (VAY-2524).
+   */
+  access: "read" | "change";
 };
 
 export type RequestContext = {
