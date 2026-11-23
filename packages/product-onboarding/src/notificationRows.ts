@@ -1,10 +1,6 @@
-import { formatCurrency } from "@/lib/utils";
-import type {
-  HostNotification,
-  HostNotificationFeed,
-} from "@/services/api/bookingNotificationsClient";
+import type { HostNotification, HostNotificationFeed } from "./hostNotifications";
 
-type Translate = (key: string, params?: Record<string, string | number>) => string;
+export type Translate = (key: string, params?: Record<string, string | number>) => string;
 
 export type NotificationTab = "all" | "bookings" | "needs_action" | "updates";
 export const NOTIFICATION_TABS: NotificationTab[] = ["all", "bookings", "needs_action", "updates"];
@@ -130,10 +126,12 @@ function money(amount: string | null, currency: string, locale: string): string 
   // Whole amounts without cents; others with both digits ("€360.50", not "€360.5").
   const digits = Number.isInteger(value) ? 0 : 2;
   try {
-    return formatCurrency(value, currency, locale, {
+    return new Intl.NumberFormat(locale || "en", {
+      style: "currency",
+      currency,
       minimumFractionDigits: digits,
       maximumFractionDigits: digits,
-    });
+    }).format(value);
   } catch {
     return `${currency} ${value.toFixed(digits)}`;
   }

@@ -3,10 +3,10 @@
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  bookingNotificationsClient,
   isNotificationPropertyId,
   type HostNotificationFeed,
-} from "@/services/api/bookingNotificationsClient";
+  type HostNotificationsClient,
+} from "./hostNotifications";
 
 /** How often the bell reads the feed while the tab is visible (VAY-2349 D3). */
 export const NOTIFICATIONS_POLL_MS = 60_000;
@@ -14,7 +14,7 @@ export const NOTIFICATIONS_POLL_MS = 60_000;
 const READ_SPACING_MS = 2_000;
 
 type Client = Pick<
-  typeof bookingNotificationsClient,
+  HostNotificationsClient,
   "load" | "markRead" | "markUnread" | "markDone" | "markAllRead"
 >;
 
@@ -124,10 +124,7 @@ function withPendingMarks(
 
 /** The selected property's notifications: read now, every 60 s while the tab is visible, on page change
  * and when the window regains focus. A refused read (no access) isn't repeated for that property. */
-export function useHostNotifications(
-  hotelId: string | undefined,
-  client: Client = bookingNotificationsClient,
-) {
+export function useHostNotifications(hotelId: string | undefined, client: Client) {
   const pathname = usePathname();
   const [feed, setFeed] = useState<HostNotificationFeed | null>(null);
   const [status, setStatus] = useState<NotificationsStatus>("loading");
