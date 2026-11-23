@@ -94,6 +94,13 @@ import { aiActionRouteGate } from "./ai/actions/registry.js";
 import { registerAiHotelRoutes } from "./routes/aiHotels.js";
 import { registerAiActivityRoutes } from "./routes/aiActivity.js";
 import type { AiActivityStore } from "./ai/actionLog/aiActivity.js";
+import type { AiActionLog } from "./ai/actionLog/actionLog.js";
+import { createAssistantRuntime } from "./ai/assistant/assistantRuntime.js";
+import type { ConversationStore } from "./ai/assistant/conversationStore.js";
+import { delegatedAssistantTools } from "./ai/assistant/registryTools.js";
+import type { AiProvider } from "./ai/provider/aiProvider.js";
+import { routeKey } from "./ai/provider/catalog.js";
+import { registerAssistantRoutes } from "./routes/assistant.js";
 import { registerAuthSessionRoutes } from "./routes/authSession.js";
 import type { BookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
 import type { BookingCustomDomainVerifier } from "./domains/bookingCustomDomainVerification.js";
@@ -455,6 +462,17 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   publicHotelProfileRepository?: PublicHotelProfileRepository;
   /** VAY-2508: the AI action log behind GET /api/ai/activity. */
   aiActivityStore?: AiActivityStore;
+  /**
+   * VAY-2518: the in-app assistant (/api/ai/assistant/*); needs `auth`. It answers "AI is off"
+   * until the provider has a route switched on (AI_PROVIDERS_ENABLED).
+   */
+  assistant?: {
+    store: ConversationStore;
+    provider: Pick<AiProvider, "routeFor" | "step">;
+    actionLog: AiActionLog;
+    /** The property's IANA time zone, for the assistant's "today". */
+    timeZoneOf?: (propertyId: string) => Promise<string | null | undefined>;
+  };
   hotelAccountInviteCodeRepository?: HotelAccountInviteCodeRepository;
   hotelAccountInvites?: Omit<HotelAccountInviteRoutesOptions, "trackCommandRepository">;
   /** Approved public profile images for the auth session (platform media). */
@@ -582,6 +600,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   registerBrowserCors(app, options.browserAllowedOrigins ?? []);
 
+  // The auth plugin's resolver; the in-app assistant resolves its delegated contexts with it too.
+  let authorizationResolver: ReturnType<typeof createAuthorizationResolver> | undefined;
   if (options.auth) {
     const {
       rolePermissionRepository,
@@ -589,17 +609,18 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       propertyAccessRepository,
       ...authOptions
     } = options.auth;
+    authorizationResolver = createAuthorizationResolver(
+      rolePermissionRepository,
+      entitlementRepository,
+      propertyAccessRepository,
+    );
     app.register(backendAuthPlugin, {
       ...authOptions,
       // AI actions may run exactly the routes of registered actions as the user (VAY-2506/2507).
       delegation: authOptions.delegation ?? aiActionRouteGate,
       // Partner apps send their own tokens to /partner; they are never WorkOS tokens (VAY-2436).
       skipPathPrefixes: ["/partner/"],
-      authorizationResolver: createAuthorizationResolver(
-        rolePermissionRepository,
-        entitlementRepository,
-        propertyAccessRepository,
-      ),
+      authorizationResolver,
     });
   }
 
@@ -640,6 +661,32 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   app.register(registerRouteGroups, { prefix: "/api" });
   if (options.aiActivityStore) {
     app.register(registerAiActivityRoutes, { prefix: "/api/ai", store: options.aiActivityStore });
+  }
+  if (options.assistant && !(options.auth && authorizationResolver)) {
+    app.log.warn("The in-app assistant needs auth: its routes are not mounted");
+  } else if (options.assistant && options.auth && authorizationResolver) {
+    const { store, provider, actionLog, timeZoneOf } = options.assistant;
+    const runtime = createAssistantRuntime({
+      store,
+      provider,
+      ...(timeZoneOf ? { timeZoneOf } : {}),
+      toolsFor: delegatedAssistantTools(app, {
+        identityRepository: options.auth.repository,
+        authorizationResolver,
+        log: actionLog,
+        model: () => {
+          const route = provider.routeFor("assistant_chat");
+          return route ? routeKey(route) : null;
+        },
+      }),
+      log: app.log,
+    });
+    app.register(registerAssistantRoutes, { prefix: "/api/ai", runtime });
+    // A root hook added while the app is built, so it runs before the other preClose hooks: from
+    // the start of a shutdown, running turns start no new step or tool (DRAIN_GRACE_MS).
+    app.addHook("preClose", async () => {
+      await runtime.drain();
+    });
   }
   if (options.publicHotelProfileRepository) {
     app.register(registerAiHotelRoutes, {
