@@ -1453,7 +1453,10 @@ describe("api config", () => {
     expect(loadConfig({})).toMatchObject({
       aiDefaultMonthlyBudgetMicroUsd: 0,
       aiSpendAlertThresholdMicroUsd: 100_000_000,
+      // VAY-2524: AI changes stay off unless switched on.
+      aiChangesEnabled: false,
     });
+    expect(loadConfig({ AI_CHANGES_ENABLED: "true" }).aiChangesEnabled).toBe(true);
     expect(loadConfig({}).aiSpendAlertEmail).toBeUndefined();
     const email = { RESEND_API_KEY: "test-key", BOOKING_EMAIL_FROM: "sender@example.test" };
     expect(

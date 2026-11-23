@@ -92,6 +92,10 @@ import type {
 import type { BookingPublicationRefreshPort } from "./domains/bookingPublicationProductionRuntime.js";
 import { aiActionRouteGate, delegatedWriteProblem } from "./ai/actions/registry.js";
 import { registerAiHotelRoutes } from "./routes/aiHotels.js";
+import {
+  registerPendingActionRoutes,
+  type PendingActionRouteOptions,
+} from "./ai/changes/pendingActions.js";
 import { registerAiActivityRoutes } from "./routes/aiActivity.js";
 import type { AiActivityStore } from "./ai/actionLog/aiActivity.js";
 import { registerAuthSessionRoutes } from "./routes/authSession.js";
@@ -455,6 +459,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   publicHotelProfileRepository?: PublicHotelProfileRepository;
   /** VAY-2508: the AI action log behind GET /api/ai/activity. */
   aiActivityStore?: AiActivityStore;
+  /** VAY-2524: the person's Yes or No to AI changes (AI_CHANGES_ENABLED). */
+  aiPendingActions?: Omit<PendingActionRouteOptions, "root">;
   hotelAccountInviteCodeRepository?: HotelAccountInviteCodeRepository;
   hotelAccountInvites?: Omit<HotelAccountInviteRoutesOptions, "trackCommandRepository">;
   /** Approved public profile images for the auth session (platform media). */
@@ -660,6 +666,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   app.register(registerRouteGroups, { prefix: "/api" });
   if (options.aiActivityStore) {
     app.register(registerAiActivityRoutes, { prefix: "/api/ai", store: options.aiActivityStore });
+  }
+  if (options.aiPendingActions) {
+    app.register(registerPendingActionRoutes, {
+      prefix: "/api/ai",
+      ...options.aiPendingActions,
+      root: app,
+    });
   }
   if (options.publicHotelProfileRepository) {
     app.register(registerAiHotelRoutes, {

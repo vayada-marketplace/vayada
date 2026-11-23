@@ -506,8 +506,8 @@ delegation that writes:
   request id as causation.
 
 The recovery job (`recoveryWorker.ts`) closes unanswered changes and takes over expired runs, one
-at a time, every 30 seconds; the API wires it with the answer endpoint (PR 3), which also checks who
-answers, the kill switch and a revoked connection before it calls `startAndRun`. One known limit: the inbox routes answer
+at a time, every 30 seconds; the API wires it with the answer endpoint (PR 3, §4.7), which also
+checks who answers, the kill switch and a revoked connection before it calls `startAndRun`. One known limit: the inbox routes answer
 any command error with a 500, so a rare refusal inside the command's own transaction is retried until
 the run gives up (`gave_up`, outcome unknown) instead of failing at once.
 
@@ -524,6 +524,33 @@ for the person's answer"; the turn ends. **Yes** is
 Origin and CSRF checks), same user and organization, with permission re-checked, the conversation
 still active, no kill switch on, and the digest and revisions unchanged (otherwise "this changed,
 ask me again"). A second click, another tab or a resumed turn joins the same run.
+
+**Built (VAY-2524 PR3): the Yes/No back end** (`apps/api/src/ai/changes/`), on with
+`AI_CHANGES_ENABLED` (off by default):
+
+- `proposeChange` is how the tool layers ask: with the tool call's own delegated context, only for
+  a change offered on that surface (none is yet), with valid input, on a property in the
+  delegation and with the person's rights now. It stores one `pending` operation and logs one
+  `ai_tool_calls` row (outcome `ok`, the operation id); it never runs anything.
+- `GET /api/ai/pending-actions/:id` returns the card's state and vayada's text (`changeCard.ts`):
+  a question, the details, what else happens and the Yes label, for each change action (a test
+  keeps one card per action). The names on it (room numbers, room types, the guest, the booking)
+  come from the app's own read routes, as the person who answers. A record that is gone closes the
+  question as `changed`; one the person can't read shows "not allowed".
+- `POST /api/ai/pending-actions/:id/answer` takes `{ answer: "no" }` or
+  `{ answer: "yes", cardSha256 }`. Only a vayada session answers: the verifier admits only the
+  app's own `client_id`, the token must carry a session id (no machine token), the Origin must be a
+  vayada app, and any AI context is refused (the routes are also on the never-list). Access tokens
+  travel in the Authorization header, which another site can't send, so a CSRF cookie adds
+  nothing. Same user and selected account; the person's permissions and property now; AI on for
+  the account (budget above 0, else closed `ai_switched_off`); the conversation or connection still
+  there (else `revoked`; until VAY-2518 and VAY-2528 bring them, MCP never and in-app always); and
+  the card's digest unchanged (else closed `changed`). Then the one executor runs it; a double
+  click or a second tab joins the run. A person's edit meanwhile is refused by the route's own
+  revision check and shows as "changed".
+- Card states: `needs_answer`, `running`, `done`, `declined`, `expired`, `changed`, `not_allowed`,
+  `stopped` (AI off or connection gone), `failed` (nothing changed) and `unsure` (gave up, outcome
+  unknown).
 
 **MCP (D4a):** every Ask-first action, for every client, is answered on a **one-tap vayada page**:
 the same card on its own small page, signed-in vayada session whose user must equal the token's

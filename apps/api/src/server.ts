@@ -53,6 +53,7 @@ import {
   verifyAdminTransferProof,
 } from "@vayada/backend-auth";
 import {
+  createAuthorizationResolver,
   createPgEntitlementRepository,
   createPgPropertyAccessRepository,
   createPgRolePermissionRepository,
@@ -402,7 +403,9 @@ import {
   createPgAiActivityStore,
 } from "./ai/actionLog/aiActivity.js";
 import { startAiActionLogRetentionWorker } from "./jobs/aiActionLogRetention.js";
+import { createAiChangesRuntime } from "./ai/changes/runtime.js";
 import { createPgAiBudgetAdmin } from "./ai/usage/budgetAdmin.js";
+import { createPgAiBudget } from "./ai/usage/budgetGate.js";
 import { createAiSpendAlert } from "./ai/usage/spendAlert.js";
 import {
   createPgGuestProfileLinkStore,
@@ -468,6 +471,32 @@ const aiBudgetAdmin = createPgAiBudgetAdmin({
   pool: aiBudgetPool,
   defaultMonthlyLimitMicroUsd: config.aiDefaultMonthlyBudgetMicroUsd,
 });
+const apiAuth = buildAuthOptions(config.auth);
+// VAY-2524: AI changes (Ask first): the record of every change, the one executor, its recovery job
+// and the person's Yes/No routes. Off unless AI_CHANGES_ENABLED; an account without an AI budget
+// can't answer a change either.
+const aiChanges =
+  config.aiChangesEnabled && apiAuth
+    ? (() => {
+        const budget = createPgAiBudget({
+          pool: aiBudgetPool,
+          defaultMonthlyLimitMicroUsd: config.aiDefaultMonthlyBudgetMicroUsd,
+        });
+        return createAiChangesRuntime({
+          connectionString: targetDatabaseUrl,
+          identity: apiAuth.repository,
+          authorizationResolver: createAuthorizationResolver(
+            apiAuth.rolePermissionRepository,
+            apiAuth.entitlementRepository,
+            apiAuth.propertyAccessRepository,
+          ),
+          aiEnabled: async (organizationId) =>
+            (await budget.monthStatus(organizationId)).limitMicroUsd > 0,
+          allowedOrigins: config.authSession?.authAllowedOrigins ?? [],
+          backgroundWorkersEnabled: config.backgroundWorkersEnabled,
+        });
+      })()
+    : undefined;
 
 const bookingSettingsRepository = createPgTargetBookingSettingsRepository({
   connectionString: targetDatabaseUrl,
@@ -1992,7 +2021,7 @@ const app = buildApp({
   airbnbImports: airbnbImportRuntime?.routes,
   databaseHealth: postgresRuntime.healthCheck(targetDatabaseUrl),
   trustProxy: PRODUCTION_TRUST_PROXY,
-  auth: buildAuthOptions(config.auth),
+  auth: apiAuth,
   browserAllowedOrigins: config.authSession?.authAllowedOrigins ?? [],
   authSession:
     config.auth && config.authSession
@@ -2616,6 +2645,7 @@ const app = buildApp({
   identityPrivacyAllowedOrigins: config.identityPrivacyAllowedOrigins,
   publicHotelProfileRepository,
   aiActivityStore,
+  aiPendingActions: aiChanges?.routes,
   bookingWebCheckoutAdapter,
   bookingWebDisplayRates,
   bookingWebAttributionSink:
@@ -2631,6 +2661,7 @@ const app = buildApp({
       }
     : undefined,
 });
+aiChanges?.start(app);
 
 const adminRoleWorker =
   config.backgroundWorkersEnabled && config.auth && config.authSession
