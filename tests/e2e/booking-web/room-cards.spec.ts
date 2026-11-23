@@ -177,7 +177,7 @@ for (const width of [1440, 390]) {
   });
 }
 
-for (const width of [1440, 390]) {
+for (const width of [1440, 820, 390]) {
   test(`shows prices only in the guest's currency, rounded, on the cards and in the details at ${width}px (VAY-2588)`, async ({
     page,
   }, testInfo) => {
@@ -216,6 +216,9 @@ for (const width of [1440, 390]) {
     // €268 at 1.1 is US$294.80: the guest's currency only, to the whole dollar, for the stay.
     await expect(choices.nth(0)).toContainText("US$295");
     await expect(choices.nth(0)).toContainText("2 nights · incl. taxes & fees");
+    // The price column never squeezes a rate's name: "Flexible rate" keeps one 20px line, on a
+    // tablet too, where the card's photo sits beside it.
+    expect((await choices.nth(1).locator("p").first().boundingBox())!.height).toBe(20);
     for (const hidden of ["≈", "€", "You pay", "per night"])
       await expect(deluxe).not.toContainText(hidden);
     // The "We charge in EUR" line above the rooms is gone; the footer credits the rates.
