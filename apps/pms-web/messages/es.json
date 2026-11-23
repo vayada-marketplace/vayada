@@ -1357,5 +1357,6 @@
   "notifications.sync.stillRunning": "La sincronización sigue en curso. Revise PMS → Channel manager en unos minutos.",
   "notifications.sync.synced": "Channel manager sincronizado",
   "notifications.toast.syncDetail": "La disponibilidad y las reservas de sus otros canales pueden estar desactualizadas.",
-  "notifications.toast.dismiss": "Descartar notificación"
+  "notifications.toast.dismiss": "Descartar notificación",
+  "bookings.detail.notProvidedByChannel": "No proporcionado por {channel}"
 }

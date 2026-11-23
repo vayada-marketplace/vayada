@@ -30,7 +30,7 @@ const twin = {
   reservations: 1,
   lastCheckIn: "2025-12-01",
 };
-const stay = (overrides: Record<string, unknown> = {}) => ({
+export const stay = (overrides: Record<string, unknown> = {}) => ({
   bookingGuestId: "guest_timo_munich",
   guestBookingId: PMS_WEB_RESERVATION_ID,
   propertyId: PMS_WEB_PROPERTY_ID,

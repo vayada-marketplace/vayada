@@ -1353,5 +1353,6 @@
   "notifications.sync.stillRunning": "Синхронизация ещё идёт. Проверьте PMS → Channel manager через несколько минут.",
   "notifications.sync.synced": "Синхронизация с channel manager выполнена",
   "notifications.toast.syncDetail": "Наличие номеров и бронирования в других каналах могут быть неактуальны.",
-  "notifications.toast.dismiss": "Закрыть уведомление"
+  "notifications.toast.dismiss": "Закрыть уведомление",
+  "bookings.detail.notProvidedByChannel": "Не передано через {channel}"
 }

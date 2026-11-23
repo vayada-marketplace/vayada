@@ -1353,5 +1353,6 @@
   "notifications.sync.stillRunning": "同步仍在进行中。请几分钟后在 PMS → 渠道管理器 中查看。",
   "notifications.sync.synced": "渠道管理器已同步",
   "notifications.toast.syncDetail": "您其他渠道上的房态和预订可能不是最新的。",
-  "notifications.toast.dismiss": "关闭通知"
+  "notifications.toast.dismiss": "关闭通知",
+  "bookings.detail.notProvidedByChannel": "{channel} 未提供"
 }

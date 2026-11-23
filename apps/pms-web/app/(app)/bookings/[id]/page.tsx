@@ -41,7 +41,7 @@ import { useGuestStayTimes } from "@/lib/settings/useGuestStayTimes";
 import { useHasPmsPermission } from "@/lib/settings/PmsAccessContext";
 import { guestDataSettingsService, type GuestDataSettings } from "@/services/guests";
 import { guestProfileEdit, withBookerEdit } from "@/lib/bookings/guestProfileEdit";
-import { isChannelBooking } from "@/lib/bookings/channelLabel";
+import { isChannelBooking, notProvidedByChannel } from "@/lib/bookings/channelLabel";
 import { formatServiceDays } from "@/lib/bookings/serviceDays";
 import { individualRoomsService, Room } from "@/services/rooms";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -1979,6 +1979,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   );
 
   const channelKey = normalizeChannelKey(booking.channel);
+  // VAY-2577: an email or phone the channel never sent says so, instead of a blank.
+  const contactNotProvided = notProvidedByChannel(booking.channel, t);
   const channelLabel =
     channelKey === "direct"
       ? t("calendar.channelDirect")
@@ -2891,12 +2893,20 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 </div>
                 <div>
                   <p className="text-xs text-gray-500">{t("bookings.detail.email")}</p>
-                  <p className="font-medium text-gray-900 break-words">{booking.guestEmail}</p>
+                  {!booking.guestEmail && contactNotProvided ? (
+                    <p className="text-gray-500">{contactNotProvided}</p>
+                  ) : (
+                    <p className="font-medium text-gray-900 break-words">{booking.guestEmail}</p>
+                  )}
                 </div>
                 {guestFieldStatus?.phone !== "off" && (
                   <div>
                     <p className="text-xs text-gray-500">{t("bookings.detail.phone")}</p>
-                    <p className="font-medium text-gray-900">{booking.guestPhone || "—"}</p>
+                    {!booking.guestPhone && contactNotProvided ? (
+                      <p className="text-gray-500">{contactNotProvided}</p>
+                    ) : (
+                      <p className="font-medium text-gray-900">{booking.guestPhone || "—"}</p>
+                    )}
                   </div>
                 )}
                 <div

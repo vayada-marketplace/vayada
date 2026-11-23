@@ -1353,5 +1353,6 @@
   "notifications.sync.stillRunning": "De synchronisatie loopt nog. Kijk over een paar minuten in PMS → Channel manager.",
   "notifications.sync.synced": "Channel manager gesynchroniseerd",
   "notifications.toast.syncDetail": "Beschikbaarheid en boekingen op je andere kanalen zijn mogelijk niet actueel.",
-  "notifications.toast.dismiss": "Melding sluiten"
+  "notifications.toast.dismiss": "Melding sluiten",
+  "bookings.detail.notProvidedByChannel": "Niet doorgegeven door {channel}"
 }
