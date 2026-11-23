@@ -938,6 +938,8 @@
     "agree": "Ich stimme den Stornierungsbedingungen, Hausregeln und Allgemeinen Geschäftsbedingungen zu.",
     "agreeNonRefundable": "Mir ist bewusst, dass diese Buchung nicht erstattbar ist. Wenn ich storniere oder nicht anreise, wird der gesamte Aufenthalt berechnet.",
     "agreeSomeNonRefundable": "Mir ist bewusst, dass einige dieser Zimmer nicht erstattbar sind. Wenn ich storniere oder nicht anreise, wird ihr voller Preis berechnet.",
+    "agreeLateBooking": "Mir ist bewusst, dass ich diese Buchung nicht kostenlos stornieren kann. Wenn ich storniere oder nicht anreise, wird der gesamte Aufenthalt berechnet.",
+    "agreeSomeLateBooking": "Mir ist bewusst, dass einige dieser Zimmer nicht kostenlos storniert werden können. Wenn ich storniere oder nicht anreise, wird ihr voller Preis berechnet.",
     "agreeNoTerms": "Ich stimme den Stornierungsbedingungen und Hausregeln zu.",
     "agreeMissing": "Bitte setzen Sie das Häkchen, um Ihre Buchung zu bestätigen.",
     "hintDetails": "Geben Sie Ihre Daten ein, um zu buchen.",
@@ -954,6 +956,7 @@
         "refundsUntil": "Erstattung bis {date}",
         "freeEnded": "Kostenlose Stornierung abgelaufen",
         "nonRefundable": "Nicht erstattbar",
+        "lateBooking": "Keine kostenlose Stornierung",
         "noRefund": "Keine Erstattung mehr",
         "notRefundableOnceAccepted": "Nicht erstattbar, sobald das Hotel annimmt",
         "notRefundableOncePaid": "Nach der Zahlung nicht erstattbar"

@@ -81,6 +81,8 @@ export type PolicyBadge =
       kind:
         | "freeEnded"
         | "nonRefundable"
+        /** VAY-2587: a Flexible rate booked after its free cancellation ended. */
+        | "lateBooking"
         | "noRefund"
         | "notRefundableOnceAccepted"
         | "notRefundableOncePaid";
@@ -199,13 +201,14 @@ export function cancellationPolicy(
           { when: { kind: "until", date: until }, pay: { kind: "free" }, now: false, ended: true },
           { when: { kind: "fromNow" }, pay: full, now: true, ended: false },
         ];
-    // Booked after the last free day (VAY-2392): non-refundable from the start, and why. Unknown
-    // without the booking date: then it says free cancellation ended, as before.
+    // Booked after the last free day (VAY-2392): no free cancellation from the start, and why; it
+    // is still the Flexible rate, so it isn't called non-refundable (VAY-2587). Unknown without
+    // the booking date: then it says free cancellation ended, as before.
     const late = stay.bookedOn !== undefined && stay.bookedOn > until;
     badge = refundable
       ? { kind: "freeUntil", date: until }
       : late
-        ? { kind: "nonRefundable" }
+        ? { kind: "lateBooking" }
         : { kind: "freeEnded" };
     note = late
       ? { kind: "lateBooking", date: until, days: terms.freeCancellationDeadlineDays }
@@ -436,11 +439,7 @@ export function cancellationLine(blocks: readonly PolicyBlock[]): {
       tone,
       lead: { key: "rooms" },
       rest: blocks.map((block) => ({
-        // VAY-2587: a room booked after its free cancellation ended says so, as one room does.
-        key:
-          block.policy.note.kind === "lateBooking"
-            ? "room.lateBooking"
-            : `room.${block.policy.badge.kind}`,
+        key: `room.${block.policy.badge.kind}`,
         rooms: block.rooms,
         date: date(block.policy.badge),
       })),
