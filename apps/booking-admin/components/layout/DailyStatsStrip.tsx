@@ -4,19 +4,24 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "@/lib/i18n";
-import { dashboardService } from "@/services/dashboard";
+import { useDashboardRange } from "@/lib/dashboardRange";
+import { dashboardService, TIME_RANGE_NAMES, type TimeRange } from "@/services/dashboard";
 import { settingsService } from "@/services/settings";
 import { todayStatsMetrics, type TodayStats } from "./todayStats";
 
 // The strip shows from 768 px; narrower screens skip the reads too.
 const WIDE = "(min-width: 768px)";
 
-// Today's numbers next to the property name (VAY-2203). They come from the Dashboard's Today read,
-// so the strip and the Dashboard always agree, and are read again on every page change.
+// The Dashboard's numbers next to the property name (VAY-2203), for the range picked on the
+// Dashboard (VAY-2594; the last 30 days until then). They come from the Dashboard's own read, so
+// the strip and the Dashboard always agree, and are read again on every page change.
 export default function DailyStatsStrip({ hotelId }: { hotelId?: string }) {
   const { t, locale } = useTranslation();
   const pathname = usePathname();
+  const range = useDashboardRange();
   const [stats, setStats] = useState<TodayStats | null>(null);
+  // The range the shown numbers are for, so the label never runs ahead of them.
+  const [statsRange, setStatsRange] = useState<TimeRange>(range);
   const [wide, setWide] = useState(false);
   // How many metrics fit: all 3, 2 without page views, or none. A metric is never cut in half.
   const [shown, setShown] = useState(3);
@@ -40,14 +45,17 @@ export default function DailyStatsStrip({ hotelId }: { hotelId?: string }) {
       .getPropertySettings(hotelId)
       .then(async (settings) => {
         if (!settings.time_zone) throw new Error("Property timezone is unavailable.");
-        const today = await dashboardService.getStats("today", settings.time_zone);
+        // A newer range or page asked meanwhile: leave this read to it.
         if (cancelled) return;
+        const read = await dashboardService.getStats(range, settings.time_zone);
+        if (cancelled) return;
+        setStatsRange(range);
         setStats({
-          revenue: today.revenue,
-          bookings: today.bookings,
-          pageViews: today.page_views,
+          revenue: read.revenue,
+          bookings: read.bookings,
+          pageViews: read.page_views,
           // The property's currency, the one guests pay in; not Localization's (VAY-2390).
-          currency: today.currency,
+          currency: read.currency,
         });
       })
       // No Dashboard access or a failed read: leave the strip out rather than show wrong zeros.
@@ -60,7 +68,7 @@ export default function DailyStatsStrip({ hotelId }: { hotelId?: string }) {
     return () => {
       cancelled = true;
     };
-  }, [hotelId, pathname, wide]);
+  }, [hotelId, pathname, wide, range]);
 
   // Start from all three whenever the numbers, the language or the room change, then drop
   // metrics from the end until the strip fits.
@@ -94,7 +102,7 @@ export default function DailyStatsStrip({ hotelId }: { hotelId?: string }) {
         className={`${shown > 0 ? "hidden md:flex" : "hidden"} group min-w-0 flex-col justify-center overflow-hidden rounded-md px-1.5 py-0.5 hover:bg-gray-50`}
       >
         <span className="whitespace-nowrap text-[12px] font-semibold leading-tight text-gray-900">
-          {t("layout.header.today")}
+          {t(TIME_RANGE_NAMES[statsRange])}
         </span>
         <span className="whitespace-nowrap text-[10px] leading-tight text-gray-400 group-hover:text-gray-600">
           {todayStatsMetrics(stats, t, locale).slice(0, shown).join(" · ")}

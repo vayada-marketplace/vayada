@@ -31,6 +31,7 @@ import { hotelSetupChecklistApi } from "@/services/api/hotelSetupChecklistClient
 import { getAuthCsrfToken } from "@/services/auth/sessionStore";
 
 import { bookingAdminGoLiveMessages } from "./bookingAdminGoLiveMessages";
+import { BOOKING_PAGE_ONLINE_EVENT, PUBLISH_BOOKING_PAGE_EVENT } from "./bookingPageEvents";
 
 const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_FRONTEND_URL || "https://pms.vayada.com";
 
@@ -160,10 +161,7 @@ export const BOOKING_ADMIN_GO_LIVE_PAGES: Record<
   property_photos: { app: "booking_admin", path: "/design-studio" },
 };
 
-/** The booking page card publishes; the go-live list's Publish asks it to (one publish path). */
-export const PUBLISH_BOOKING_PAGE_EVENT = "vayada:publish-booking-page";
-/** The booking page card says the page went online while the dashboard was open; the list reads again. */
-export const BOOKING_PAGE_ONLINE_EVENT = "vayada:booking-page-online";
+export { BOOKING_PAGE_ONLINE_EVENT, PUBLISH_BOOKING_PAGE_EVENT };
 
 /** "Setup complete…" once, when Finish setup sent the owner here (?setupFinished=1). */
 function useSetupFinishedToast() {

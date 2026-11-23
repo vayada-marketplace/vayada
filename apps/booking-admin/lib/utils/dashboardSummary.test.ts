@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { compareRate, compareSummary, sparklineShape } from "./dashboardSummary";
+import {
+  compareConversion,
+  compareSummary,
+  conversionRate,
+  sparklinePath,
+} from "./dashboardSummary";
 
 describe("dashboard summary comparison", () => {
   it("reports no data, no change, and signed changes with a percent only from a nonzero base", () => {
@@ -17,37 +22,48 @@ describe("dashboard summary comparison", () => {
   });
 });
 
-describe("dashboard nightly rate comparison", () => {
-  it("has no rate without bookings and compares whole amounts otherwise", () => {
-    expect(compareRate({ rate: 0, bookings: 0 }, { rate: 288, bookings: 3 })).toEqual({
-      kind: "noData",
-    });
-    expect(compareRate({ rate: 310, bookings: 4 }, { rate: 0, bookings: 0 })).toBeNull();
-    expect(compareRate({ rate: 100.4, bookings: 1 }, { rate: 100.1, bookings: 1 })).toEqual({
-      kind: "unchanged",
-    });
-    expect(compareRate({ rate: 310, bookings: 4 }, { rate: 288, bookings: 3 })).toMatchObject({
+describe("dashboard conversion rate (VAY-2594)", () => {
+  const steps = (visits: number, booked: number) => [
+    { stage: "page_visit", count: visits },
+    { stage: "rate_selected", count: Math.round(visits / 2) },
+    { stage: "booking_completed", count: booked },
+  ];
+
+  it("divides confirmed bookings by visitors from one period's funnel", () => {
+    expect(conversionRate(steps(200, 3))).toBeCloseTo(1.5, 5);
+    expect(conversionRate(steps(0, 0))).toBeNull();
+    expect(conversionRate([])).toBeNull();
+  });
+
+  it("compares two periods' rates, and nothing without a previous rate", () => {
+    expect(compareConversion(1.5, 2.5)).toEqual({
       kind: "change",
-      up: true,
-      amount: 22,
+      up: false,
+      amount: 100,
+      percent: 40,
     });
+    expect(compareConversion(4.878, 3.191)).toMatchObject({ kind: "change", up: true });
+    expect(compareConversion(1.501, 1.499)).toEqual({ kind: "unchanged" });
+    // No bookings in either period, with visitors: unchanged, not "no data".
+    expect(compareConversion(0, 0)).toEqual({ kind: "unchanged" });
+    expect(compareConversion(2, 0)).toMatchObject({ kind: "change", up: true, percent: null });
+    expect(compareConversion(2, null)).toBeNull();
+    expect(compareConversion(null, 2)).toEqual({ kind: "noData" });
   });
 });
 
-describe("dashboard sparkline shape", () => {
+describe("dashboard sparkline path", () => {
   it("stays a flat grey line until two points exist and one is nonzero", () => {
-    expect(sparklineShape([])).toBeNull();
-    expect(sparklineShape([5])).toBeNull();
-    expect(sparklineShape([0, 0, 0])).toBeNull();
+    expect(sparklinePath([])).toBeNull();
+    expect(sparklinePath([5])).toBeNull();
+    expect(sparklinePath([0, 0, 0])).toBeNull();
   });
 
-  it("spans the box from the first to the last point and closes the area below", () => {
-    const shape = sparklineShape([0, 2, 1]);
-    expect(shape?.line).toBe("M0.00,30.00 L50.00,2.00 L100.00,16.00");
-    expect(shape?.area).toBe(`${shape?.line} L100,32 L0,32 Z`);
+  it("spans the box from the first to the last point", () => {
+    expect(sparklinePath([0, 2, 1])).toBe("M0.00,30.00 L50.00,2.00 L100.00,16.00");
   });
 
   it("draws a flat nonzero series across the middle", () => {
-    expect(sparklineShape([3, 3])?.line).toBe("M0.00,16.00 L100.00,16.00");
+    expect(sparklinePath([3, 3])).toBe("M0.00,16.00 L100.00,16.00");
   });
 });

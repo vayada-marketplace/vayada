@@ -4,27 +4,33 @@
 import {
   checkMessage,
   type ChatMessage,
+  type ConversationOwner,
   type ConversationStore,
   type StartTurnResult,
   type TurnEnd,
 } from "./conversationStore.js";
+
+const TURN_ID = "22222222-2222-4222-8222-222222222222";
 
 export function memoryConversationStore(options: { start?: StartTurnResult } = {}) {
   const messages: ChatMessage[] = [];
   const ends: TurnEnd[] = [];
   const contracts: string[] = [];
   let running = false;
+  let owner: ConversationOwner | undefined;
   const store: ConversationStore = {
     async startTurn(input) {
       contracts.push(input.contract.sha256);
       if (options.start) return options.start;
       checkMessage(input.message, ["user"]);
+      owner = input.owner;
       messages.push(input.message);
       running = true;
       return {
         status: "started",
-        conversationId: "11111111-1111-4111-8111-111111111111",
-        turnId: "22222222-2222-4222-8222-222222222222",
+        conversationId:
+          input.conversationId ?? input.newConversationId ?? "11111111-1111-4111-8111-111111111111",
+        turnId: TURN_ID,
         messages: [...messages],
       };
     },
@@ -41,6 +47,13 @@ export function memoryConversationStore(options: { start?: StartTurnResult } = {
       if (!running) return false;
       running = false;
       ends.push(end);
+      return true;
+    },
+    async stopTurn(who, _conversationId, turnId) {
+      const mine = owner && JSON.stringify(who) === JSON.stringify(owner);
+      if (!running || !mine || (turnId !== undefined && turnId !== TURN_ID)) return false;
+      running = false;
+      ends.push({ status: "stopped", reason: "user_stopped" });
       return true;
     },
     async read() {

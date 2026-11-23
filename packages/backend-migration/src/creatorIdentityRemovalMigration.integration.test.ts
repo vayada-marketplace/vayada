@@ -344,6 +344,9 @@ const REFERENCES = [
   // 0552 (VAY-2518): assistant chats go with the account and with the user who wrote them.
   "identity.organizations <- platform.ai_conversations(organization_id) c",
   "identity.users <- platform.ai_conversations(user_id) c",
+  // 0553 (VAY-2524): an AI change, with the text it carries, goes with the account and the user.
+  "identity.organizations <- platform.ai_operations(organization_id) c",
+  "identity.users <- platform.ai_operations(user_id) c",
   // 0540 (VAY-2457): the agency page's header image clears with its media.
   "platform.media_objects <- booking.account_booking_pages(header_image_media_object_id) n",
   "platform.media_objects <- booking.booking_settings(header_logo_media_object_id) n",

@@ -403,6 +403,10 @@ import {
 } from "./ai/actionLog/aiActivity.js";
 import { startAiActionLogRetentionWorker } from "./jobs/aiActionLogRetention.js";
 import { createPgAiBudgetAdmin } from "./ai/usage/budgetAdmin.js";
+import { createPgAiBudget } from "./ai/usage/budgetGate.js";
+import { createPgAiActionLog } from "./ai/actionLog/actionLog.js";
+import { createPgConversationStore } from "./ai/assistant/conversationStore.js";
+import { createAiProvider, enabledAiProvidersFromEnv } from "./ai/provider/aiProvider.js";
 import { createAiSpendAlert } from "./ai/usage/spendAlert.js";
 import {
   createPgGuestProfileLinkStore,
@@ -468,6 +472,37 @@ const aiBudgetAdmin = createPgAiBudgetAdmin({
   pool: aiBudgetPool,
   defaultMonthlyLimitMicroUsd: config.aiDefaultMonthlyBudgetMicroUsd,
 });
+// VAY-2518: the in-app assistant, mounted only with AI_ASSISTANT_ENABLED=true. Even then no model
+// is called until AI_PROVIDERS_ENABLED names a provider: it answers that AI is off. Every model
+// call is reserved against the hotel account's budget.
+const assistantPool = config.aiAssistantEnabled
+  ? new pg.Pool({ connectionString: targetDatabaseUrl, connectionTimeoutMillis: 5_000 })
+  : undefined;
+const assistantActionLog = assistantPool
+  ? createPgAiActionLog({ connectionString: targetDatabaseUrl, pool: assistantPool })
+  : undefined;
+const assistant =
+  assistantPool && assistantActionLog
+    ? {
+        store: createPgConversationStore({ pool: assistantPool }),
+        provider: createAiProvider({
+          enabledProviders: enabledAiProvidersFromEnv(process.env),
+          budget: createPgAiBudget({
+            pool: assistantPool,
+            defaultMonthlyLimitMicroUsd: config.aiDefaultMonthlyBudgetMicroUsd,
+          }),
+          log: { warn: (fields, message) => app.log.warn(fields, message) },
+        }),
+        actionLog: assistantActionLog,
+        timeZoneOf: async (propertyId: string) => {
+          const { rows } = await assistantPool.query<{ timezone: string | null }>(
+            "SELECT timezone FROM hotel_catalog.property_locations WHERE property_id = $1::uuid",
+            [propertyId],
+          );
+          return rows[0]?.timezone;
+        },
+      }
+    : undefined;
 
 const bookingSettingsRepository = createPgTargetBookingSettingsRepository({
   connectionString: targetDatabaseUrl,
@@ -2616,6 +2651,7 @@ const app = buildApp({
   identityPrivacyAllowedOrigins: config.identityPrivacyAllowedOrigins,
   publicHotelProfileRepository,
   aiActivityStore,
+  assistant,
   bookingWebCheckoutAdapter,
   bookingWebDisplayRates,
   bookingWebAttributionSink:
@@ -3997,6 +4033,8 @@ app.addHook("onClose", async () => {
 
 app.addHook("onClose", async () => {
   await aiActivityStore.close();
+  // The action log shares the assistant's pool: ending the pool closes both.
+  await assistantPool?.end();
 });
 
 // VAY-2508: AI action log rows go after two years; expired Inbox assist results are emptied.

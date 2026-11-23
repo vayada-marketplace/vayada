@@ -65,8 +65,11 @@ export type AssistantTool = {
 export type TurnEndEvent = { type: "end"; status: TurnEnd["status"]; reason: string | null };
 export type RefusedEvent = {
   type: "refused";
-  /** unavailable: AI is switched off (no allowed route); nothing was stored. */
-  reason: "unavailable" | "not_found" | "busy" | "read_only";
+  /**
+   * unavailable: AI is switched off (no allowed route). restarting: this API task is shutting
+   * down; ask again in a moment. Nothing was stored for either.
+   */
+  reason: "unavailable" | "restarting" | "not_found" | "busy" | "read_only";
   readOnlyReason?: ReadOnlyReason;
 };
 export type AssistantEvent =
@@ -82,7 +85,15 @@ export type AssistantTurnInput = {
   owner: ConversationOwner;
   /** Absent: a new conversation. */
   conversationId?: string;
+  /** A new conversation's id, chosen beforehand. */
+  newConversationId?: string;
   question: string;
+  /**
+   * vayada's note for this turn (today's date, the property), sent with the question in the same
+   * message and marked `providerOptions.vayada.context`, so the panel shows only the question.
+   * Per turn, not in the system prompt, which must stay the same for every hotel and every day.
+   */
+  context?: string;
   /** vayada's system prompt, the same for every hotel (it is part of the cached prefix). */
   instructions: string;
   tools: readonly AssistantTool[];
@@ -140,8 +151,17 @@ export async function runAssistantTurn(
   const started = await store.startTurn({
     owner: input.owner,
     ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+    ...(input.newConversationId ? { newConversationId: input.newConversationId } : {}),
     contract,
-    message: { role: "user", content: input.question },
+    message: {
+      role: "user",
+      content: input.context
+        ? [
+            { type: "text", text: input.context, providerOptions: { vayada: { context: true } } },
+            { type: "text", text: input.question },
+          ]
+        : input.question,
+    },
   });
   if (started.status === "read_only")
     return refuse({ type: "refused", reason: "read_only", readOnlyReason: started.reason });
@@ -234,6 +254,7 @@ export async function runAssistantTurn(
       }
       if (!result.ok) {
         if (closedElsewhere) return finish({ status: "interrupted" });
+        if (input.shuttingDown?.()) return finish({ status: "interrupted", reason: "shutdown" });
         if (input.signal?.aborted) return finish({ status: "stopped", reason: "user_stopped" });
         if (now() >= deadline) return finish({ status: "stopped", reason: "time_limit" });
         return finish(STEP_FAILURE[result.reason]);
@@ -278,6 +299,9 @@ export async function runAssistantTurn(
     if (!tool) return failure("unknown_tool", "There is no tool with this name.");
     if (seen > limits.repeats)
       return failure("repeat_limit", "This exact call already ran in this turn: use its result.");
+    // A closing server answers no route any more: say so instead of a failure that never ran.
+    if (input.shuttingDown?.())
+      return failure("not_run", "The server restarted before this ran. Ask again in a moment.");
     if (running.signal.aborted) return failure("not_run", "Stopped before this ran.");
     if (now() >= deadline) return failure("not_run", "The turn ran out of time before this ran.");
     emit({ type: "tool", toolCallId: call.toolCallId, name: call.toolName, status: "running" });

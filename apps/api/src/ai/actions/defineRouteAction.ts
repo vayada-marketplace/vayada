@@ -3,8 +3,8 @@
 // The route, its method and its path parameters come from the route list captured from the app
 // (routeManifest.generated.ts). A person writes only what the route can not say about itself: the
 // description for the AI, the output allow-list (only the fields the job needs; unknown keys are
-// stripped), the permission the route really checks, the read tier and the surfaces. Phase 1 is
-// read-only: only GET routes can become actions.
+// stripped), the permission the route really checks, the read tier and the surfaces. Only GET
+// routes become read actions; a write is a change action (defineChangeAction.ts, VAY-2522).
 import type { PermissionKey } from "@vayada/backend-auth";
 import { z } from "zod";
 
@@ -14,7 +14,7 @@ import type { RouteKey } from "../routeManifest.generated.js";
 export type ReadTier = "R0" | "R1" | "R2-finance" | "R2";
 export type AiSurface = "mcp" | "in_app";
 
-type QueryShape = Record<string, z.ZodType>;
+export type QueryShape = Record<string, z.ZodType>;
 
 export type RouteActionDefinition<Output extends z.ZodType = z.ZodType> = {
   /** snake_case, e.g. "rooms_list". A changed input or output is a new version. */
@@ -73,40 +73,16 @@ export class ActionDefinitionError extends Error {
 export function defineRouteAction<Output extends z.ZodType>(
   definition: RouteActionDefinition<Output>,
 ): RouteAction<Output> {
-  const key = `${definition.name}@${definition.version}`;
-  const fail = (problem: string): never => {
-    throw new ActionDefinitionError(key, problem);
-  };
-  if (!NAME.test(definition.name)) fail("name must be snake_case");
-  if (!Number.isInteger(definition.version) || definition.version < 1) fail("bad version");
-  const description = definition.description.trim();
-  if (description.length < 20 || description.length > 1000) fail("description length");
-  if (UUID_IN_TEXT.test(description)) fail("the description must not carry ids");
-  if (!definition.reviewedBy.trim()) fail("needs a reviewer");
+  const { key, fail, description } = checkActionBasics(definition);
   if (definition.surfaces.length === 0) fail("needs a surface");
 
   const [method, routeUrl] = splitRouteKey(definition.route);
-  if (method !== "GET") fail("Phase 1 is read-only: only GET routes can become actions");
+  if (method !== "GET") fail("only GET routes can become read actions");
 
-  const pathParamNames = routeUrl
-    .split("/")
-    .filter((segment) => segment.startsWith(":"))
-    .map((segment) => segment.slice(1));
-  const shape: Record<string, z.ZodType> = {};
-  for (const name of pathParamNames) {
-    // Only the canonical property id has a known shape; every other parameter is declared
-    // (review ids are the OTA's own ids, module and step ids are enums).
-    const schema =
-      definition.pathParams?.[name] ?? (PROPERTY_PARAMS.has(name) ? z.uuid() : undefined);
-    if (!schema) fail(`path parameter ${name} needs a schema`);
-    shape[name] = schema!;
-  }
+  const { pathParamNames, shape } = pathParamsShape(routeUrl, definition.pathParams, fail);
   for (const [name, schema] of Object.entries(definition.query ?? {})) {
     if (name in shape) fail(`query ${name} clashes with a path parameter`);
     shape[name] = schema;
-  }
-  for (const name of Object.keys(definition.pathParams ?? {})) {
-    if (!pathParamNames.includes(name)) fail(`pathParams.${name} is not in the route`);
   }
 
   assertAllowList(definition.output, key);
@@ -129,6 +105,50 @@ export function defineRouteAction<Output extends z.ZodType>(
     pathParamNames,
     input: input as unknown as z.ZodType<Record<string, unknown>>,
   });
+}
+
+/** The rules every action shares: name, version, description and reviewer (VAY-2507, VAY-2522). */
+export function checkActionBasics(definition: {
+  name: string;
+  version: number;
+  description: string;
+  reviewedBy: string;
+}): { key: string; fail: (problem: string) => never; description: string } {
+  const key = `${definition.name}@${definition.version}`;
+  const fail = (problem: string): never => {
+    throw new ActionDefinitionError(key, problem);
+  };
+  if (!NAME.test(definition.name)) fail("name must be snake_case");
+  if (!Number.isInteger(definition.version) || definition.version < 1) fail("bad version");
+  const description = definition.description.trim();
+  if (description.length < 20 || description.length > 1000) fail("description length");
+  if (UUID_IN_TEXT.test(description)) fail("the description must not carry ids");
+  if (!definition.reviewedBy.trim()) fail("needs a reviewer");
+  return { key, fail, description };
+}
+
+/** The route's path parameters and their schemas; every one must have a schema. */
+export function pathParamsShape(
+  routeUrl: string,
+  pathParams: QueryShape | undefined,
+  fail: (problem: string) => never,
+): { pathParamNames: string[]; shape: Record<string, z.ZodType> } {
+  const pathParamNames = routeUrl
+    .split("/")
+    .filter((segment) => segment.startsWith(":"))
+    .map((segment) => segment.slice(1));
+  const shape: Record<string, z.ZodType> = {};
+  for (const name of pathParamNames) {
+    // Only the canonical property id has a known shape; every other parameter is declared
+    // (review ids are the OTA's own ids, module and step ids are enums).
+    const schema = pathParams?.[name] ?? (PROPERTY_PARAMS.has(name) ? z.uuid() : undefined);
+    if (!schema) fail(`path parameter ${name} needs a schema`);
+    shape[name] = schema!;
+  }
+  for (const name of Object.keys(pathParams ?? {})) {
+    if (!pathParamNames.includes(name)) fail(`pathParams.${name} is not in the route`);
+  }
+  return { pathParamNames, shape };
 }
 
 export function splitRouteKey(route: string): [string, string] {
