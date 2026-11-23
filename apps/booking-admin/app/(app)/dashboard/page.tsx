@@ -452,6 +452,16 @@ function PageViewsDetailModal({ locale, t, timeZone, onClose }: PageViewsDetailM
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  // The window renders at the end of <body>, so focus moves into it and goes back on close.
+  useEffect(() => {
+    const opener = document.activeElement;
+    closeRef.current?.focus();
+    return () => {
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -517,6 +527,7 @@ function PageViewsDetailModal({ locale, t, timeZone, onClose }: PageViewsDetailM
             {t("dashboard.pageViewsModal.title")}
           </h2>
           <button
+            ref={closeRef}
             type="button"
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 -mr-2 -mt-1 p-2"
