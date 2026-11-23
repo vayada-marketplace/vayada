@@ -607,7 +607,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       const problem = delegatedWriteProblem({
         method: request.method,
         routeUrl: request.routeOptions.url,
-        params: request.params,
+        // find-my-way's params object has its own prototype: hand over a plain copy.
+        params: { ...(request.params as Record<string, unknown>) },
         query: request.query,
         body: request.body,
         idempotencyKey: typeof header === "string" ? header : undefined,

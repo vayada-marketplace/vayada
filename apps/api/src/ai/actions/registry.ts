@@ -44,7 +44,9 @@ const ACTION_ROUTES = new Set<string>(
 );
 const BY_KEY = new Map(AI_ACTIONS.map((action) => [action.key, action]));
 const CHANGE_BY_KEY = new Map(CHANGE_ACTIONS.map((action) => [action.key, action]));
-const CHANGE_BY_ROUTE = new Map(CHANGE_ACTIONS.map((action) => [action.route, action]));
+const CHANGE_BY_ROUTE = new Map<string, ChangeAction>(
+  CHANGE_ACTIONS.map((action) => [action.route, action]),
+);
 
 /**
  * The auth plugin's delegation gate: an AI may run exactly the routes of registered actions. A
@@ -168,7 +170,11 @@ export function assertChangeRegistry(
   readActions: readonly RouteAction[],
 ): readonly ChangeAction[] {
   assertActionList([...readActions, ...actions]);
+  const routes = new Set<string>();
   for (const action of actions) {
+    // The app holds a delegated write to the one change of its route (delegatedWriteProblem).
+    if (routes.has(action.route)) throw new Error(`AI change ${action.key}: a second on its route`);
+    routes.add(action.route);
     if (!isDefinedChangeAction(action)) {
       throw new Error(`AI change ${action.key} was not made by defineChangeAction`);
     }

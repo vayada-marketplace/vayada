@@ -76,6 +76,7 @@ describe("defineChangeAction (VAY-2522)", () => {
     ["a precondition that is not a body field", { preconditions: ["version"] }],
     ["a change to something that exists without a precondition", { preconditions: [] }],
     ["a precondition on something said to be new", { addsNew: true }],
+    ["something new on a DELETE", { addsNew: true, preconditions: [] }],
     [
       "a rule across body fields, which the input would lose",
       {
@@ -235,6 +236,17 @@ describe("the change registry (VAY-2522)", () => {
     expect(reachable).toHaveLength(10);
   });
 
+  it("registers one change per route: the app holds a write to the change of its route", () => {
+    const twin = defineChangeAction({
+      ...base,
+      name: "test_release_twin",
+      route:
+        "PUT /api/pms/properties/:propertyId/room-types/:roomTypeId/physical-units/:roomUnitId",
+      pathParams: { roomTypeId: z.uuid(), roomUnitId: z.uuid() },
+    });
+    expect(() => assertChangeRegistry([roomStatusSet, twin], [])).toThrow(/second on its route/);
+  });
+
   it("registers only changes defineChangeAction made", () => {
     expect(() => assertChangeRegistry([{ ...roomStatusSet }], [])).toThrow(/defineChangeAction/);
   });
@@ -275,25 +287,40 @@ describe("delegatedWriteProblem: a delegated write is held to its change (VAY-25
     expect(delegatedWriteProblem(write())).toBeNull();
   });
 
+  const NOT_THIS_CHANGE = /not what this change lets/;
   it.each([
-    ["another route", { routeUrl: "/api/pms/properties/:propertyId/room-blocks/:blockId" }],
-    ["another method on the route", { method: "DELETE" }],
-    ["the room's number", { body: { expectedRevision: 2, changes: { operationalLabel: "9" } } }],
+    [
+      "another route",
+      { routeUrl: "/api/pms/properties/:propertyId/room-blocks/:blockId" },
+      /not the route/,
+    ],
+    ["another method on the route", { method: "DELETE" }, /not the route/],
+    [
+      "the room's number",
+      { body: { expectedRevision: 2, changes: { operationalLabel: "9" } } },
+      NOT_THIS_CHANGE,
+    ],
     [
       "the room's floor next to its state",
       { body: { expectedRevision: 2, changes: { status: "maintenance", floor: "3" } } },
+      NOT_THIS_CHANGE,
     ],
     [
       "a field of its own",
       { body: { expectedRevision: 2, changes: { status: "maintenance" }, extra: 1 } },
+      NOT_THIS_CHANGE,
     ],
-    ["a body field for a path parameter", { body: { expectedRevision: 2, propertyId: PROPERTY } }],
-    ["a query", { query: { force: "1" } }],
-    ["no retry key", { idempotencyKey: undefined }],
-    ["a retry key of another change", { idempotencyKey: `${KEY}:room_block_release` }],
-    ["a body that is not an object", { body: [1] }],
-  ])("refuses %s", (_label, overrides) => {
-    expect(delegatedWriteProblem(write(overrides))).not.toBeNull();
+    [
+      "a body field for a path parameter",
+      { body: { expectedRevision: 2, propertyId: PROPERTY } },
+      /path parameter/,
+    ],
+    ["a query", { query: { force: "1" } }, /query/],
+    ["no retry key", { idempotencyKey: undefined }, /retry key/],
+    ["a retry key of another change", { idempotencyKey: `${KEY}:room_block_release` }, /retry key/],
+    ["a body that is not an object", { body: [1] }, /malformed/],
+  ])("refuses %s", (_label, overrides, reason) => {
+    expect(delegatedWriteProblem(write(overrides))).toMatch(reason);
   });
 
   it("holds a body retry key to the request's own", () => {

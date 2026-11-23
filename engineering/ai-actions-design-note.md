@@ -601,9 +601,10 @@ write can not escape a delegation narrowed to fewer properties). Beside the read
   (notes and room blocks take `commandId` and `idempotencyKey`); the executor fills it, bound to the
   action (`<key>:<action name>`), and the AI can never send it;
 - `preconditions`: body fields the route compares with the current state (expected versions); only
-  a change declared `addsNew` (a note, a new block) has none. No read action returns these versions
+  a POST declared `addsNew` (a note, a new block) has none. No read action returns these versions
   yet: VAY-2524 decides who fills them (captured when the Ask-first card is shown, so the person's
-  Yes binds to what they saw) and the reads that expose them come with their batch;
+  Yes binds to what they saw) and, if the executor does, takes them out of the AI's input before any
+  surface offers a change; the reads that expose them come with their batch;
 - `authoritySites`: every rights check inside the transaction, from
   [`authoritySites.ts`](../apps/api/src/ai/actions/authoritySites.ts); only checks that already take
   the AI's limits may be listed, so a change through any other can not be registered;
@@ -614,7 +615,8 @@ write can not escape a delegation narrowed to fewer properties). Beside the read
 sends it with the user's change delegation. On the server, the delegation gate lets an AI write
 reach only a change's route, and the app then holds every delegated write to that change before the
 route runs (`delegatedWriteProblem`, a `preValidation` hook): no query, no field the change does not
-let the AI send, the retry key bound to the change and, for body keys, the request's own.
+let the AI send, the retry key bound to the change and, for body keys, the request's own. One route
+has at most one change.
 
 The first batch (plan row 50): `booking_note_add`, `room_block_create`, `room_block_release`,
 `room_status_set`, `thread_mark_done`, `thread_follow_up`, `thread_reopen`. No surface offers them

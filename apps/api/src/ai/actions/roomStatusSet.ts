@@ -8,8 +8,9 @@ export const roomStatusSet = defineChangeAction({
   version: 1,
   description:
     "Sets one room of a property to available, maintenance or out of order. Use rooms_list for " +
-    "the room and its room type. vayada refuses it while the room has bookings or blocks on it. " +
-    "The person confirms it in vayada before it runs.",
+    "the room and its room type. vayada refuses it for a room that ever had a booking or a " +
+    "block, and maintenance or out of order once its room type sells rooms from today on. The " +
+    "person confirms it in vayada before it runs.",
   // The physical-room update; the AI may send only the state (not the number or the floor).
   route: "PUT /api/pms/properties/:propertyId/room-types/:roomTypeId/physical-units/:roomUnitId",
   pathParams: { roomTypeId: z.uuid(), roomUnitId: z.uuid() },

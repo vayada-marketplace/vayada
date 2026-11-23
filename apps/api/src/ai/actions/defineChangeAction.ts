@@ -156,6 +156,7 @@ export function defineChangeAction<Output extends z.ZodType>(
   if ((definition.preconditions.length === 0) !== (definition.addsNew === true)) {
     fail("preconditions are needed unless, and only unless, it adds something new");
   }
+  if (definition.addsNew && method !== "POST") fail("only a POST adds something new");
 
   const sites = new Set<string>();
   for (const site of definition.authoritySites) {

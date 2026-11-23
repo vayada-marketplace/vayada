@@ -152,39 +152,33 @@ describe.each(CHANGE_FIXTURES.map((fixture) => [fixture.action, fixture] as cons
       const context = () => changeContext(OWNER, ORG_A, granted);
       const built = changeRequest(action, fixture.input(P1), `op_${randomUUID()}:1`);
       if (!built.ok) throw new Error(built.message);
-      const refused = async (request: typeof built.request) => {
+      const refused = async (request: typeof built.request, reason: RegExp) => {
         const before = fixture.commands().length;
         const response = await injectAsDelegate(app, { context: await context(), ...request });
         expect(response.statusCode).toBe(403);
-        expect(response.json().code).toBe("delegation_refused");
+        expect(response.json()).toMatchObject({ code: "delegation_refused", message: reason });
         expect(fixture.commands().length).toBe(before);
       };
       // A field the change does not let the AI send, also one the route itself would take.
-      await refused({ ...built.request, body: { ...built.request.body, smuggled: FORBIDDEN } });
-      // A retry key that is not bound to this change.
+      await refused(
+        { ...built.request, body: { ...built.request.body, smuggled: FORBIDDEN } },
+        /not what this change lets/,
+      );
+      // A retry key that is not bound to this change, in the header and the body alike.
       const loose = `op_${randomUUID()}:1`;
-      await refused({
-        ...built.request,
-        idempotencyKey: loose,
-        body:
-          action.idempotency.in === "body"
-            ? Object.fromEntries(
-                Object.entries(built.request.body).map(([field, value]) => [
-                  field,
-                  (action.idempotency as { fields: readonly string[] }).fields.includes(field)
-                    ? loose
-                    : value,
-                ]),
-              )
-            : built.request.body,
-      });
-      if (action.idempotency.in === "body") {
+      const keyFields = action.idempotency.in === "body" ? action.idempotency.fields : [];
+      const looseBody = { ...built.request.body };
+      for (const field of keyFields) looseBody[field] = loose;
+      await refused(
+        { ...built.request, idempotencyKey: loose, body: looseBody },
+        /retry key is not this change's/,
+      );
+      if (keyFields.length > 0) {
         // The body's retry key must be the request's own.
-        const field = action.idempotency.fields[0]!;
-        await refused({
-          ...built.request,
-          body: { ...built.request.body, [field]: "other-key-1" },
-        });
+        await refused(
+          { ...built.request, body: { ...built.request.body, [keyFields[0]!]: "other-key-1" } },
+          /retry key in the body/,
+        );
       }
     });
 
