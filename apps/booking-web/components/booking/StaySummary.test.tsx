@@ -149,7 +149,7 @@ it("lists each extra and ends with the step's button", () => {
     onChangeRoom,
     action: createElement("button", { type: "button" }, "Continue to your details"),
   });
-  expect(text()).toContain("1 nightUS$175Airport transferUS$30Total");
+  expect(text()).toContain("1 nightUS$175Airport transferUS$30Taxes & feesIncludedTotal");
   expect(text()).not.toContain("Extras");
   expect(text()).toContain("Pay nowUS$0At the hotelUS$205Continue to your details");
   const total = document.querySelector('[data-testid="stay-total"]')!;

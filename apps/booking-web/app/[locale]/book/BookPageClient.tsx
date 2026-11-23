@@ -98,6 +98,7 @@ import {
 } from "@/lib/bookFlow";
 import { useReplacementQuote } from "@/lib/hooks/useReplacementQuote";
 import { serverNow } from "@/lib/serverClock";
+import { resolveLocale } from "@/lib/utils";
 import { bookingService } from "@/services/api/booking";
 import { funnelErrorCode, trackEvent } from "@/services/api/tracking";
 import {
