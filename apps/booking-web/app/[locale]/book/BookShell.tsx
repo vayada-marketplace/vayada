@@ -41,6 +41,7 @@ export default function BookShell({
   back,
   exit,
   rooms,
+  amountsCurrency,
 }: {
   steps: readonly BookStep[];
   current: BookStep;
@@ -52,6 +53,8 @@ export default function BookShell({
   exit?: { label: string; onClick: () => void };
   /** Back to the rooms from the indicator's Rooms, after the rooms step. */
   rooms?: { onClick: () => void; disabled?: boolean };
+  /** The currency of the price shown (VAY-2588): the footers credit the rates while it's converted. */
+  amountsCurrency?: string;
 }) {
   const t = useTranslations("steps");
   const { hotel } = useHotel();
@@ -151,12 +154,12 @@ export default function BookShell({
       {details ? (
         <>
           <div className="max-lg:hidden">
-            <BookingFooter />
+            <BookingFooter rateCredit amountsCurrency={amountsCurrency} />
           </div>
-          <CheckoutFooter />
+          <CheckoutFooter amountsCurrency={amountsCurrency} />
         </>
       ) : (
-        <BookingFooter />
+        <BookingFooter rateCredit amountsCurrency={amountsCurrency} />
       )}
     </div>
   );
