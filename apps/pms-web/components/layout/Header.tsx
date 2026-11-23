@@ -25,6 +25,7 @@ import { useTranslation, SUPPORTED_LANGUAGES } from "@/lib/i18n";
 import { usePmsAccess } from "@/lib/settings/PmsAccessContext";
 import { CURRENCY_OPTIONS } from "@/lib/constants/options";
 import SearchModal from "./SearchModal";
+import { holdsPrices } from "@/lib/utils/holdsPrices";
 import NotificationsBell from "@vayada/product-onboarding/NotificationsBell";
 import { useHostNotifications } from "@vayada/product-onboarding/useHostNotifications";
 import { pmsNotificationsClient } from "@/services/api/pmsNotificationsClient";
@@ -36,9 +37,6 @@ interface DayStats {
   remainingArrivals: number;
   departures: number;
 }
-
-/** A room page can hold unsaved prices: leaving through the document lets its beforeunload warning run. */
-const holdsPrices = () => /^\/rooms\/[^/]+$/.test(window.location.pathname);
 
 export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
   const router = useRouter();

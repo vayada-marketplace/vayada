@@ -132,7 +132,9 @@ export default function NotificationsBell({
     if (!open) resetSync();
   }, [open, resetSync]);
 
-  if (status === "unavailable") return null;
+  // Nothing until the first read answers: people the feed refuses (PMS front desk without the Booking
+  // Engine) never see the bell flash up and vanish.
+  if (status === "unavailable" || (status === "loading" && !feed)) return null;
 
   const unread = feed?.unread.all ?? 0;
   // Red with nothing unread: the sync error was read but is still failing (a dot without a count).
@@ -357,7 +359,11 @@ export default function NotificationsBell({
                       {alert.canViewDetails && (
                         <button
                           type="button"
-                          onClick={() => void openChannelManager(alert)}
+                          onClick={() => {
+                            // In PMS the page changes under the header: close the panel too.
+                            setOpen(false);
+                            void openChannelManager(alert);
+                          }}
                           className="inline-flex h-[30px] items-center rounded-[7px] border border-red-200 bg-white px-3 text-[13px] font-medium text-red-800 hover:bg-red-50"
                         >
                           {t("notifications.sync.viewDetails")}

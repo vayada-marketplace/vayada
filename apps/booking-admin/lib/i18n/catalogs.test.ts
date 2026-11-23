@@ -87,6 +87,8 @@ describe("admin translation catalogs", () => {
       "product-onboarding/src/NearbyPlacesEditor.tsx",
       "product-onboarding/src/NearbyPlacesMap.tsx",
       "product-onboarding/src/NearbyAreaSearch.tsx",
+      // The notifications bell, shared with PMS (VAY-2591).
+      "product-onboarding/src/NotificationsBell.tsx",
     ]) {
       files.push(resolve(root, "../packages", file));
     }

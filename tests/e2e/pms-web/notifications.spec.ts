@@ -138,26 +138,33 @@ test.describe("PMS notifications bell (VAY-2591)", () => {
 
   test("Extend opens the promo code in Booking Admin on the same property", async ({ page }) => {
     await setUp(page, feed());
+    const destination = `${new URL("/handoff", bookingAdminOrigin()).toString()}#code=${"c".repeat(40)}`;
     const handoffs: unknown[] = [];
     await page.route("**/auth/handoff/create", (route) => {
       handoffs.push(route.request().postDataJSON());
-      return route.fulfill({ status: 500, json: { code: "unavailable" } });
+      return route.fulfill({ json: { destination } });
     });
-    await page.route("http://admin.booking.localhost:3003/**", (route) =>
-      route.fulfill({ contentType: "text/html", body: "<h1>Booking Admin</h1>" }),
+    // A document request carries no fragment, so the landing route matches origin and path only.
+    await page.route(
+      (url) => url.origin === bookingAdminOrigin() && url.pathname === "/handoff",
+      (route) =>
+        route.fulfill({
+          contentType: "text/html",
+          body: "<!doctype html><title>Booking Admin handoff</title><h1>Booking Admin handoff</h1>",
+        }),
     );
     await page.goto("/dashboard");
     await bell(page).click();
     await panel(page).getByRole("button", { name: "Extend" }).click();
-    // Without the one-time exchange it asks Booking Admin's sign-in, keeping the page to open.
-    await page.waitForURL(/^http:\/\/admin\.booking\.localhost:3003\//);
-    expect(decodeURIComponent(page.url())).toContain("/promo-codes?edit=promo_summer20");
-    for (const handoff of handoffs)
-      expect(handoff).toMatchObject({
+    await expect.poll(() => page.url()).toBe(destination);
+    expect(handoffs).toEqual([
+      {
+        routingHints: { propertyId: PMS_WEB_PROPERTY_ID },
         sourceSurface: "pms-web",
-        targetSurface: "booking-admin",
         targetPath: "/promo-codes?edit=promo_summer20",
-      });
+        targetSurface: "booking-admin",
+      },
+    ]);
   });
 
   // A refused read logs the browser's own 403 line, so this one runs without the page-health check.
@@ -169,3 +176,13 @@ test.describe("PMS notifications bell (VAY-2591)", () => {
     await expect(bell(page)).toHaveCount(0);
   });
 });
+
+function bookingAdminOrigin(): string {
+  return (
+    process.env.E2E_SETUP_HOST_BASE_URL ||
+    process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL ||
+    (process.env.CI === "true" || process.env.E2E_START_SERVERS === "1"
+      ? "http://admin.booking.localhost:3003"
+      : "https://admin.booking.localhost")
+  );
+}

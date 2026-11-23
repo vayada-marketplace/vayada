@@ -110,6 +110,29 @@ export function withMarks(
   return { ...next, badge };
 }
 
+// A property whose feed answered 403 stays refused for this browser tab (VAY-2591): no read on every page load.
+const REFUSED_KEY = "vayada.notifications.refused";
+
+function refusedHere(propertyId: string): boolean {
+  try {
+    return (JSON.parse(sessionStorage.getItem(REFUSED_KEY) ?? "[]") as unknown[]).includes(
+      propertyId,
+    );
+  } catch {
+    return false;
+  }
+}
+
+function rememberRefusal(propertyId: string): void {
+  try {
+    const refused = JSON.parse(sessionStorage.getItem(REFUSED_KEY) ?? "[]") as unknown[];
+    if (!refused.includes(propertyId))
+      sessionStorage.setItem(REFUSED_KEY, JSON.stringify([...refused, propertyId].slice(-20)));
+  } catch {
+    // Storage blocked: the next page load asks again.
+  }
+}
+
 /** Applies the marks still on their way: a running "Mark all read" first, then each row's own mark. */
 function withPendingMarks(
   feed: HostNotificationFeed,
@@ -136,7 +159,7 @@ export function useHostNotifications(hotelId: string | undefined, client: Client
 
   const load = useCallback(
     async (force = false) => {
-      if (!propertyId || refused.current === propertyId) return;
+      if (!propertyId || refused.current === propertyId || refusedHere(propertyId)) return;
       if (document.visibilityState === "hidden") return;
       if (!force && Date.now() - lastRead.current < READ_SPACING_MS) return;
       lastRead.current = Date.now();
@@ -152,6 +175,7 @@ export function useHostNotifications(hotelId: string | undefined, client: Client
         const code = (error as { status?: number } | null)?.status;
         if (code === 401 || code === 403) {
           refused.current = propertyId;
+          if (code === 403) rememberRefusal(propertyId);
           setFeed(null);
           setStatus("unavailable");
         } else setStatus((current) => (current === "ready" ? current : "failed"));
@@ -162,7 +186,11 @@ export function useHostNotifications(hotelId: string | undefined, client: Client
 
   useEffect(() => {
     setFeed(null);
-    setStatus(propertyId && refused.current !== propertyId ? "loading" : "unavailable");
+    setStatus(
+      propertyId && refused.current !== propertyId && !refusedHere(propertyId)
+        ? "loading"
+        : "unavailable",
+    );
     pending.current = null;
   }, [propertyId]);
 
