@@ -152,6 +152,7 @@ describe("who may use the assistant for a property (VAY-2518, the production che
     const outcome = await tools![0]!.run(rooms.input(WORLD.P1), {
       toolCallId: "toolu_03",
       signal: stop.signal,
+      turnId: "turn-1",
     });
     expect(outcome).toMatchObject({ ok: false, error: { code: "stopped" } });
     await slowApp.close();
