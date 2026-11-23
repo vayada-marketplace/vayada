@@ -14,6 +14,8 @@ import { pmsSetupExitPropertyId } from "@vayada/product-onboarding";
 import { useTranslation } from "@/lib/i18n";
 import { PmsAccessProvider } from "@/lib/settings/PmsAccessContext";
 import { getPmsSelfAccess, type PmsSelfAccess } from "@/services/api/pmsStaffClient";
+import { AssistantDrawer, AssistantProvider } from "@vayada/assistant-ui";
+import { apiClient } from "@/services/api/client";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { t, locale } = useTranslation();
@@ -111,6 +113,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     // shell's bottom — and any sticky footers anchored to it — sit behind
     // the browser chrome until Safari collapses it mid-scroll.
     <PmsAccessProvider access={access}>
+      <AssistantProvider app="pms" http={apiClient} locale={locale}>
       <div className="h-[100dvh] flex overflow-x-hidden">
         {/* Mobile overlay */}
         {sidebarOpen && (
@@ -128,7 +131,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="flex-1 flex flex-col min-w-0">
           <Header onMenuToggle={() => setSidebarOpen(!sidebarOpen)} />
           <InboxHiddenNotice permissions={access.permissions} />
-          <main className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain bg-gray-50">
+          {/* VAY-2519: the assistant's panel sits beside the page and pushes it aside. */}
+          <div className="flex min-h-0 flex-1">
+          <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain bg-gray-50">
             {/* VAY-2246: until the hotel account accepts the hotel terms and DPA, its account admin sees this. */}
             <HotelAccountAgreementsBanner
               client={hotelAccountAgreementsApi}
@@ -138,8 +143,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             />
             {children}
           </main>
+          <AssistantDrawer />
+          </div>
         </div>
       </div>
+      </AssistantProvider>
     </PmsAccessProvider>
   );
 }

@@ -129,6 +129,9 @@ jobs:
       - name: Web security package tests
         run: npm --workspace @vayada/web-security run test
 
+      - name: Assistant UI package tests
+        run: npm --workspace @vayada/assistant-ui run test
+
       - name: Booking Web tests
         run: npm --workspace vayada-booking-engine-frontend run test
 

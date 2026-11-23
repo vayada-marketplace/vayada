@@ -5,6 +5,7 @@ module.exports = {
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
     "./lib/**/*.{js,ts,jsx,tsx}",
+    "../../packages/assistant-ui/src/**/*.{js,ts,jsx,tsx}",
     "../../packages/feature-hub/src/**/*.{js,ts,jsx,tsx}",
     "../../packages/product-onboarding/src/**/*.{js,ts,jsx,tsx}",
     "../../packages/settings-ui/src/**/*.{js,ts,jsx,tsx}",

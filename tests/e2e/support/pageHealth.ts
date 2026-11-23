@@ -13,10 +13,12 @@ const ignoredConsoleErrorPatterns = [
 
 /** The PMS mocks answer their test property's (PMS_WEB_PROPERTY_ID in pmsWebMocks.ts) pricing-v2 read with 404
  * ("no prices yet", before a first publication); the Booking Admin mocks answer its setup checklist with 404 (not
- * mounted while the server's first run is off, VAY-2247). A 404 for any other property or path still fails. */
+ * mounted while the server's first run is off, VAY-2247); both answer the assistant's chat list with 404 (switched
+ * off, VAY-2519). A 404 for any other property or path still fails. */
 const expectedMissingByDefault = [
   /\/api\/pms\/properties\/f6853000-0000-4000-8000-000000000001\/pricing-v2$/,
   /\/api\/hotel-setup\/properties\/f6853000-0000-4000-8000-000000000001\/checklist(\/v2)?$/,
+  /\/api\/ai\/assistant\/conversations\?/,
 ];
 
 /** `expectedMissingUrls`: resources whose 404 is a documented "not configured yet" answer. */

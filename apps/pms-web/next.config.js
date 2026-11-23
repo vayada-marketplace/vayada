@@ -24,7 +24,7 @@ const nextConfig = {
   },
   output: "standalone",
   allowedDevOrigins: ["127.0.0.1", ...(authPublicHostname ? [authPublicHostname] : [])],
-  transpilePackages: ["@vayada/feature-hub", "@vayada/web-security"],
+  transpilePackages: ["@vayada/assistant-ui", "@vayada/feature-hub", "@vayada/web-security"],
   turbopack: {
     root: path.join(__dirname, "../.."),
   },

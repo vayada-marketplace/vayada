@@ -6,6 +6,8 @@ import { usePathname, useRouter } from "next/navigation";
 import HotelAccountAgreementsBanner from "@vayada/product-onboarding/HotelAccountAgreementsBanner";
 import { useNearbyHistoryGuard } from "@vayada/product-onboarding/useNearbyNavigationGuard";
 import Header from "@/components/layout/Header";
+import { AssistantDrawer, AssistantProvider } from "@vayada/assistant-ui";
+import { apiClient } from "@/services/api/client";
 import Sidebar from "@/components/layout/Sidebar";
 import { hotelAccountAgreementsMessages } from "@/components/layout/hotelAccountAgreementsMessages";
 import { hotelAccountAgreementsApi } from "@/services/api/hotelAccountAgreementsClient";
@@ -102,6 +104,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
+    <AssistantProvider app="booking_admin" http={apiClient} locale={locale}>
     <div className="h-screen flex">
       {/* Mobile overlay */}
       {sidebarOpen && (
@@ -120,7 +123,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <Header onMenuToggle={() => setSidebarOpen(!sidebarOpen)} />
         {/* relative: absolutely placed content (sr-only text) scrolls inside <main> instead of
             stretching the window, which showed a white strip under the app (VAY-2344). */}
-        <main className="relative flex-1 overflow-auto bg-gray-50 [scrollbar-gutter:stable]">
+        {/* VAY-2519: the assistant's panel sits beside the page and pushes it aside. */}
+        <div className="flex min-h-0 flex-1">
+        <main className="relative min-w-0 flex-1 overflow-auto bg-gray-50 [scrollbar-gutter:stable]">
           {/* VAY-2246: the account admin accepts the hotel terms and DPA; Privacy & data has its own button. */}
           <HotelAccountAgreementsBanner
             client={hotelAccountAgreementsApi}
@@ -132,8 +137,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           />
           {children}
         </main>
+        <AssistantDrawer />
+        </div>
       </div>
     </div>
+    </AssistantProvider>
   );
 }
 
