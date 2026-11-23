@@ -10,6 +10,8 @@ import type { AiActionGroup, AiActionOutcome, AiRecordRef, AiSurface } from "./a
  * clamped to the database clock like that function.
  */
 export const AI_ACTION_LOG_RETENTION = "2 years";
+/** AI changes, with the text their arguments can carry (plan 3.6, VAY-2524). */
+export const AI_OPERATION_RETENTION = "90 days";
 
 export type AiActivityItem = {
   id: string;
@@ -49,9 +51,14 @@ export type AiActivityStore = {
   list(query: AiActivityQuery): Promise<AiActivityItem[]>;
 };
 
+export type AiRetentionBatch = { logRows: number; assistResults: number; operations: number };
+
 export type AiActionLogRetentionStore = {
-  /** Deletes up to `limit` expired log rows and empties up to `limit` expired assist results. */
-  purgeExpiredBatch(now: Date, limit: number): Promise<{ logRows: number; assistResults: number }>;
+  /**
+   * Deletes up to `limit` expired log rows, empties up to `limit` expired assist results and
+   * deletes up to `limit` AI changes past their retention (VAY-2524).
+   */
+  purgeExpiredBatch(now: Date, limit: number): Promise<AiRetentionBatch>;
   close(): Promise<void>;
 };
 
@@ -151,7 +158,26 @@ export function createPgAiActionLogRetentionStore(config: {
          SELECT count(*)::int AS n FROM purged`,
         [now.toISOString(), limit],
       );
-      return { logRows: log.rows[0]?.n ?? 0, assistResults: assist.rows[0]?.n ?? 0 };
+      const operations = await db.query<{ n: number }>(
+        `WITH expired AS (
+           SELECT id FROM platform.ai_operations
+            WHERE created_at < LEAST($1::timestamptz, now()) - $3::text::interval
+            ORDER BY created_at
+            LIMIT $2
+            FOR UPDATE SKIP LOCKED
+         ), deleted AS (
+           DELETE FROM platform.ai_operations operation USING expired
+            WHERE operation.id = expired.id
+           RETURNING 1
+         )
+         SELECT count(*)::int AS n FROM deleted`,
+        [now.toISOString(), limit, AI_OPERATION_RETENTION],
+      );
+      return {
+        logRows: log.rows[0]?.n ?? 0,
+        assistResults: assist.rows[0]?.n ?? 0,
+        operations: operations.rows[0]?.n ?? 0,
+      };
     },
     close: () => db.end(),
   };

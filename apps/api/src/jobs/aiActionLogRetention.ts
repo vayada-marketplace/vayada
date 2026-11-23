@@ -1,8 +1,9 @@
-import type { AiActionLogRetentionStore } from "../ai/actionLog/aiActivity.js";
+import type { AiActionLogRetentionStore, AiRetentionBatch } from "../ai/actionLog/aiActivity.js";
 
 /**
  * VAY-2508: deletes AI action log rows after two years and empties Inbox assist results whose
- * 30-day retention passed (design note §7.3). Runs every six hours, batch by batch.
+ * 30-day retention passed (design note §7.3); VAY-2524: deletes AI changes after 90 days. Runs
+ * every six hours, batch by batch.
  */
 export const AI_ACTION_LOG_RETENTION_BATCH_SIZE = 500;
 export const AI_ACTION_LOG_RETENTION_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -14,7 +15,7 @@ export function startAiActionLogRetentionWorker(options: {
   batchSize?: number;
   now?: () => Date;
   logger: {
-    info(context: { logRows: number; assistResults: number }, message: string): void;
+    info(context: AiRetentionBatch, message: string): void;
     error(context: { err: unknown }, message: string): void;
   };
 }): { runNow(): Promise<void>; close(): Promise<void> } {
@@ -23,15 +24,16 @@ export function startAiActionLogRetentionWorker(options: {
   let activeRun: Promise<void> | undefined;
   let closing = false;
   const drain = async (cutoff: Date) => {
-    const total = { logRows: 0, assistResults: 0 };
+    const total: AiRetentionBatch = { logRows: 0, assistResults: 0, operations: 0 };
     for (;;) {
       const batch = await options.store.purgeExpiredBatch(cutoff, batchSize);
       total.logRows += batch.logRows;
       total.assistResults += batch.assistResults;
-      if (closing || (batch.logRows < batchSize && batch.assistResults < batchSize)) break;
+      total.operations += batch.operations;
+      if (closing || Object.values(batch).every((count) => count < batchSize)) break;
     }
-    if (total.logRows + total.assistResults > 0)
-      options.logger.info(total, "Purged expired AI action log rows and Inbox assist results");
+    if (total.logRows + total.assistResults + total.operations > 0)
+      options.logger.info(total, "Purged expired AI action log rows, assist results and changes");
   };
   const runNow = (): Promise<void> => {
     if (closing) return Promise.resolve();
