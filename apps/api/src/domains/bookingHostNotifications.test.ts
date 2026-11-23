@@ -252,6 +252,29 @@ describe("Booking Admin notifications feed (VAY-2349)", () => {
     expect(byKey.get(createdKey)).toMatchObject({ done: false, read: false });
     expect(done.unread).toEqual({ all: 2, bookings: 1, needsAction: 1, updates: 0 });
     expect(done.badge).toBe("blue");
+    // Done items have their own 50 rows: 50 newer done items never push out one that still needs action.
+    const many = Array.from({ length: 51 }, (_, index) =>
+      event({
+        eventType: "guest_booking.expired",
+        actorType: "system",
+        lifecycleStatus: "expired",
+        paymentMethod: "bank_transfer",
+        cancellationReason: "pending_booking_expired",
+        occurredAt: new Date(Date.UTC(2026, 9, 25, 9, index)),
+      }),
+    );
+    const open = many[0]!;
+    const crowded = buildHostNotificationFeed(
+      sources({
+        bookingEvents: many,
+        doneKeys: new Set(many.slice(1).map((row) => `booking-event:${row.eventId}`)),
+      }),
+      viewer,
+    );
+    expect(crowded.items.filter((item) => !item.done).map((item) => item.key)).toEqual([
+      `booking-event:${open.eventId}`,
+    ]);
+    expect(crowded.items.filter((item) => item.done)).toHaveLength(50);
     // "Mark all read" leaves done items alone: they are read already.
     expect(
       readAllKeys({ ...base, doneKeys: new Set([missedKey]) }, viewer, {

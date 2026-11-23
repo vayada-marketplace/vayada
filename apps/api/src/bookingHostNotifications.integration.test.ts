@@ -389,13 +389,36 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking Admin notifications (runtime login)
     expect(await item(viewer, missedKey)).toMatchObject({ done: true, read: true });
     expect(await item(colleague, missedKey)).toMatchObject({ done: true, read: true });
 
-    // "Mark as unread" is the person's own, and a done item stays read.
+    // "Mark as unread" is the person's own read mark...
     await repository.markRead(propertyId, viewerId, [createdKey, missedKey]);
-    await repository.markRead(propertyId, colleagueId, [createdKey]);
-    await repository.markUnread(propertyId, viewerId, [createdKey, missedKey]);
+    await repository.markRead(propertyId, colleagueId, [createdKey, missedKey]);
+    await repository.markUnread(propertyId, viewer, [createdKey]);
     expect(await item(viewer, createdKey)).toMatchObject({ read: false, done: false });
     expect(await item(colleague, createdKey)).toMatchObject({ read: true });
-    expect(await item(viewer, missedKey)).toMatchObject({ done: true, read: true });
+    // ...and on a done item it is the undo, for the whole team: it needs action again.
+    await repository.markUnread(propertyId, viewer, [missedKey]);
+    expect(await item(viewer, missedKey)).toMatchObject({ done: false, read: false });
+    expect(await item(colleague, missedKey)).toMatchObject({ done: false, read: true });
+    // Only what is in the person's own feed can be undone (here, a promo code it doesn't list).
+    await admin.query(
+      `INSERT INTO booking.host_notification_done(property_id,notification_key,done_by)
+       VALUES($1,'promo-limit:hidden:1',$2)`,
+      [propertyId, viewerId],
+    );
+    await repository.markUnread(propertyId, { ...viewer, canReadPromos: false }, [
+      "promo-limit:hidden:1",
+    ]);
+    expect(
+      (
+        await admin.query(
+          "SELECT 1 FROM booking.host_notification_done WHERE property_id=$1 AND notification_key='promo-limit:hidden:1'",
+          [propertyId],
+        )
+      ).rowCount,
+    ).toBe(1);
+    await admin.query(
+      "DELETE FROM booking.host_notification_done WHERE notification_key='promo-limit:hidden:1'",
+    );
 
     // Done marks older than 60 days are deleted on the next done mark.
     await admin.query(

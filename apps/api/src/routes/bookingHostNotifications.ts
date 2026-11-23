@@ -74,7 +74,7 @@ export async function registerBookingHostNotificationRoutes(
     }
   });
 
-  // VAY-2591: "Mark as unread" removes the person's own read marks.
+  // VAY-2591: "Mark as unread" removes the person's own read marks, and undoes "Mark as done" for the team.
   app.post(
     "/properties/:propertyId/notifications/unread",
     { onRequest },
@@ -83,7 +83,7 @@ export async function registerBookingHostNotificationRoutes(
       const keys = notificationKeys(request.body);
       if (!keys) return reply.status(400).send({ code: "invalid_notification_keys" });
       try {
-        await repository.markUnread(propertyId, viewer.userId, keys);
+        await repository.markUnread(propertyId, viewer, keys);
         return reply.header("Cache-Control", "no-store").status(204).send();
       } catch (error) {
         request.log.error({ err: error, propertyId }, "Notifications mark unread failed");

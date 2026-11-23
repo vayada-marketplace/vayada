@@ -139,8 +139,13 @@ export type BookingHostNotificationsRepository = {
   /** Null when the property doesn't exist. */
   read(propertyId: string, viewer: HostNotificationViewer): Promise<HostNotificationFeed | null>;
   markRead(propertyId: string, userId: string, keys: readonly string[]): Promise<void>;
-  /** Removes the person's own read marks. An item someone marked done stays read. */
-  markUnread(propertyId: string, userId: string, keys: readonly string[]): Promise<void>;
+  /** Removes the person's own read marks. On an item someone marked done it also takes the done mark away,
+   * for the whole team: "Mark as unread" is how done is undone. */
+  markUnread(
+    propertyId: string,
+    viewer: HostNotificationViewer,
+    keys: readonly string[],
+  ): Promise<void>;
   /** Marks items done for the property's whole team: only the given keys that are needs-action items in
    * the person's feed now. Returns the keys it marked. */
   markDone(
@@ -470,8 +475,9 @@ function allNotifications(
 
 const URGENT: ReadonlySet<HostNotificationKind> = new Set(["payment_not_received"]);
 
-/** Turns the source rows into the bell's feed: newest first, the newest 50 of each tab's category, and
- * unread counts over all 30 days. */
+/** Turns the source rows into the bell's feed: newest first, the newest 50 of each tab's category (done
+ * items counted apart, so they never push out what still needs action), and unread counts over all 30
+ * days. */
 export function buildHostNotificationFeed(
   sources: HostNotificationSources,
   viewer: HostNotificationViewer,
@@ -486,15 +492,17 @@ export function buildHostNotificationFeed(
     unread.all += 1;
     unread.needsAction += 1;
   }
-  const shown: Record<HostNotificationCategory, number> = {
+  const shown: Record<HostNotificationCategory | "done", number> = {
     bookings: 0,
     needs_action: 0,
     updates: 0,
+    done: 0,
   };
   const listed: HostNotification[] = [];
   for (const item of items) {
-    if (shown[item.category] < HOST_NOTIFICATION_LIST_LIMIT) {
-      shown[item.category] += 1;
+    const bucket = item.done ? "done" : item.category;
+    if (shown[bucket] < HOST_NOTIFICATION_LIST_LIMIT) {
+      shown[bucket] += 1;
       listed.push(item);
     }
     if (item.read) continue;
@@ -689,6 +697,14 @@ WHERE user_id = $1::uuid AND property_id = $2::uuid AND notification_key = ANY($
 const DONE_KEYS_SQL = `
 SELECT notification_key AS key FROM booking.host_notification_done WHERE property_id = $1::uuid`;
 
+const DONE_AMONG_SQL = `
+SELECT notification_key AS key FROM booking.host_notification_done
+WHERE property_id = $1::uuid AND notification_key = ANY($2::text[])`;
+
+const UNDONE_SQL = `
+DELETE FROM booking.host_notification_done
+WHERE property_id = $1::uuid AND notification_key = ANY($2::text[])`;
+
 // The first person to mark an item done keeps it; the property's other done marks older than 60 days go.
 const DONE_SQL = `
 WITH pruned AS (
@@ -797,10 +813,24 @@ export function createPgBookingHostNotificationsRepository(
       if (valid.length === 0) return;
       await inTransaction(false, (client) => mark(client, userId, propertyId, valid));
     },
-    async markUnread(propertyId, userId, keys) {
+    async markUnread(propertyId, viewer, keys) {
       const valid = [...new Set(keys)].filter(isHostNotificationKey);
       if (valid.length === 0) return;
-      await inTransaction(false, (client) => client.query(UNMARK_SQL, [userId, propertyId, valid]));
+      await inTransaction(false, async (client) => {
+        await client.query(UNMARK_SQL, [viewer.userId, propertyId, valid]);
+        const done = await rows<{ key: string }>(client, DONE_AMONG_SQL, [propertyId, valid]);
+        if (done.length === 0) return;
+        // Undone only what the person may mark done: needs-action items in their own feed.
+        const sources = await readSources(client, propertyId, viewer);
+        const undone = sources
+          ? doneableKeys(
+              sources,
+              viewer,
+              done.map((row) => row.key),
+            )
+          : [];
+        if (undone.length > 0) await client.query(UNDONE_SQL, [propertyId, undone]);
+      });
     },
     markDone: (propertyId, viewer, keys) =>
       inTransaction(false, async (client) => {

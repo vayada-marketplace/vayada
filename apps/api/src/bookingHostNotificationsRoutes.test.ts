@@ -154,7 +154,11 @@ describe("Booking Admin notification routes", () => {
       payload: { keys: [key] },
     });
     expect(unread.statusCode).toBe(204);
-    expect(repository.markUnread).toHaveBeenCalledWith(propertyId, actorUserId, [key]);
+    expect(repository.markUnread).toHaveBeenCalledWith(
+      propertyId,
+      expect.objectContaining({ userId: actorUserId, organizationId }),
+      [key],
+    );
 
     const done = await app.inject({
       method: "POST",
