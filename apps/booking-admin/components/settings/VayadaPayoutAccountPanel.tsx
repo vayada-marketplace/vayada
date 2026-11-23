@@ -89,9 +89,8 @@ export function VayadaPayoutAccountPanel({
   useEffect(load, [load]);
 
   const active = activePayoutDestination(saved);
-  const hasAccount = active !== null;
   useEffect(() => {
-    if (!canEdit || !hasAccount) return;
+    if (!canEdit) return;
     let cancelled = false;
     getPayoutStatement(propertyId).then(
       (statement) => {
@@ -109,7 +108,7 @@ export function VayadaPayoutAccountPanel({
     return () => {
       cancelled = true;
     };
-  }, [canEdit, hasAccount, propertyId, t, locale]);
+  }, [canEdit, propertyId, t, locale]);
   const commandFor = (fingerprint: string) => {
     if (attempt.current?.fingerprint !== fingerprint)
       attempt.current = { fingerprint, commandId: crypto.randomUUID() };
@@ -342,7 +341,7 @@ export function VayadaPayoutAccountPanel({
         )}
       </div>
 
-      {canEdit && active && (
+      {canEdit && (
         <div
           className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-primary-50 px-4 py-3"
           data-testid="payout-statement-link"

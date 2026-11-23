@@ -46,8 +46,10 @@ const FILTERS: StatementFilter[] = ["all", "card", "deductions"];
 type State =
   | { kind: "loading" }
   | { kind: "failed" }
-  /** Not the owner (or not this hotel's member): payouts are the owner's (VAY-2401). */
+  /** Staff without the owner's permission: payouts are the owner's (VAY-2401). */
   | { kind: "ownerOnly" }
+  /** Refused for another reason (not this hotel's member, no active plan for it). */
+  | { kind: "noAccess" }
   /** vayada Payment isn't set up for the hotel, or nothing has been paid through it yet. */
   | { kind: "empty" }
   | { kind: "ready"; statement: PayoutStatement };
@@ -88,7 +90,17 @@ export function PayoutStatementPage({
     } catch (error) {
       if (!current()) return;
       const status = error instanceof ApiErrorResponse ? error.status : null;
-      setState({ kind: status === 403 ? "ownerOnly" : status === 404 ? "empty" : "failed" });
+      const code = error instanceof ApiErrorResponse ? error.data?.code : undefined;
+      setState({
+        kind:
+          status === 403
+            ? code === "missing_permission"
+              ? "ownerOnly"
+              : "noAccess"
+            : status === 404
+              ? "empty"
+              : "failed",
+      });
     }
   }, [load]);
 
@@ -139,6 +151,14 @@ export function PayoutStatementPage({
           >
             <p className="text-sm font-semibold">{t("settings.payouts.ownerOnlyTitle")}</p>
             <p className="mt-1 text-sm">{t("settings.payouts.ownerOnlyText")}</p>
+          </div>
+        )}
+        {state.kind === "noAccess" && (
+          <div
+            className="max-w-3xl rounded-xl border border-gray-200 bg-white px-5 py-4 text-sm text-gray-700"
+            data-testid="payout-statement-no-access"
+          >
+            {t("settings.payouts.noAccess")}
           </div>
         )}
         {state.kind === "empty" && (
@@ -324,7 +344,11 @@ function PayoutRow({
   return (
     <li className="border-t border-gray-200 py-[11px]" data-testid="payout-row">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm text-gray-900 md:flex-nowrap">
-        <span className="md:w-[200px] md:shrink-0">{day(payout.paidOn ?? payout.startedOn)}</span>
+        <span className="md:w-[200px] md:shrink-0">
+          {payout.paidOn
+            ? day(payout.paidOn)
+            : t("settings.payouts.startedOn", { date: day(payout.startedOn) })}
+        </span>
         <span className="font-medium md:w-[220px] md:shrink-0 md:font-normal">
           {formatMinor(payout.amountMinor, payout.currency)}
         </span>

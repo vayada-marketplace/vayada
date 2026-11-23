@@ -884,6 +884,8 @@
   "settings.payouts.goToPayments": "Naar Betalingen",
   "settings.payouts.paymentsLink": "Uitbetalingen en overzicht bekijken",
   "settings.payouts.paymentsNext": "Volgende uitbetaling {date} · {amount}",
+  "settings.payouts.noAccess": "Uitbetalingen zijn niet beschikbaar voor dit hotelaccount.",
+  "settings.payouts.startedOn": "Gestart {date}",
   "settings.billing.providerStripe": "Stripe Connect",
   "settings.billing.providerStripeDesc": "Uw eigen Stripe-account. Directe uitbetalingen.",
   "settings.billing.providerXendit": "Xendit",

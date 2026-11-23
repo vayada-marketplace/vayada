@@ -884,6 +884,8 @@
   "settings.payouts.goToPayments": "К платежам",
   "settings.payouts.paymentsLink": "Выплаты и выписка",
   "settings.payouts.paymentsNext": "Следующая выплата {date} · {amount}",
+  "settings.payouts.noAccess": "Выплаты недоступны для этого аккаунта отеля.",
+  "settings.payouts.startedOn": "Начато {date}",
   "settings.billing.providerStripe": "Stripe Connect",
   "settings.billing.providerStripeDesc": "Ваша собственная учетная запись Stripe. Прямые выплаты.",
   "settings.billing.providerXendit": "Xendit",

@@ -884,6 +884,8 @@
   "settings.payouts.goToPayments": "Vai a Pagamenti",
   "settings.payouts.paymentsLink": "Vedi pagamenti ed estratto",
   "settings.payouts.paymentsNext": "Prossimo pagamento {date} · {amount}",
+  "settings.payouts.noAccess": "I pagamenti non sono disponibili per questo account hotel.",
+  "settings.payouts.startedOn": "Avviato il {date}",
   "settings.billing.providerStripe": "Stripe Connect",
   "settings.billing.providerStripeDesc": "Il tuo account Stripe. Pagamenti diretti.",
   "settings.billing.providerXendit": "Xendit",

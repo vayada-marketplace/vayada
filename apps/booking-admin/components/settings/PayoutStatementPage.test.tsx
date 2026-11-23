@@ -302,12 +302,20 @@ describe("Settings › Payouts (VAY-2584)", () => {
 
   it("tells staff who aren't the owner that payouts are the owner's, and offers a retry on failure", async () => {
     const ownerOnly = await render(async () => {
-      throw new ApiErrorResponse(403, { code: "forbidden" } as never);
+      throw new ApiErrorResponse(403, { code: "missing_permission" } as never);
     });
     expect(textOf(byTestId(ownerOnly, "payout-statement-owner-only")[0]!)).toContain(
       "Only the account owner can see payouts",
     );
     expect(byTestId(ownerOnly, "payout-totals")).toHaveLength(0);
+    // Refused for another reason (not this hotel's, no active plan): not "you aren't the owner".
+    const noAccess = await render(async () => {
+      throw new ApiErrorResponse(403, { code: "missing_entitlement" } as never);
+    });
+    expect(textOf(byTestId(noAccess, "payout-statement-no-access")[0]!)).toContain(
+      "Payouts aren't available for this hotel account.",
+    );
+    expect(byTestId(noAccess, "payout-statement-owner-only")).toHaveLength(0);
 
     const load = vi
       .fn<(propertyId: string) => Promise<PayoutStatement>>()

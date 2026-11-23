@@ -17,7 +17,7 @@ const statement = {
 const today = new Date("2026-11-25T10:00:00Z");
 const path = (id = propertyId) => `/api/finance/properties/${id}/payout-statement`;
 
-async function appFor(variant: "missing" | "permission" | "manager" | "owner" | "unlisted") {
+async function appFor(variant: "missing" | "permission" | "manager" | "owner") {
   const repository = { statement: vi.fn(async () => statement) };
   const app = Fastify();
   app.decorateRequest("authContext", null);
@@ -56,8 +56,6 @@ async function appFor(variant: "missing" | "permission" | "manager" | "owner" | 
   await app.register(registerFinancePayoutStatementRoutes, {
     prefix: "/api",
     repository,
-    // "unlisted": an owner whose hotel vayada Payment isn't set up for.
-    open: (id: string) => variant !== "unlisted" && id === propertyId,
     propertyAccessRepository: {
       findMembershipPropertyScope: async () => ({
         mode: "assigned",
@@ -92,25 +90,30 @@ it.each([
   }
 });
 
-it("never reads another hotel's statement, and answers only where vayada Payment is set up", async () => {
+it("never reads another hotel's statement, nor one for a malformed id", async () => {
   const { app, repository } = await appFor("owner");
   try {
-    // A hotel the owner isn't linked to.
+    // A hotel the owner isn't linked to: the access check refuses it.
     const other = await app.inject({ method: "GET", url: path(otherHotel) });
-    expect([403, 404]).toContain(other.statusCode);
-    expect((await app.inject({ method: "GET", url: path("not-a-uuid") })).statusCode).toBe(400);
+    expect(other.statusCode).toBe(403);
+    expect(other.json().code).not.toBe("missing_permission");
+    // Not a hotel id: refused (the access check, like the payout account's, runs first).
+    const malformed = await app.inject({ method: "GET", url: path("not-a-uuid") });
+    expect([400, 403]).toContain(malformed.statusCode);
     expect(repository.statement).not.toHaveBeenCalled();
   } finally {
     await app.close();
   }
-  const unlisted = await appFor("unlisted");
+});
+
+it("tells staff the statement is the owner's (missing_permission)", async () => {
+  const { app } = await appFor("manager");
   try {
-    const response = await unlisted.app.inject({ method: "GET", url: path() });
-    expect(response.statusCode).toBe(404);
-    expect(response.json()).toEqual({ code: "vayada_payment_unavailable" });
-    expect(unlisted.repository.statement).not.toHaveBeenCalled();
+    const response = await app.inject({ method: "GET", url: path() });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().code).toBe("missing_permission");
   } finally {
-    await unlisted.app.close();
+    await app.close();
   }
 });
 

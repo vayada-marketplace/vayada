@@ -884,6 +884,8 @@
   "settings.payouts.goToPayments": "Ke Pembayaran",
   "settings.payouts.paymentsLink": "Lihat pencairan dan laporan",
   "settings.payouts.paymentsNext": "Pencairan berikutnya {date} · {amount}",
+  "settings.payouts.noAccess": "Pencairan tidak tersedia untuk akun hotel ini.",
+  "settings.payouts.startedOn": "Dimulai {date}",
   "settings.billing.providerStripe": "Stripe Connect",
   "settings.billing.providerStripeDesc": "Akun Stripe Anda sendiri. Pembayaran langsung.",
   "settings.billing.providerXendit": "Xendit",

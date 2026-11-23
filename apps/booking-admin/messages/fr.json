@@ -884,6 +884,8 @@
   "settings.payouts.goToPayments": "Aller aux paiements",
   "settings.payouts.paymentsLink": "Voir les versements et le relevé",
   "settings.payouts.paymentsNext": "Prochain versement {date} · {amount}",
+  "settings.payouts.noAccess": "Les versements ne sont pas disponibles pour ce compte hôtel.",
+  "settings.payouts.startedOn": "Lancé le {date}",
   "settings.billing.providerStripe": "Stripe Connect",
   "settings.billing.providerStripeDesc": "Votre propre compte Stripe. Paiements directs.",
   "settings.billing.providerXendit": "Xendit",

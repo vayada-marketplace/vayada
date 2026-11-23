@@ -884,6 +884,8 @@
   "settings.payouts.goToPayments": "決済設定へ",
   "settings.payouts.paymentsLink": "お支払いと明細を見る",
   "settings.payouts.paymentsNext": "次回のお支払い {date} · {amount}",
+  "settings.payouts.noAccess": "このホテルアカウントではお支払いを表示できません。",
+  "settings.payouts.startedOn": "{date}に開始",
   "settings.billing.providerStripe": "Stripe Connect",
   "settings.billing.providerStripeDesc": "あなた自身の Stripe アカウント。直接支払い。",
   "settings.billing.providerXendit": "Xendit",

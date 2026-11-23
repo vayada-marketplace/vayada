@@ -9,6 +9,8 @@ const url = process.env.TEST_DATABASE_URL;
 if (url && !new URL(url).pathname.endsWith("_test")) throw new Error("Unsafe test database");
 const hotel = randomUUID(),
   otherHotel = randomUUID(),
+  mondayHotel = randomUUID(),
+  mondayDestination = randomUUID(),
   actorId = randomUUID(),
   destinationId = randomUUID();
 const admin = new pg.Client({ connectionString: url });
@@ -87,6 +89,8 @@ async function line(input: {
 
 /** A payout as staff left it: started, then perhaps sent, returned by the bank or cancelled. */
 async function payout(input: {
+  property?: string;
+  destination?: string;
   id: string;
   amount: number;
   startedAt: string;
@@ -107,11 +111,11 @@ async function payout(input: {
        CASE WHEN $10::timestamptz IS NULL THEN NULL ELSE 'staff-only reason' END)`,
     [
       input.id,
-      hotel,
+      input.property ?? hotel,
       randomUUID(),
       input.amount,
       input.livemode ?? true,
-      destinationId,
+      input.destination ?? destinationId,
       actorId,
       input.startedAt,
       input.paidOn ?? null,
@@ -119,6 +123,7 @@ async function payout(input: {
     ],
   );
   await line({
+    property: input.property,
     kind: "payout",
     gross: -input.amount,
     at: input.startedAt,
@@ -127,6 +132,7 @@ async function payout(input: {
   });
   if (input.returnedAt)
     await line({
+      property: input.property,
       kind: "payout_returned",
       gross: input.amount,
       at: input.returnedAt,
@@ -140,15 +146,33 @@ beforeAll(async () => {
   await admin.connect();
   await admin.query(
     `INSERT INTO hotel_catalog.properties (id,public_id,display_name)
-     VALUES ($1,$1::uuid::text,'Statement Villa'),($2,$2::uuid::text,'Other Inn')`,
-    [hotel, otherHotel],
+     VALUES ($1,$1::uuid::text,'Statement Villa'),($2,$2::uuid::text,'Other Inn'),
+       ($3,$3::uuid::text,'Monday Lodge')`,
+    [hotel, otherHotel, mondayHotel],
   );
   await admin.query(
     `INSERT INTO finance.payout_destinations
        (id,property_id,revision,state_version,ciphertext,key_arn,account_last4,country_code)
-     VALUES ($1,$2,1,1,$3,'key','6789','ID')`,
-    [destinationId, hotel, Buffer.alloc(40, 1)],
+     VALUES ($1,$2,1,1,$3,'key','6789','ID'),($4,$5,1,1,$3,'key','4321','LK')`,
+    [destinationId, hotel, Buffer.alloc(40, 1), mondayDestination, mondayHotel],
   );
+  // Monday Lodge: IDR 1,000,000 owed for a stay that checked out on 10 Nov; staff paid 600,000 of
+  // it on Monday 16 Nov, so 400,000 is still owed.
+  await line({
+    property: mondayHotel,
+    kind: "charge",
+    gross: 100_000_000,
+    at: "2026-11-08T08:00:00Z",
+    checkOut: "2026-11-10",
+  });
+  await payout({
+    property: mondayHotel,
+    destination: mondayDestination,
+    id: randomUUID(),
+    amount: 60_000_000,
+    startedAt: "2026-11-16T09:00:00Z",
+    paidOn: "2026-11-16",
+  });
   // IDR 3,200,000 paid by card; fees: the plan's IDR 256,000 and vayada Payment's 6% (192,000).
   const a = await line({
     kind: "charge",
@@ -364,5 +388,28 @@ it.skipIf(!url)(
         today: new Date("2026-11-25T10:00:00Z"),
       }),
     ).toEqual({ totals: [], account: null, payouts: [], lines: [] });
+  },
+);
+
+it.skipIf(!url)(
+  "what is still owed after a Monday's payouts goes out the next Monday, not today",
+  async () => {
+    const totals = async (today: string) =>
+      (await repository.statement({ propertyId: mondayHotel, today: new Date(today) })).totals[0]!
+        .nextPayout;
+    // Monday 16 Nov, after staff started that day's payout: the rest waits a week.
+    expect(await totals("2026-11-16T15:00:00Z")).toEqual({
+      on: "2026-11-23",
+      cutoff: "2026-11-22",
+      amountMinor: "40000000",
+      balanceMinor: "40000000",
+    });
+    // Monday 23 Nov, before staff start: it goes out today.
+    expect(await totals("2026-11-23T06:00:00Z")).toEqual({
+      on: "2026-11-23",
+      cutoff: "2026-11-22",
+      amountMinor: "40000000",
+      balanceMinor: "40000000",
+    });
   },
 );

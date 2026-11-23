@@ -7,14 +7,18 @@ import {
   mockPayoutStatement,
   mockVayadaPayments,
   PAYOUT_STATEMENT,
+  PAYOUT_STATEMENT_ROUTE,
 } from "./vayadaPaymentsFixtures";
 
 // VAY-2584: Settings › Payouts shows the owner of a vayada Payment hotel what it is owed, each
-// Monday payout and every line that adds to or takes from it.
+// Monday payout and every line that adds to or takes from it. The browser clock is fixed: dates leave
+// out the year only within the current year.
+const NOW = new Date("2026-11-25T10:00:00Z");
 
 test("the owner sees what is owed, each payout and every deduction, on desktop and phone", async ({
   page,
 }, testInfo) => {
+  await page.clock.setFixedTime(NOW);
   await mockBookingAdminAuthenticatedSession(page);
   await mockBookingAdminShellRoutes(page);
   await mockPayoutStatement(page);
@@ -29,8 +33,10 @@ test("the owner sees what is owed, each payout and every deduction, on desktop a
   await expect(totals).toContainText("IDR 34,100,000");
 
   const payouts = page.getByTestId("payout-row");
-  await expect(payouts).toHaveCount(4);
-  await expect(payouts.nth(2)).toContainText("Returned by the bank");
+  await expect(payouts).toHaveCount(5);
+  await expect(payouts.nth(0)).toContainText("Started Wed 25 Nov");
+  await expect(payouts.nth(0)).toContainText("Being sent");
+  await expect(payouts.nth(3)).toContainText("Returned by the bank");
 
   const lines = page.getByTestId("statement-line");
   await expect(lines).toHaveCount(7);
@@ -42,6 +48,11 @@ test("the owner sees what is owed, each payout and every deduction, on desktop a
   await expect(lines.nth(5)).toContainText("+1,750,000");
   await expect(lines.nth(6)).toContainText("The Mon 9 Nov payout came back from the bank.");
   await page.screenshot({ path: testInfo.outputPath("payouts-desktop.png"), fullPage: true });
+  // Booking Admin scrolls inside its own container: a second shot for the statement.
+  await page
+    .getByRole("heading", { name: "Statement" })
+    .evaluate((el) => el.scrollIntoView({ block: "start" }));
+  await page.screenshot({ path: testInfo.outputPath("payouts-desktop-statement.png") });
 
   await page.getByRole("button", { name: "Deductions" }).click();
   await expect(lines).toHaveCount(3);
@@ -55,18 +66,29 @@ test("the owner sees what is owed, each payout and every deduction, on desktop a
   // Phone: every line still reads, nothing runs off the screen.
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(lines.nth(0)).toContainText("2,752,000");
-  await expect(lines.nth(0).getByText("Card payment", { exact: true })).toBeVisible();
+  // Both layouts are in the page; the phone one is the one showing.
+  await expect(
+    lines.nth(0).getByText("Card payment", { exact: true }).filter({ visible: true }),
+  ).toHaveCount(1);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
     ),
   ).toBe(true);
-  await page.screenshot({ path: testInfo.outputPath("payouts-phone.png"), fullPage: true });
+  await page
+    .getByRole("heading", { name: "Payouts", level: 1 })
+    .evaluate((el) => el.scrollIntoView({ block: "start" }));
+  await page.screenshot({ path: testInfo.outputPath("payouts-phone.png") });
+  await page
+    .getByRole("heading", { name: "Statement" })
+    .evaluate((el) => el.scrollIntoView({ block: "start" }));
+  await page.screenshot({ path: testInfo.outputPath("payouts-phone-statement.png") });
 });
 
 test("staff who aren't the owner are told payouts are the owner's; a hotel without payouts sees an empty state", async ({
   page,
 }, testInfo) => {
+  await page.clock.setFixedTime(NOW);
   await mockBookingAdminAuthenticatedSession(page);
   await mockBookingAdminShellRoutes(page);
   await mockPayoutStatement(page, 403);
@@ -77,7 +99,7 @@ test("staff who aren't the owner are told payouts are the owner's; a hotel witho
   await expect(page.getByTestId("statement-line")).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("payouts-staff.png"), fullPage: true });
 
-  await page.unroute("**/payout-statement");
+  await page.unroute(PAYOUT_STATEMENT_ROUTE);
   await mockPayoutStatement(page, 404);
   await page.reload();
   const empty = page.getByTestId("payout-statement-empty");
@@ -94,6 +116,7 @@ test("Payments links the owner to the statement with the next payout", async ({
     process.env.E2E_BOOKING_ADMIN_PROD !== "1",
     "Requires a production booking-admin build so the authenticated shell hydrates.",
   );
+  await page.clock.setFixedTime(NOW);
   await mockVayadaPayments(page, {
     available: true,
     statement: PAYOUT_STATEMENT,

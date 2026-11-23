@@ -220,6 +220,14 @@ function account(row: {
  * are separate ledgers that never mix. */
 export function createVayadaPaymentPayoutRepository(connectionString: string, codec?: Codec) {
   const pool = new pg.Pool({ connectionString, max: 5 });
+  // Hotels' own statements (VAY-2584) read on a pool of their own, so owners opening Payouts never
+  // queue in front of staff starting or marking payouts.
+  const statementPool = new pg.Pool({
+    connectionString,
+    max: 3,
+    connectionTimeoutMillis: 5_000,
+    application_name: "vayada-payout-statement",
+  });
 
   /** The account in use. `lock` (a payout start): a replacement saving at the same moment makes
    * the start find no account instead of one being replaced under it. */
@@ -423,20 +431,8 @@ export function createVayadaPaymentPayoutRepository(connectionString: string, co
      * every line and payout matches what Vayada staff see; the totals are taken at the hotel's
      * next payout day instead of staff's last cut-off. */
     async statement(input: { propertyId: string; today: Date }): Promise<VayadaPayoutStatement> {
-      const balancesAt = (next: { cutoff: string }) =>
-        hotels(pool, { livemode: true, cutoff: next.cutoff, propertyId: input.propertyId });
-      let next = vayadaNextPayout(input.today);
-      let balances = await balancesAt(next);
-      // A Monday whose payout has gone out (or with nothing owed): the next one is a week later.
-      if (
-        next.on === input.today.toISOString().slice(0, 10) &&
-        balances.every((balance) => balance.payNowMinor === "0")
-      ) {
-        next = vayadaNextPayout(input.today, 1);
-        balances = await balancesAt(next);
-      }
       const [entries, payouts, current] = await Promise.all([
-        pool.query<
+        statementPool.query<
           VayadaPayoutEntry & {
             payoutId: string | null;
             planFee: string | null;
@@ -465,7 +461,7 @@ export function createVayadaPaymentPayoutRepository(connectionString: string, co
            ORDER BY l.occurred_at DESC, l.id LIMIT 500`,
           [input.propertyId],
         ),
-        pool.query<VayadaPayout>(
+        statementPool.query<VayadaPayout>(
           `SELECT ${PAYOUT_COLUMNS}
            FROM finance.hotel_payouts h
            JOIN finance.payout_destinations d
@@ -474,7 +470,7 @@ export function createVayadaPaymentPayoutRepository(connectionString: string, co
            ORDER BY h.started_at DESC`,
           [input.propertyId],
         ),
-        destination(pool, input.propertyId),
+        destination(statementPool, input.propertyId),
       ]);
       const statementPayouts = payouts.rows.map((payout) => ({
         id: payout.id,
@@ -492,6 +488,27 @@ export function createVayadaPaymentPayoutRepository(connectionString: string, co
             ? ("sent" as const)
             : ("sending" as const),
       }));
+      const balancesAt = (next: { cutoff: string }) =>
+        hotels(statementPool, {
+          livemode: true,
+          cutoff: next.cutoff,
+          propertyId: input.propertyId,
+        });
+      const today = input.today.toISOString().slice(0, 10);
+      let next = vayadaNextPayout(input.today);
+      let balances = await balancesAt(next);
+      // On a Monday whose payouts staff have started (or with nothing owed), whatever is still owed
+      // goes out the next Monday.
+      if (
+        next.on === today &&
+        (statementPayouts.some(
+          (payout) => payout.startedOn === today && payout.status !== "cancelled",
+        ) ||
+          balances.every((balance) => balance.payNowMinor === "0"))
+      ) {
+        next = vayadaNextPayout(input.today, 1);
+        balances = await balancesAt(next);
+      }
       return {
         totals: balances.map((balance) => {
           const sent = statementPayouts.filter(
@@ -738,7 +755,7 @@ export function createVayadaPaymentPayoutRepository(connectionString: string, co
       };
     },
 
-    close: () => pool.end(),
+    close: () => Promise.all([pool.end(), statementPool.end()]).then(() => undefined),
   };
 }
 

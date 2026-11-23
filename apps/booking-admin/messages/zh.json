@@ -884,6 +884,8 @@
   "settings.payouts.goToPayments": "前往付款设置",
   "settings.payouts.paymentsLink": "查看付款和对账单",
   "settings.payouts.paymentsNext": "下次付款 {date} · {amount}",
+  "settings.payouts.noAccess": "此酒店账户无法查看付款。",
+  "settings.payouts.startedOn": "{date} 开始",
   "settings.billing.providerStripe": "Stripe Connect",
   "settings.billing.providerStripeDesc": "您自己的 Stripe 帐户。直接付款。",
   "settings.billing.providerXendit": "Xendit",

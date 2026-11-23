@@ -8,7 +8,8 @@ import {
 } from "../support/bookingAdminMocks";
 
 const PAYOUT_PATH = `/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/payout-destination`;
-const STATEMENT_PATH = `/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/payout-statement`;
+/** The statement route as mocked (unroute with this same pattern). */
+export const PAYOUT_STATEMENT_ROUTE = `**/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/payout-statement`;
 
 /** A hotel's payout statement (VAY-2584): made-up money, as the design shows it. */
 export const PAYOUT_STATEMENT = {
@@ -28,6 +29,7 @@ export const PAYOUT_STATEMENT = {
   ],
   account: { accountLast4: "6789", countryCode: "ID" },
   payouts: [
+    { ...payout("p30", "300000000", "6789", "2026-11-25", "sending"), paidOn: null },
     payout("p23", "912000000", "6789", "2026-11-23", "sent"),
     payout("p16", "1240000000", "6789", "2026-11-16", "sent"),
     { ...payout("p9", "800000000", "1102", "2026-11-09", "returned"), returnedOn: "2026-11-12" },
@@ -95,11 +97,11 @@ export async function mockPayoutStatement(
   page: Page,
   answer: typeof PAYOUT_STATEMENT | 403 | 404 = PAYOUT_STATEMENT,
 ) {
-  await page.route(`**${STATEMENT_PATH}`, (route) =>
+  await page.route(PAYOUT_STATEMENT_ROUTE, (route) =>
     typeof answer === "number"
       ? route.fulfill({
           status: answer,
-          json: { code: answer === 403 ? "forbidden" : "vayada_payment_unavailable" },
+          json: { code: answer === 403 ? "missing_permission" : "not_found" },
         })
       : route.fulfill({ json: answer }),
   );

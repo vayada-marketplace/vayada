@@ -2414,9 +2414,9 @@ const app = buildApp({
   vayadaPaymentPayouts: vayadaPaymentPayoutRepository
     ? { repository: vayadaPaymentPayoutRepository }
     : undefined,
-  // VAY-2584: the same ledger as the hotel owner's statement, for the hotels it is set up for.
+  // VAY-2584: the hotel owner's own statement, from the same ledger as staff's payouts.
   financePayoutStatement: vayadaPaymentPayoutRepository
-    ? { repository: vayadaPaymentPayoutRepository, open: vayadaPaymentManageable }
+    ? { repository: vayadaPaymentPayoutRepository }
     : undefined,
   // VAY-2348: booking windows per payment method, on the ordinary API login (finance).
   financePaymentWindows: config.auth

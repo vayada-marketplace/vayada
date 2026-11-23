@@ -75,7 +75,8 @@ describe("payout statement figures (VAY-2584)", () => {
     const today = new Date("2026-11-25T10:00:00Z");
     expect(formatPayoutDay("2026-11-30", "en", today)).toBe("Mon 30 Nov");
     expect(formatPayoutDay("2026-11-24T23:30:00Z", "en", today)).toBe("Tue 24 Nov");
-    expect(formatPayoutDay("2025-12-29", "en", today)).toBe("Mon 29 Dec 2025");
+    // With a year, ICU puts a comma after the weekday ("Mon, 29 Dec 2025").
+    expect(formatPayoutDay("2025-12-29", "en", today)).toMatch(/^Mon,? 29 Dec 2025$/);
     expect(formatPayoutDay("2026-11-30", "de", today)).toContain("30");
   });
 

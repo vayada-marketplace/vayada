@@ -884,6 +884,8 @@
   "settings.payouts.goToPayments": "Zu den Zahlungen",
   "settings.payouts.paymentsLink": "Auszahlungen und Kontoauszug ansehen",
   "settings.payouts.paymentsNext": "Nächste Auszahlung {date} · {amount}",
+  "settings.payouts.noAccess": "Auszahlungen sind für dieses Hotelkonto nicht verfügbar.",
+  "settings.payouts.startedOn": "Gestartet {date}",
   "settings.billing.providerStripe": "Stripe Connect",
   "settings.billing.providerStripeDesc": "Ihr eigenes Stripe-Konto. Direkte Auszahlungen.",
   "settings.billing.providerXendit": "Xendit",
