@@ -433,7 +433,8 @@ it("says a stay booked after free cancellation's last day was never refundable (
     "17500",
     instant,
   );
-  expect(late.badge).toEqual({ kind: "nonRefundable" });
+  // VAY-2587: its own badge, "No free cancellation"; only the Non-refundable rate reads "Non-refundable".
+  expect(late.badge).toEqual({ kind: "lateBooking" });
   expect(late.tone).toBe("amber");
   expect(late.note).toEqual({ kind: "lateBooking", date: "2026-10-23", days: 3 });
   // Booked on the last free day itself, it is still free until its end.
