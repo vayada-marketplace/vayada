@@ -1719,6 +1719,7 @@
   "settings.cards.general.title": "Общие",
   "settings.cards.general.description": "Данные объекта, контакты и соцсети, валюта по умолчанию и языки.",
   "settings.cards.payments.description": "Способы оплаты для гостей, реквизиты для банковского перевода и платёжный провайдер.",
+  "settings.cards.payouts.description": "Что vayada Payment выплачивает вам каждый понедельник, и каждая сумма, которая из этого вычитается.",
   "settings.cards.benefits.title": "Преимущества прямого бронирования",
   "settings.cards.benefits.description": "Преимущества, которые видят гости, чтобы бронировать напрямую.",
   "settings.cards.policies.title": "Правила",

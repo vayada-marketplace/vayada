@@ -1719,6 +1719,7 @@
   "settings.cards.general.title": "General",
   "settings.cards.general.description": "Datos del alojamiento, contacto y redes sociales, moneda predeterminada e idiomas.",
   "settings.cards.payments.description": "Métodos de pago para huéspedes, datos de transferencia bancaria y proveedor de pagos.",
+  "settings.cards.payouts.description": "Lo que vayada Payment le paga cada lunes y cada importe que se descuenta.",
   "settings.cards.benefits.title": "Ventajas de reservar directo",
   "settings.cards.benefits.description": "Ventajas que se muestran a los huéspedes para fomentar las reservas directas.",
   "settings.cards.policies.title": "Políticas",

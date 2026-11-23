@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   AdjustmentsHorizontalIcon,
   ArrowsUpDownIcon,
+  BanknotesIcon,
   BoltIcon,
   BuildingOffice2Icon,
   ClipboardDocumentListIcon,
@@ -61,6 +62,14 @@ const CARDS: SettingsCardLink[] = [
     description: "settings.cards.payments.description",
     icon: CreditCardIcon,
     href: "/settings/payments",
+  },
+  // VAY-2584: vayada Payment's payouts and statement, for everyone who sees Settings (staff get the
+  // owner-only note on the page), so owners with card payments off still find it.
+  {
+    title: "settings.payouts.title",
+    description: "settings.cards.payouts.description",
+    icon: BanknotesIcon,
+    href: "/settings/payouts",
   },
   {
     title: "settings.cards.benefits.title",
