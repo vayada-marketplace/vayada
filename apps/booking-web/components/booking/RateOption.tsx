@@ -11,8 +11,7 @@ export default function RateOption({
   title,
   terms,
   totalLabel,
-  nightlyLabel,
-  paidLabel,
+  subLabel,
   discountPercent,
   unavailable,
   loading,
@@ -26,12 +25,10 @@ export default function RateOption({
   refundable: boolean | null;
   title: string;
   terms: string;
-  /** Formatted stay total and per-night price; null while prices load. */
+  /** The stay's price in the guest's currency (VAY-2588); null while prices load. */
   totalLabel: string | null;
-  nightlyLabel: string | null;
-  /** VAY-2390: what the guest pays, in the charged currency, when totalLabel is an approximation
-   * in their display currency. It takes the per-night line's place. */
-  paidLabel?: string | null;
+  /** The line under it: "2 nights · incl. taxes & fees" (Room Details: "incl. taxes & fees"). */
+  subLabel: string;
   /** The `-X% OFF` badge next to a non-refundable choice. */
   discountPercent?: number;
   /** No price for this stay: shown, but can't be picked. */
@@ -121,17 +118,7 @@ export default function RateOption({
               <p className="text-base md:text-lg font-bold text-gray-900 whitespace-nowrap">
                 {totalLabel}
               </p>
-              {paidLabel ? (
-                <p className="text-xs text-gray-500 whitespace-nowrap">
-                  {t("youPay", { price: paidLabel })}
-                </p>
-              ) : (
-                nightlyLabel && (
-                  <p className="text-xs text-gray-500 whitespace-nowrap">
-                    {t("perNightly", { price: nightlyLabel })}
-                  </p>
-                )
-              )}
+              <p className="text-xs text-gray-500 whitespace-nowrap">{subLabel}</p>
             </>
           )}
         </div>

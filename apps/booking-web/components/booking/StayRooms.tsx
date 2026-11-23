@@ -12,7 +12,6 @@ import type { PricingRoom } from "@/services/api/replacementOffers";
 import RoomCard from "./RoomCard";
 import RoomTabs, { RoomsHelp } from "./RoomsProgress";
 import AccommodationViews from "./AccommodationViews";
-import ApproximateAmountsNote from "./ApproximateAmountsNote";
 import RoomSortSheet from "./RoomSortSheet";
 import StickySearchBar from "./StickySearchBar";
 
@@ -323,8 +322,6 @@ export default function StayRooms({
           </p>
         ) : null}
       </div>
-      {/* VAY-2390: the cards lead with "≈" amounts in the guest's display currency. */}
-      <ApproximateAmountsNote currency={hotel.currency} className="order-last basis-full" />
     </>
   );
 

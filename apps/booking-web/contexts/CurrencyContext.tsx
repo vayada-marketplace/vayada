@@ -29,6 +29,9 @@ interface CurrencyContextValue {
   approximate: (amount: number, fromCurrency: string) => string | null;
   /** The amount in its own (charged) currency, then the approximation in brackets. */
   formatPrice: (amount: number, fromCurrency: string) => string;
+  /** VAY-2588: the room list's price, in the guest's currency only: converted ones in whole units
+   * (for display; the charge stays in the hotel's currency), its own currency exactly. */
+  displayPrice: (amount: number, fromCurrency: string) => string;
 }
 
 const CurrencyContext = createContext<CurrencyContextValue>({
@@ -42,6 +45,7 @@ const CurrencyContext = createContext<CurrencyContextValue>({
   convertPrice: (amount) => amount,
   approximate: () => null,
   formatPrice: (amount) => String(amount),
+  displayPrice: (amount) => String(amount),
 });
 
 const STORAGE_KEY_PREFIX = "vayada-selected-currency";
@@ -195,6 +199,23 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     [approximate],
   );
 
+  const displayPrice = useCallback(
+    (amount: number, fromCurrency: string): string => {
+      const converted =
+        fromCurrency !== selectedCurrency &&
+        (fromCurrency === baseCurrency || rates[fromCurrency] > 0);
+      const value = converted ? convertPrice(amount, fromCurrency) : amount;
+      const digits = converted || Number.isInteger(value) ? 0 : 2;
+      return new Intl.NumberFormat("en-GB", {
+        style: "currency",
+        currency: converted ? selectedCurrency : fromCurrency,
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits,
+      }).format(value);
+    },
+    [convertPrice, selectedCurrency, baseCurrency, rates],
+  );
+
   return (
     <CurrencyContext.Provider
       value={{
@@ -208,6 +229,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
         convertPrice,
         approximate,
         formatPrice,
+        displayPrice,
       }}
     >
       {children}
