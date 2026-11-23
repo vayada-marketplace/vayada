@@ -201,11 +201,11 @@ export default function AiBudgetsPage() {
                 </table>
               </div>
 
-              <ul className="xl:hidden grid gap-3 lg:grid-cols-2">
+              <ul className="xl:hidden grid grid-cols-1 gap-3 lg:grid-cols-2">
                 {accounts.map((account) => (
                   <li
                     key={account.organizationId}
-                    className="bg-white border border-gray-200 rounded-xl px-4 py-3.5 space-y-2"
+                    className="min-w-0 bg-white border border-gray-200 rounded-xl px-4 py-3.5 space-y-2"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="flex min-w-0 items-center gap-2">

@@ -225,4 +225,11 @@ test("on a phone each hotel is a card (VAY-2504)", async ({ page, baseURL }) => 
     card("Hotel Alpenrose Munich").getByRole("button", { name: /Set budget for/ }),
   ).toBeVisible();
   await expect(page.locator("table")).toBeHidden();
+  // Nothing wider than the phone: a long name with a status tag truncates instead.
+  const sticksOut = await page.evaluate(() =>
+    Array.from(document.querySelectorAll("main li, main li *"))
+      .filter((element) => element.getBoundingClientRect().right > window.innerWidth + 0.5)
+      .map((element) => element.textContent?.trim().slice(0, 40)),
+  );
+  expect(sticksOut).toEqual([]);
 });
