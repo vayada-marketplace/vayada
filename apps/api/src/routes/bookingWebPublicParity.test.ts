@@ -249,13 +249,19 @@ describe("Booking Web public bootstrap parity", () => {
     await app.close();
   });
 
-  it("counts a page view without consent, storing only the hotel, its type and a random id (VAY-2592)", async () => {
-    const events: Array<{ sessionId: unknown; metadata: unknown; eventType: string }> = [];
+  it("counts a page view without consent: only the hotel, a server-made id and the quarter hour (VAY-2592)", async () => {
+    const events: Array<{
+      eventId: string;
+      sessionId: unknown;
+      metadata: unknown;
+      eventType: string;
+      occurredAt: Date;
+    }> = [];
     const app = buildApp({
       logger: false,
       publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
       bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
-      bookingWebPublicNow: () => new Date("2026-06-06T11:00:00.000Z"),
+      bookingWebPublicNow: () => new Date("2026-06-06T11:14:59.999Z"),
       bookingWebAttributionSink: {
         async recordTelemetryEvent(event) {
           events.push(event);
@@ -269,35 +275,40 @@ describe("Booking Web public bootstrap parity", () => {
         headers: { "content-type": "text/plain;charset=UTF-8" },
         payload: JSON.stringify(payload),
       });
-    const eventId = randomUUID();
 
-    const counted = await view({ hotelSlug: "hotel-alpenrose", eventType: "page_view", eventId });
-    expect(counted.statusCode).toBe(204);
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
-      propertyId: "booking_hotel_alpenrose",
-      hotelSlug: "hotel-alpenrose",
-      eventType: "page_view",
-      eventId,
-      sessionId: null,
-      metadata: {},
-    });
+    for (let index = 0; index < 2; index += 1) {
+      const counted = await view({ hotelSlug: "hotel-alpenrose", eventType: "page_view" });
+      expect(counted.statusCode).toBe(204);
+    }
+    expect(events).toHaveLength(2);
+    for (const event of events) {
+      expect(event).toMatchObject({
+        propertyId: "booking_hotel_alpenrose",
+        hotelSlug: "hotel-alpenrose",
+        eventType: "page_view",
+        sessionId: null,
+        metadata: {},
+        occurredAt: new Date("2026-06-06T11:00:00.000Z"),
+      });
+      expect(event.eventId).toMatch(/^[0-9a-f-]{36}$/);
+    }
+    // The API makes a fresh id for each view.
+    expect(events[0]!.eventId).not.toBe(events[1]!.eventId);
 
-    // Anything more than those three fields, or no random id, stores nothing.
+    // Anything more than the hotel and the type stores nothing, a client's id included.
     for (const extra of [
+      { eventId: randomUUID() },
+      { event_id: randomUUID() },
       { sessionId: randomUUID() },
       { session_id: randomUUID() },
       { metadata: {} },
       { metadata: { funnelVersion: 1, funnelSequence: 1 } },
       { analyticsConsent: true, consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION },
       { referrer: "https://www.instagram.com/" },
-      { eventId: "view-1" },
-      { eventId: undefined },
     ]) {
       const refused = await view({
         hotelSlug: "hotel-alpenrose",
         eventType: "page_view",
-        eventId: randomUUID(),
         ...extra,
       });
       expect(refused.statusCode).toBe(400);
@@ -311,13 +322,9 @@ describe("Booking Web public bootstrap parity", () => {
       metadata: { funnelVersion: 1, funnelSequence: 1 },
     });
     expect(unconsented.statusCode).toBe(204);
-    const unknownHotel = await view({
-      hotelSlug: "no-such-hotel",
-      eventType: "page_view",
-      eventId,
-    });
+    const unknownHotel = await view({ hotelSlug: "no-such-hotel", eventType: "page_view" });
     expect(unknownHotel.statusCode).toBe(404);
-    expect(events).toHaveLength(1);
+    expect(events).toHaveLength(2);
     await app.close();
   });
 

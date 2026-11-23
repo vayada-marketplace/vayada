@@ -88,7 +88,7 @@ import type { BillingConfigReadModel, BillingConfigReadPort } from "@vayada/doma
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { isVayadaPaymentAccountRef, stripeCallAccountRef } from "../domains/vayadaPaymentStripe.js";
 import { onlineCardReadySql } from "../domains/financeOnlineCardReadySql.js";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 import {
   bookedMealDescription,
@@ -1062,8 +1062,9 @@ export async function registerBookingWebPublicRoutes(
       // string.
       const body =
         typeof request.body === "string" ? parseTelemetryEventBody(request.body) : request.body;
-      // VAY-2592: a page view is counted without consent, so it may carry nothing but the hotel,
-      // its type and a fresh random id: no session, consent fields or properties are stored.
+      // VAY-2592: a page view is counted without consent, so it may carry nothing but the hotel and
+      // its type. The id is made here and the time kept to the quarter hour, so no client can
+      // send a value that links its views, and a view can't be matched to an exact request.
       const pageView = body?.eventType === BOOKING_WEB_PAGE_VIEW_EVENT;
       if (
         !pageView &&
@@ -1077,16 +1078,14 @@ export async function registerBookingWebPublicRoutes(
       if (!hotelSlug || !eventType) {
         throw createHttpError(400, "Hotel slug and event type are required.");
       }
-      const eventId = firstString(body?.eventId, body?.event_id);
+      let eventId = firstString(body?.eventId, body?.event_id);
       let metadata: Record<string, unknown> | null;
       let sessionId: string | null;
       if (pageView) {
-        if (
-          !isFunnelId(eventId) ||
-          Object.keys(body ?? {}).some((key) => !PAGE_VIEW_FIELDS.has(key))
-        ) {
+        if (Object.keys(body ?? {}).some((key) => !PAGE_VIEW_FIELDS.has(key))) {
           throw createHttpError(400, "Invalid booking page view.");
         }
+        eventId = randomUUID();
         metadata = {};
         sessionId = null;
       } else {
@@ -1127,7 +1126,7 @@ export async function registerBookingWebPublicRoutes(
           eventType,
           eventId,
           sessionId,
-          occurredAt: now(),
+          occurredAt: pageView ? quarterHour(now()) : now(),
           userAgent: request.headers["user-agent"],
           metadata,
         });
@@ -1140,7 +1139,13 @@ export async function registerBookingWebPublicRoutes(
 }
 
 /** The only fields an anonymous page view may send (VAY-2592). */
-const PAGE_VIEW_FIELDS = new Set(["hotelSlug", "eventType", "eventId"]);
+const PAGE_VIEW_FIELDS = new Set(["hotelSlug", "eventType"]);
+
+/** The start of the quarter hour: every time zone's offset is a multiple of 15 minutes, so a page
+ * view still lands on the right local day. */
+function quarterHour(at: Date): Date {
+  return new Date(Math.floor(at.getTime() / 900_000) * 900_000);
+}
 
 /**
  * Guests' browsers post the booking lookup straight to this API, so its per-address limit counts

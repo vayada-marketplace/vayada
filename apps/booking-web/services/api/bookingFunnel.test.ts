@@ -101,7 +101,7 @@ describe("Booking funnel instrumentation", () => {
   });
 
   it.each([null, { version: BOOKING_WEB_ANALYTICS_CONSENT_VERSION, analytics: false }])(
-    "counts a page view without consent, touching no storage and sending only the hotel and a fresh id (VAY-2592): %j",
+    "counts a page view without consent, touching no storage and sending only the hotel (VAY-2592): %j",
     (choice) => {
       mockBrowser(choice);
       const touched: string[] = [];
@@ -130,12 +130,11 @@ describe("Booking funnel instrumentation", () => {
         });
         return JSON.parse(init.body as string) as Record<string, string>;
       });
-      for (const body of sent) {
-        expect(Object.keys(body).sort()).toEqual(["eventId", "eventType", "hotelSlug"]);
-        expect(body).toMatchObject({ hotelSlug: "hotel", eventType: "page_view" });
-      }
-      // A fresh id each time, so two views can't be linked.
-      expect(sent[0]!.eventId).not.toBe(sent[1]!.eventId);
+      // Nothing that could link two views: the API makes each view's id.
+      expect(sent).toEqual([
+        { hotelSlug: "hotel", eventType: "page_view" },
+        { hotelSlug: "hotel", eventType: "page_view" },
+      ]);
     },
   );
 

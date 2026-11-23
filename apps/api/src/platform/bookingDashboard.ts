@@ -415,12 +415,11 @@ function pageViewBucketsSql(): string {
   LEFT JOIN telemetry_scope scope ON TRUE
   LEFT JOIN distribution.booking_web_events event
     ON event.property_id = scope.property_id
+   AND event.event_type IN ('page_view', 'page_visit')
    AND (
      event.event_type = 'page_view'
-     OR (
-       event.event_type = 'page_visit'
-       AND (scope.views_counted_from IS NULL OR event.occurred_at < scope.views_counted_from)
-     )
+     OR scope.views_counted_from IS NULL
+     OR event.occurred_at < scope.views_counted_from
    )
    AND event.traffic_class = 'human'
    AND event.occurred_at >= (bucket.bucket_date::timestamp AT TIME ZONE scope.time_zone)

@@ -93,7 +93,10 @@ async function mockFunnel(page: Page, { extras = true, refusePrices = false } = 
     else sent.push({ ...body, referer, body: request.postData() ?? "" });
     await route.fulfill({ status: 204 });
   });
-  return Object.assign(sent, { views });
+  // Not enumerable, so `expect(sent).toEqual([])` still compares only the funnel events.
+  return Object.defineProperty(sent, "views", { value: views }) as typeof sent & {
+    views: typeof views;
+  };
 }
 
 function saveChoice(page: Page, analytics: boolean) {
@@ -236,16 +239,14 @@ for (const choice of ["rejected", "unanswered"] as const) {
     expect(
       await page.evaluate(() => Object.keys(sessionStorage).filter((key) => key.includes("sid"))),
     ).toEqual([]);
-    // VAY-2592: the hotel page's load is counted without asking: the hotel, the type and a fresh
-    // id, no session, address or cookie. The dev server's double effects can send it twice.
+    // VAY-2592: the hotel page's load is counted without asking: only the hotel and the type, no
+    // id, session, address or cookie. The dev server's double effects can send it twice.
     expect(sent.views.length).toBeGreaterThanOrEqual(1);
     expect(sent.views.length).toBeLessThanOrEqual(2);
     for (const view of sent.views) {
-      expect(Object.keys(view.body).sort()).toEqual(["eventId", "eventType", "hotelSlug"]);
-      expect(view.body).toMatchObject({ hotelSlug: SEEDED_BOOKING_SLUG, eventType: "page_view" });
+      expect(view.body).toEqual({ hotelSlug: SEEDED_BOOKING_SLUG, eventType: "page_view" });
       expect(view.referer).toBeNull();
       expect(view.cookie).toBeNull();
     }
-    expect(new Set(sent.views.map((view) => view.body.eventId)).size).toBe(sent.views.length);
   });
 }

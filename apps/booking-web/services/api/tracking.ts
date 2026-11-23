@@ -16,8 +16,8 @@ export function funnelErrorCode(code: unknown) {
 }
 
 /** VAY-2592: counts this page view for the hotel without asking the guest. It reads and writes
- * nothing on the device (no storage, no cookies) and sends only the slug, the type and a fresh
- * random id, so a view can't be linked to another view or to the guest. */
+ * nothing on the device (no storage, no cookies) and sends only the slug and the type; the API
+ * makes the view's id, so a view can't be linked to another view or to the guest. */
 export function trackPageView(hotelSlug: string) {
   if (typeof window === "undefined" || !hotelSlug) return;
   try {
@@ -27,11 +27,7 @@ export function trackPageView(hotelSlug: string) {
       mode: "cors",
       credentials: "omit",
       headers: { "Content-Type": "text/plain;charset=UTF-8" },
-      body: JSON.stringify({
-        hotelSlug,
-        eventType: BOOKING_WEB_PAGE_VIEW_EVENT,
-        eventId: crypto.randomUUID(),
-      }),
+      body: JSON.stringify({ hotelSlug, eventType: BOOKING_WEB_PAGE_VIEW_EVENT }),
       keepalive: true,
       referrerPolicy: "no-referrer",
     }).catch(() => {});
