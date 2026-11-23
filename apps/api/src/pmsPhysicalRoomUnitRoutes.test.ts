@@ -37,6 +37,8 @@ type AuthOptions = {
   permissions?: PermissionKey[];
   entitlements?: ProductEntitlement[];
   links?: LinkedResource[];
+  /** An AI request with change access (VAY-2522). */
+  delegated?: boolean;
 };
 
 let app: Awaited<ReturnType<typeof testApp>> | null = null;
@@ -146,6 +148,16 @@ async function scopedApp(
         source: "api",
         receivedAt: now,
       },
+      ...(auth.delegated
+        ? {
+            delegation: {
+              channel: "in_app",
+              conversationId: "conversation-1",
+              toolCallId: "correlation-1",
+              access: "change",
+            },
+          }
+        : {}),
     } as RequestContext;
   });
   await register(instance);
@@ -648,6 +660,29 @@ describe("physical-room management authorization and conflicts", () => {
       organizationId,
       expectedRevision: 2,
       action: "retire",
+      // A person's request: no AI limits for the transaction to apply (VAY-2522).
+      narrowing: null,
     });
+  });
+});
+
+describe("AI requests (VAY-2522)", () => {
+  it("room counts and labels refuse them until their commands carry the AI's limits", async () => {
+    const units = fakePort();
+    app = await testApp(units.options, { delegated: true });
+    expect(await request(app)).toMatchObject({
+      statusCode: 403,
+      body: { code: "delegation_refused" },
+    });
+    expect(units.calls).toEqual([]);
+    await app.close();
+
+    const labels = labelPort();
+    app = await labelApp(labels.options, { delegated: true });
+    expect(await labelRequest(app)).toMatchObject({
+      statusCode: 403,
+      body: { code: "delegation_refused" },
+    });
+    expect(labels.calls).toEqual([]);
   });
 });

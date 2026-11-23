@@ -1,3 +1,5 @@
+import type { AuthorityNarrowing } from "@vayada/backend-auth";
+
 export const NATIVE_GUEST_INBOX_CONTRACT_VERSION = "native-guest-inbox.v2" as const;
 
 export type PmsInboxReplyRoute =
@@ -287,6 +289,8 @@ export type PmsInboxTriagePort = {
     expectedThreadVersion: number;
     followUpAt: string | null;
     audit: { requestId: string; correlationId: string; requestedAt: string };
+    /** An AI request's limits, checked again inside the transaction; null for a person (VAY-2522). */
+    narrowing: AuthorityNarrowing | null;
   }): Promise<
     | {
         ok: true;

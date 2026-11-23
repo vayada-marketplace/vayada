@@ -13074,6 +13074,8 @@ describe("vayada-api", () => {
         correlationId: expect.any(String),
         requestedAt: expect.any(String),
       },
+      // A person's request: no AI limits for the transaction to apply (VAY-2522).
+      narrowing: null,
     });
     await app.close();
     app = null;

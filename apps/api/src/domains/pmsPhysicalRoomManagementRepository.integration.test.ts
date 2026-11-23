@@ -56,6 +56,7 @@ describe.skipIf(!url)("physical-room management PostgreSQL", () => {
       correlationId: null,
       requestedAt: new Date().toISOString(),
     },
+    narrowing: null,
   });
   it("rejects unit additions, reconciliation and facts edits after closure", async () => {
     const initialCommand = command(1);
@@ -314,6 +315,49 @@ describe.skipIf(!url)("physical-room management PostgreSQL", () => {
       ).rows[0].count,
     ).toBe(1);
   });
+  it("holds an AI change to its narrowing inside the transaction (VAY-2522)", async () => {
+    const created = await repository.managePhysicalRoom(command(1));
+    if (!created.ok) throw new Error(JSON.stringify(created));
+    const roomUnitId = created.response.roomUnitId;
+    // Room status, the first AI change on this command. The user may make it; only the
+    // narrowing says no, so each refusal below is the narrowing's own.
+    const status = (
+      narrowing: ManagePhysicalRoomCommand["narrowing"],
+    ): ManagePhysicalRoomCommand => ({
+      ...command(2),
+      action: "update",
+      roomUnitId,
+      changes: { status: "maintenance" },
+      narrowing,
+    });
+    const keys = async () =>
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM platform.idempotency_keys WHERE property_id=$1",
+          [propertyId],
+        )
+      ).rows[0].count;
+    const keysBefore = await keys();
+    for (const narrowing of [
+      { access: "read", propertyIds: [propertyId] },
+      { access: "change", propertyIds: [randomUUID()] },
+      { access: "change", propertyIds: [] },
+    ] as const) {
+      expect(await repository.managePhysicalRoom(status(narrowing))).toMatchObject({
+        ok: false,
+        error: { code: "setup_scope_unavailable" },
+      });
+    }
+    expect(await keys()).toBe(keysBefore);
+    const roomStatus = async () =>
+      (await admin.query("SELECT status FROM pms.rooms WHERE id=$1", [roomUnitId])).rows[0].status;
+    expect(await roomStatus()).toBe("available");
+    expect(
+      await repository.managePhysicalRoom(status({ access: "change", propertyIds: [propertyId] })),
+    ).toMatchObject({ ok: true, response: { outcome: "updated", roomUnitsRevision: 3 } });
+    expect(await roomStatus()).toBe("maintenance");
+  });
+
   it("frees a deleted room's number at once and still keeps rooms in use apart", async () => {
     // VAY-2467: a deleted room used to keep its number taken for good.
     const create = async (expectedRevision: number, operationalLabel: string) => {
