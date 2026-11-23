@@ -8,39 +8,17 @@ import type { StayOfferPrice } from "@/services/api/stayPrices";
 
 /** The parts of a choice's plain name, shared with the PMS (VAY-2188): its meal, how it cancels,
  * free cancellation's deadline in days and, for two choices that would read the same in one
- * room, a number ("Free cancellation 2"). Plus the hotel's own meal text, if any (VAY-2281). */
+ * room, a number ("Flexible rate 2"). Plus the hotel's own meal text, if any (VAY-2281). */
 export type ChoiceKeys = PricingOfferNameKey & { mealDescription?: string };
 
-/** One room's choices, in order. With the stay, a free cancellation already over for it (or a
- * partial refund past its last refund day, VAY-2406) is numbered as the no-refund choice it now
- * reads as (VAY-2392), after the room's own no-refund choices, so two choices never read
- * "Non-refundable" alike. */
-export function choiceKeys(
-  offers: readonly PricingOffer[],
-  stay?: { checkIn: string; timezone?: string },
-  now = new Date(),
-): ChoiceKeys[] {
-  const keys = pricingOfferNameKeys(
+/** One room's choices, in order. A choice keeps its own name for every stay (VAY-2587): when its
+ * free cancellation is already over, its terms say so, it is never renamed "Non-refundable". */
+export function choiceKeys(offers: readonly PricingOffer[]): ChoiceKeys[] {
+  return pricingOfferNameKeys(
     offers.map(({ mealPlan, cancellation }) => ({ mealPlan, cancellation })),
-  );
-  const passed = keys.map(({ days }) => !!stay && days !== null && refundsEnded(stay, days, now));
-  // The passed ones are numbered last, so the room's own no-refund choice keeps the plain name.
-  const order = offers.map((_, index) => index).sort((a, b) => +passed[a]! - +passed[b]!);
-  const numbers = pricingOfferNameKeys(
-    order.map((index) => ({
-      mealPlan: offers[index]!.mealPlan,
-      cancellation: passed[index]
-        ? { kind: "non_refundable" as const }
-        : offers[index]!.cancellation,
-    })),
-  );
-  return keys.map((own, index) => {
+  ).map((keys, index) => {
     const mealDescription = offers[index]!.mealDescription;
-    return {
-      ...own,
-      number: numbers[order.indexOf(index)]!.number,
-      ...(mealDescription && { mealDescription }),
-    };
+    return { ...keys, ...(mealDescription && { mealDescription }) };
   });
 }
 
@@ -64,17 +42,6 @@ function freeUntil(checkIn: string, days: number): string | null {
     : null;
 }
 
-/** Free cancellation, or a partial refund's last step, `days` before arrival is over on the
- * hotel's calendar today. */
-function refundsEnded(
-  stay: { checkIn: string; timezone?: string },
-  days: number,
-  now: Date,
-): boolean {
-  const until = freeUntil(stay.checkIn, days);
-  return until !== null && hotelToday(stay.timezone, now) > until;
-}
-
 type Translate = (key: string, values?: Record<string, string | number>) => string;
 
 export type ChoiceText = {
@@ -84,9 +51,9 @@ export type ChoiceText = {
    * booked room's line (VAY-2320). */
   meal: string | null;
   cancellationTerms: string | null;
-  /** The rate icon: the arrows for free or partial cancellation, a cross for no refund (also
-   * once free cancellation or the last refund step has passed), none when the cancellation isn't
-   * known. */
+  /** The rate icon: the arrows for free or partial cancellation, a cross for the Non-refundable
+   * rate, none when the cancellation isn't known. A rate keeps its icon, as its name, once its
+   * free cancellation or last refund step has passed (VAY-2587). */
   refundable: boolean | null;
   /** Free cancellation whose deadline has passed for this stay, or a partial refund past its last
    * refund day (VAY-2406). */
@@ -94,9 +61,9 @@ export type ChoiceText = {
 };
 
 /** A choice's guest-facing name and one line of terms (home.choice messages). Free
- * cancellation reads as a date for the stay; once that date has passed the choice is named
- * non-refundable, as the server refunds it, and says why (VAY-2392). So is a partial refund past
- * its last refund day, as Review & pay says "No refund any more" (VAY-2406). */
+ * cancellation reads as a date for the stay. Once that date has passed (VAY-2392), or a partial
+ * refund's last refund day (VAY-2406), the choice keeps its name and a short note says so
+ * (VAY-2587); the server refunds by the stay's dates, and Review & pay words the terms in full. */
 export function choiceText(
   keys: ChoiceKeys,
   stay: { checkIn: string; timezone?: string; formatDate: (date: string) => string },
@@ -106,7 +73,7 @@ export function choiceText(
   // Without a stay (/book before dates are chosen) there is no deadline to word yet.
   const until = keys.days === null ? null : freeUntil(stay.checkIn, keys.days);
   const cancellationPassed = until !== null && hotelToday(stay.timezone, now) > until;
-  const cancellation = cancellationPassed ? "non_refundable" : keys.cancellation;
+  const { cancellation } = keys;
   const meal = t(`choice.meal.${keys.meal}`);
   const base =
     keys.meal === "room_only"
@@ -123,9 +90,7 @@ export function choiceText(
           ? t("choice.mealPartialRefund", { meal })
           : meal;
   const cancellationTerms = cancellationPassed
-    ? t(keys.cancellation === "partial_refund" ? "choice.refundsPassed" : "choice.windowPassed", {
-        days: keys.days!,
-      })
+    ? t(cancellation === "partial_refund" ? "choice.refundsPassed" : "choice.windowPassed")
     : cancellation === "free" && until
       ? t("choice.freeUntil", { date: stay.formatDate(until) })
       : cancellation === "non_refundable"
@@ -192,7 +157,7 @@ export function roomSaving(
   now = new Date(),
 ): number {
   if (!prices) return 0;
-  const keys = choiceKeys(offers, stay, now);
+  const keys = choiceKeys(offers);
   const all = offers.map((offer, index) => {
     const text = choiceText(keys[index]!, { ...stay, formatDate: (date) => date }, t, now);
     const price = prices.find((p) => p.publicOfferKey === offer.publicOfferKey);

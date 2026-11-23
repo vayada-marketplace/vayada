@@ -139,7 +139,7 @@
       "availabilityUnavailableTooltip": "Availability unavailable"
     },
     "choice": {
-      "freeCancellation": "Free cancellation",
+      "freeCancellation": "Flexible rate",
       "nonRefundable": "Non-refundable",
       "partialRefund": "Partial refund",
       "mealNonRefundable": "{meal}, non-refundable",
@@ -147,8 +147,8 @@
       "freeUntil": "Free cancellation until {date}, 23:59 (local time)",
       "noRefund": "No refund if you cancel or don't arrive",
       "partialRefundTerms": "Part of the price is refunded if you cancel. See our terms on the next step",
-      "windowPassed": "Free cancellation ends {days, plural, one {# day} other {# days}} before arrival. For these dates, no refund if you cancel or don't arrive",
-      "refundsPassed": "Refunds end {days, plural, one {# day} other {# days}} before arrival. For these dates, no refund if you cancel or don't arrive",
+      "windowPassed": "No free cancellation for these dates",
+      "refundsPassed": "No refund for these dates",
       "freeEnded": "Free cancellation has ended",
       "refundsEnded": "No refund any more",
       "meal": {
@@ -593,7 +593,7 @@
       "freeEnded": "Free cancellation ended on {date}.",
       "noRefund": "Refunds ended on {date}.",
       "nonRefundable": "Non-refundable.",
-      "lateBooking": "Non-refundable: booked less than {days} before arrival.",
+      "lateBooking": "No free cancellation: booked less than {days} before arrival.",
       "days": "{count, plural, one {# day} other {# days}}",
       "payFull": "If you cancel or don't arrive, you pay the full amount ({amount}).",
       "beforeAccept": "Free to withdraw until we answer.",

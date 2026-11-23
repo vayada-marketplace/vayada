@@ -54,7 +54,7 @@ export default function RoomGuestsStep({
         const rate =
           room && offerIndex >= 0
             ? choiceText(
-                choiceKeys(room.offers, { checkIn, timezone }, now)[offerIndex]!,
+                choiceKeys(room.offers)[offerIndex]!,
                 {
                   checkIn,
                   timezone,

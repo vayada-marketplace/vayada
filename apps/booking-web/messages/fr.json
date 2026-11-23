@@ -139,7 +139,7 @@
       "availabilityUnavailableTooltip": "Disponibilités indisponibles"
     },
     "choice": {
-      "freeCancellation": "Annulation gratuite",
+      "freeCancellation": "Tarif flexible",
       "nonRefundable": "Non remboursable",
       "partialRefund": "Remboursement partiel",
       "mealNonRefundable": "{meal}, non remboursable",
@@ -147,8 +147,8 @@
       "freeUntil": "Annulation gratuite jusqu'au {date}, 23:59 (heure locale)",
       "noRefund": "Aucun remboursement en cas d'annulation ou de non-présentation",
       "partialRefundTerms": "En cas d'annulation, nous remboursons une partie du prix. Nos conditions sont à l'étape suivante",
-      "windowPassed": "L'annulation gratuite prend fin {days, plural, one {# jour} other {# jours}} avant l'arrivée. Pour ces dates, aucun remboursement en cas d'annulation ou de non-présentation",
-      "refundsPassed": "Les remboursements prennent fin {days, plural, one {# jour} other {# jours}} avant l'arrivée. Pour ces dates, aucun remboursement en cas d'annulation ou de non-présentation",
+      "windowPassed": "Pas d'annulation gratuite pour ces dates",
+      "refundsPassed": "Aucun remboursement pour ces dates",
       "freeEnded": "L'annulation gratuite est terminée",
       "refundsEnded": "Plus de remboursement",
       "meal": {
@@ -592,7 +592,7 @@
       "freeEnded": "L’annulation gratuite s’est terminée le {date}.",
       "noRefund": "Les remboursements se sont terminés le {date}.",
       "nonRefundable": "Non remboursable.",
-      "lateBooking": "Non remboursable : réservée moins de {days} avant l’arrivée.",
+      "lateBooking": "Pas d’annulation gratuite : réservée moins de {days} avant l’arrivée.",
       "days": "{count, plural, one {# jour} other {# jours}}",
       "payFull": "Si vous annulez ou ne venez pas, vous payez le montant total ({amount}).",
       "beforeAccept": "Vous pouvez la retirer gratuitement tant que nous n’avons pas répondu.",

@@ -984,7 +984,7 @@ export const CANCEL_LINE_TEXT: Readonly<Partial<Record<string, string>>> = {
   freeEnded: "Free cancellation ended on {date}.",
   noRefund: "Refunds ended on {date}.",
   nonRefundable: "Non-refundable.",
-  lateBooking: "Non-refundable: booked less than {days} before arrival.",
+  lateBooking: "No free cancellation: booked less than {days} before arrival.",
   payFull: "If you cancel or don't arrive, you pay the full amount ({amount}).",
   rooms: "Your rooms cancel differently.",
   "room.freeUntil": "{rooms}: free until the end of {date}.",
