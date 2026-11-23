@@ -68,7 +68,7 @@ const TOUCH_MARK_BUTTON =
   "hidden h-[30px] items-center gap-1.5 rounded-[7px] border border-gray-300 bg-white px-3 text-[13px] font-medium text-primary-600 hover:bg-gray-50 [@media(hover:none)]:inline-flex";
 // With a mouse it takes the label's place while the row is hovered, or while it has keyboard focus.
 const HOVER_MARK_BUTTON =
-  "pointer-events-none absolute right-0 top-0 inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-semibold text-primary-600 opacity-0 shadow-sm transition-opacity hover:bg-gray-50 focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 [@media(hover:none)]:hidden";
+  "pointer-events-none absolute -top-1 right-0 inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-semibold text-primary-600 opacity-0 shadow-sm transition-opacity hover:bg-gray-50 focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 [@media(hover:none)]:hidden";
 
 type Notifications = ReturnType<typeof useHostNotifications>;
 
