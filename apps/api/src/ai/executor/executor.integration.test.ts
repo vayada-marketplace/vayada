@@ -49,10 +49,17 @@ describe.skipIf(!url)("the executor of AI changes on PostgreSQL (VAY-2524)", () 
   // The real command, which the test can make break once (a lost database connection), and which
   // shows the AI's limits each command was given.
   let breakNext = false;
+  // ...or answer slowly (a request that outlives part of its lease).
+  let delayNextMs = 0;
   const narrowings: unknown[] = [];
   const port: PmsInboxTriagePort = {
     async transition(input) {
       narrowings.push(input.narrowing);
+      if (delayNextMs) {
+        const ms = delayNextMs;
+        delayNextMs = 0;
+        await pause(ms);
+      }
       if (breakNext) {
         breakNext = false;
         throw new Error("connection lost");
@@ -235,6 +242,14 @@ describe.skipIf(!url)("the executor of AI changes on PostgreSQL (VAY-2524)", () 
       new Date(),
     );
 
+  /** Lets an operation's lease run out now, as if its worker stopped. */
+  const expireLease = (operationId: string) =>
+    admin.query(
+      `UPDATE platform.ai_operations SET lease_expires_at = now() - interval '1 second'
+        WHERE id = $1 AND status = 'running'`,
+      [operationId],
+    );
+
   /** The key the route saw for an operation's one step. */
   const routeKey = (operationId: string) => `op_${operationId}:1:thread_mark_done`;
 
@@ -271,7 +286,7 @@ describe.skipIf(!url)("the executor of AI changes on PostgreSQL (VAY-2524)", () 
         idempotencyKeyHash: sha256(routeKey(operation.id)),
         propertyId: property,
         userId: user,
-        recordsChanged: [{ type: "thread", id: threadId }],
+        recordsChanged: [{ type: "message_thread", id: threadId }],
       }),
     ]);
     // What the route itself wrote down: the operation as correlation, the logged request as cause.
@@ -304,20 +319,106 @@ describe.skipIf(!url)("the executor of AI changes on PostgreSQL (VAY-2524)", () 
     ]);
   });
 
-  it("never fails a taken-over run on a refusal: the earlier request may have gone out", async () => {
+  it("never fails a taken-over run on a refusal once its earlier request may have gone out", async () => {
     const threadId = await newThread();
     const { operation } = await ask(threadId);
-    await store.start(operation.id, { holder: "dead-worker", ms: 1 }, new Date());
-    // Meanwhile a person changes the conversation; whether the dead worker's request went out
-    // nobody knows, so the refusal the take-over gets says nothing about it.
+    const started = await store.start(
+      operation.id,
+      { holder: "dead-worker", ms: 60_000 },
+      new Date(),
+    );
+    // The dead worker had recorded its request as sent: whether it went out nobody knows.
+    await store.recordStep(operation.id, started!.operation.leaseOwner!, {
+      step: 1,
+      requestId: randomUUID(),
+      idempotencyKeySha256: sha256(routeKey(operation.id)),
+      statusCode: 0,
+      at: new Date().toISOString(),
+    });
+    // Meanwhile a person changes the conversation: the take-over's refusal says nothing about it.
     await admin.query(`UPDATE pms.message_threads SET version = 9 WHERE id = $1`, [threadId]);
-    await pause(10);
+    await expireLease(operation.id);
     await executor("recovery").recover(50);
     expect(await store.find(operation.id)).toMatchObject({
       status: "running",
       attempts: 2,
       errorCode: null,
     });
+  });
+
+  it("fails a taken-over run on a refusal when its worker died before sending anything", async () => {
+    const threadId = await newThread();
+    const { operation } = await ask(threadId);
+    await store.start(operation.id, { holder: "dead-worker", ms: 60_000 }, new Date());
+    await admin.query(`UPDATE pms.message_threads SET version = 9 WHERE id = $1`, [threadId]);
+    await expireLease(operation.id);
+    await executor("recovery").recover(50);
+    expect(await store.find(operation.id)).toMatchObject({
+      status: "failed",
+      attempts: 2,
+      errorCode: "thread_version_conflict",
+    });
+  });
+
+  it("takes over several runs, one after the other", async () => {
+    const threads = [await newThread(), await newThread()];
+    const ids: string[] = [];
+    for (const threadId of threads) {
+      const { operation } = await ask(threadId);
+      await store.start(operation.id, { holder: "dead-worker", ms: 60_000 }, new Date());
+      await expireLease(operation.id);
+      ids.push(operation.id);
+    }
+    expect(await executor("recovery").recover(50)).toBeGreaterThanOrEqual(2);
+    for (const id of ids) expect((await store.find(id))?.status).toBe("done");
+    for (const threadId of threads) {
+      expect(await thread(threadId)).toEqual({ attentionState: "done", version: "5" });
+    }
+  });
+
+  it("keeps its lease while a slow request runs, and stops waiting before the lease runs out", async () => {
+    // Slow but in time: the lease is renewed while it runs, and the change is done.
+    const slowThread = await newThread();
+    const slow = await ask(slowThread);
+    let renewals = 0;
+    const counting = {
+      ...store,
+      renewLease: (...args: Parameters<typeof store.renewLease>) => {
+        renewals++;
+        return store.renewLease(...args);
+      },
+    };
+    const patient = createAiChangeExecutor({
+      app,
+      store: counting,
+      identity,
+      authorizationResolver,
+      log,
+      holder: "slow",
+      leaseMs: 900,
+      onLogFailure: (error) => runFailures.push(error),
+      onRunFailure: (error) => runFailures.push(error),
+    });
+    delayNextMs = 500;
+    expect(await patient.startAndRun(slow.operation.id)).toMatchObject({ status: "done" });
+    // Once right before sending, then every 300 ms while the request ran.
+    expect(renewals).toBeGreaterThanOrEqual(2);
+
+    // Too slow: the run stops waiting and stays running; the recovery job finishes it.
+    const lateThread = await newThread();
+    const late = await ask(lateThread);
+    delayNextMs = 1_200;
+    expect(await executor("hasty", 900).startAndRun(late.operation.id)).toMatchObject({
+      status: "running",
+    });
+    expect(log.rows.filter((row) => row.operationId === late.operation.id)).toEqual([
+      expect.objectContaining({ outcome: "failed", errorCode: "timeout" }),
+    ]);
+    await pause(800);
+    await expireLease(late.operation.id);
+    await executor("recovery").recover(50);
+    expect(await store.find(late.operation.id)).toMatchObject({ status: "done", attempts: 2 });
+    expect(await thread(lateThread)).toEqual({ attentionState: "done", version: "5" });
   });
 
   it("gives a resumed run (the AI SDK, a Mastra workflow) the stored outcome, never a second run", async () => {
@@ -377,17 +478,22 @@ describe.skipIf(!url)("the executor of AI changes on PostgreSQL (VAY-2524)", () 
     const threadId = await newThread();
     const { operation } = await ask(threadId);
     breakNext = true;
-    expect(await executor("tab-a", 1).startAndRun(operation.id)).toMatchObject({
+    expect(await executor("tab-a").startAndRun(operation.id)).toMatchObject({
       status: "running",
     });
     expect(await thread(threadId)).toEqual({ attentionState: "needs_attention", version: "4" });
-    await pause(10);
+    await expireLease(operation.id);
     expect(await executor("recovery").recover(50)).toBeGreaterThanOrEqual(1);
     expect(await store.find(operation.id)).toMatchObject({ status: "done", attempts: 2 });
     expect(await thread(threadId)).toEqual({ attentionState: "done", version: "5" });
     expect(
-      log.rows.filter((row) => row.operationId === operation.id).map((row) => row.outcome),
-    ).toEqual(["failed", "ok"]);
+      log.rows
+        .filter((row) => row.operationId === operation.id)
+        .map((row) => [row.outcome, row.errorCode]),
+    ).toEqual([
+      ["failed", "read_model_unavailable"],
+      ["ok", null],
+    ]);
   });
 
   it("refuses a change a person made meanwhile: the conversation changed, nothing is applied", async () => {

@@ -8,11 +8,11 @@
 // keeps it here). The model, the AI SDK, Mastra and the browser never run a change: they create
 // an operation or answer it.
 //
-// "failed" must mean the change certainly did not happen. So only a first attempt that never sent
-// anything, or whose route refused it outright, fails; once a request may have gone out (a "sent"
-// step is recorded before every request), only the route's success ends the run, and anything else
-// leaves it running for the recovery job, which sends the same key again until the run gives up
-// (outcome unknown).
+// "failed" must mean the change certainly did not happen. A "sent" step is recorded before every
+// request, so a run without one never sent anything: it fails before any request, or on its
+// route's refusal. Once a request may have gone out, only the route's success ends the run, and
+// anything else leaves it running for the recovery job, which sends the same key again until the
+// run gives up (outcome unknown).
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -54,8 +54,11 @@ export type AiChangeExecutor = {
    * an unknown operation. The caller checks who answers before (PR 3).
    */
   startAndRun(operationId: string): Promise<AiOperation | null>;
-  /** The recovery job: takes over runs whose lease ran out, one at a time, with the same keys. */
-  recover(limit?: number): Promise<number>;
+  /**
+   * The recovery job: takes over runs whose lease ran out, one at a time, with the same keys, until
+   * `limit` or until `stopping()` says the API is shutting down.
+   */
+  recover(limit?: number, stopping?: () => boolean): Promise<number>;
   /** Closes pending changes nobody answered in time. */
   expirePending(limit?: number): Promise<number>;
 };
@@ -96,8 +99,9 @@ export function createAiChangeExecutor(deps: {
   async function run(operation: AiOperation): Promise<void> {
     const token = operation.leaseOwner;
     if (!token) throw new Error("AI change run without its lease");
-    // A request may already have gone out: then nothing but the route's success ends the run.
-    const mayHaveSent = operation.attempts > 1 || operation.steps.length > 0;
+    // A request may already have gone out (a "sent" step is on record before every request): then
+    // nothing but the route's success ends the run.
+    const mayHaveSent = operation.steps.length > 0;
     const fail = async (errorCode: string) => {
       if (!mayHaveSent) {
         await deps.store.finish(operation.id, token, { status: "failed", errorCode }, now());
@@ -182,14 +186,10 @@ export function createAiChangeExecutor(deps: {
         })
         .catch((error: unknown) => deps.onLogFailure(error));
 
-    // Keep the lease while the request runs; give up waiting before it could run out.
-    let leaseKept = true;
+    // Keep the lease while the request runs (record and finish check it again); give up waiting
+    // before it could run out.
     const renewer = setInterval(
-      () =>
-        void deps.store
-          .renewLease(operation.id, token, leaseMs, now())
-          .then((kept) => (leaseKept &&= kept))
-          .catch(() => (leaseKept = false)),
+      () => void deps.store.renewLease(operation.id, token, leaseMs, now()).catch(() => undefined),
       Math.max(1, Math.floor(leaseMs / 3)),
     );
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -235,10 +235,10 @@ export function createAiChangeExecutor(deps: {
     await log(
       answer.logOutcome,
       answer.kind === "done" ? null : answer.errorCode,
-      answer.kind === "done" ? recordsOf(action, operation.arguments) : [],
+      answer.kind === "done" ? recordsOf(action, operation.arguments, answer.result) : [],
     );
     // Taken over meanwhile: the new holder records and finishes.
-    if (!leaseKept || !(await record(response.statusCode))) return;
+    if (!(await record(response.statusCode))) return;
     if (answer.kind === "done") {
       await deps.store.finish(
         operation.id,
@@ -266,10 +266,10 @@ export function createAiChangeExecutor(deps: {
       return deps.store.find(operationId);
     },
 
-    async recover(limit = 10) {
+    async recover(limit = 10, stopping = () => false) {
       // One at a time: a run taken over but not started would lose its lease while it waits.
       let count = 0;
-      for (; count < limit; count++) {
+      for (; count < limit && !stopping(); count++) {
         const [operation] = await deps.store.takeOverExpired(lease, now(), 1);
         if (!operation) break;
         await runSafely(operation);
@@ -320,13 +320,36 @@ export function classifyChangeAnswer(
   return { kind: "refused", errorCode, logOutcome };
 }
 
-/** The records a done change touched: the ids in its path (`threadId` -> a "thread"). */
-function recordsOf(action: ChangeAction, args: Record<string, unknown>): AiRecordRef[] {
-  return action.pathParamNames
-    .filter((name) => name !== "propertyId" && name !== "hotelId" && name.endsWith("Id"))
-    .flatMap((name) => {
-      const id = args[name];
-      const type = name.slice(0, -2).replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
-      return typeof id === "string" ? [{ type, id }] : [];
-    });
+/** The records a change's path names, typed as the routes' own audit rows type them. */
+const PATH_RECORDS: Readonly<Record<string, string>> = {
+  threadId: "message_thread",
+  roomUnitId: "physical_room_unit",
+  blockId: "room_block",
+};
+
+/** The records a done change touched: from its path, or from its answer where the path has none. */
+function recordsOf(
+  action: ChangeAction,
+  args: Record<string, unknown>,
+  result: unknown,
+): AiRecordRef[] {
+  const records: AiRecordRef[] = [];
+  for (const name of action.pathParamNames) {
+    const type = PATH_RECORDS[name];
+    const id = args[name];
+    if (type && typeof id === "string") records.push({ type, id });
+  }
+  const answer = (result ?? {}) as {
+    items?: { blockId?: unknown }[];
+    note?: { noteId?: unknown };
+  };
+  if (records.length === 0) {
+    for (const item of answer.items ?? []) {
+      if (typeof item.blockId === "string") records.push({ type: "room_block", id: item.blockId });
+    }
+  }
+  if (typeof answer.note?.noteId === "string") {
+    records.push({ type: "booking_note_private", id: answer.note.noteId });
+  }
+  return records;
 }

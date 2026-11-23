@@ -25,7 +25,7 @@ export function startAiChangeRecoveryWorker(options: {
       options.logger.error({ err: error }, "Closing unanswered AI changes failed");
     }
     try {
-      recovered = await options.executor.recover();
+      recovered = await options.executor.recover(undefined, () => closing);
     } catch (error) {
       options.logger.error({ err: error }, "Taking over AI change runs failed");
     }
