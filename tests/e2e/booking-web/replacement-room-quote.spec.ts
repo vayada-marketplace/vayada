@@ -336,7 +336,10 @@ test("shows checkout in the guest's currency with cents, and the charged amount 
   await expect(summary).toContainText(/2 nights\s*US\$346\.50/);
   await expect(summary).toContainText("Taxes & feesIncluded");
   await expect(summary).toContainText(/At the hotel\s*US\$346\.50/);
+  // At the board's height the whole summary shows (a shorter window scrolls its details).
+  await page.setViewportSize({ width: 1280, height: 1100 });
   await summary.screenshot({ path: testInfo.outputPath("checkout-usd-summary-1280.png") });
+  await page.setViewportSize({ width: 1280, height: 720 });
   // The charged currency once, at the end of the summary; the sentences name no amount.
   await expect(page.getByTestId("charged-currency")).toHaveText(
     "The hotel charges in Euro: €315. The US$346.50 shown uses today’s exchange rate.",
