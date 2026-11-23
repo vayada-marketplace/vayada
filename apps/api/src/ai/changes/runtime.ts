@@ -1,16 +1,18 @@
-// AI changes in the API (VAY-2524): the record of every change, the one executor, its recovery job
-// and the Yes/No routes, switched on together by AI_CHANGES_ENABLED (off by default). server.ts
-// wires this; nothing outside apps/api/src/ai touches the executor (delegationBoundary.test.ts).
+// AI changes in the API (VAY-2524): the record of every change, how an AI asks for one, the one
+// executor, its recovery job and the Yes/No routes, switched on together by AI_CHANGES_ENABLED
+// (off by default). server.ts wires this; nothing outside apps/api/src/ai touches the executor
+// (delegationBoundary.test.ts).
 import { randomBytes } from "node:crypto";
 
 import type { AuthorizationResolver, IdentityRepository } from "@vayada/backend-auth";
-import type { FastifyInstance } from "fastify";
+import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 
 import { createPgAiActionLog } from "../actionLog/actionLog.js";
 import { createAiChangeExecutor, type AiChangeExecutor } from "../executor/executor.js";
 import { createPgAiOperationStore, type AiOperation } from "../executor/operationStore.js";
 import { startAiChangeRecoveryWorker } from "../executor/recoveryWorker.js";
 import type { PendingActionRouteOptions } from "./pendingActions.js";
+import { createAiChangeProposer } from "./proposeChange.js";
 
 /**
  * Until conversations (VAY-2518) and MCP connections (VAY-2528) exist, an in-app conversation
@@ -37,8 +39,17 @@ export function createAiChangesRuntime(config: {
   const holder = `api-${process.pid}-${randomBytes(4).toString("hex")}`;
   let executor: AiChangeExecutor | undefined;
   let worker: ReturnType<typeof startAiChangeRecoveryWorker> | undefined;
+  let appLog: FastifyBaseLogger | undefined;
+  const logFailure = (error: unknown) =>
+    appLog?.error({ err: error }, "AI action log row not written");
 
   return {
+    /**
+     * How an AI asks for a change: the in-app assistant's change tool calls it with the tool
+     * call's own delegated context and returns the result as the tool's output; the card finds
+     * the change by its `pendingActionId`. It records the ask and runs nothing.
+     */
+    proposeChange: createAiChangeProposer({ store, log, onLogFailure: logFailure }),
     /** For buildApp: the Yes/No routes. */
     routes: {
       store,
@@ -53,6 +64,7 @@ export function createAiChangesRuntime(config: {
 
     /** Once the app exists: the executor runs its changes in it, and the recovery job starts. */
     start(app: FastifyInstance) {
+      appLog = app.log;
       executor = createAiChangeExecutor({
         app,
         store,
@@ -60,7 +72,7 @@ export function createAiChangesRuntime(config: {
         authorizationResolver: config.authorizationResolver,
         log,
         holder,
-        onLogFailure: (error) => app.log.error({ err: error }, "AI action log row not written"),
+        onLogFailure: logFailure,
         onRunFailure: (error, operation) =>
           app.log.error(
             { err: error, operationId: operation.id },
