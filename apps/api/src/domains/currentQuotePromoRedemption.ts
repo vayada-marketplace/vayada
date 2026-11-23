@@ -6,6 +6,10 @@ import { decodeCurrentPricingQuoteRecord } from "./currentPricingQuoteStore.js";
 import { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { pricingDecimalMinor } from "./pricingDecimalMinor.js";
+import {
+  lockPmsInventoryMutationScope,
+  type PmsInventoryMutationLockClient,
+} from "./pmsInventoryMutationLock.js";
 
 type CurrentQuote = NonNullable<Awaited<ReturnType<typeof lockCurrentQuoteRevalidation>>>;
 const fail = (): never => {
@@ -162,4 +166,42 @@ async function redeemQuotePromo(
     discountMinor: discounts.codeMinor,
     replayed: false,
   };
+}
+
+/** Gives a booking's applied code back: its application `reversed`, the code's use count one
+ * lower. In the caller's transaction, with the booking's own cancel, decline or lapse; a booking
+ * without an applied code changes nothing. */
+export async function reverseTargetPromoRedemption(
+  pool: PmsInventoryMutationLockClient,
+  propertyId: string,
+  guestBookingId: string,
+  occurredAt: Date,
+): Promise<void> {
+  const applied = await pool.query(
+    `SELECT 1 FROM booking.promo_applications
+     WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid AND application_status='applied' LIMIT 1`,
+    [propertyId, guestBookingId],
+  );
+  if (!applied.rows.length) return;
+  // The property's inventory lock before its promo rows, the order quotes and checkouts take them
+  // in (VAY-2566): a sweep or withdraw giving a use back can't deadlock a checkout with a code.
+  await lockPmsInventoryMutationScope(pool, propertyId);
+  await pool.query(
+    `WITH reversed AS (
+       UPDATE booking.promo_applications
+          SET application_status = 'reversed',
+              metadata = metadata || jsonb_build_object('reversedAt', $3::text)
+        WHERE property_id = $1::uuid
+          AND guest_booking_id = $2::uuid
+          AND application_status = 'applied'
+      RETURNING promo_definition_id
+     )
+     UPDATE booking.promo_definitions promo
+        SET current_uses = GREATEST(promo.current_uses - 1, 0),
+            updated_at = $3::timestamptz
+       FROM reversed
+      WHERE promo.id = reversed.promo_definition_id
+        AND promo.property_id = $1::uuid`,
+    [propertyId, guestBookingId, occurredAt.toISOString()],
+  );
 }

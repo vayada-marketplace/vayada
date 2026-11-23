@@ -130,11 +130,23 @@ describe("pricing room revenue projection", () => {
       pricingRoomRevenueProjection(quote, chargeEvidence)?.nights.map((n) => n.grossRoomAmount),
     ).toEqual(["150.00", "150.00"]);
   });
-  it("rejects a booking-wide (code) discount, which names no room to take it from", () => {
+  it("rejects a code's discount without the rooms it applies to", () => {
     const { quote, charges } = fixture();
     discount(quote, null, "1000");
     expect(parseStoredPricingQuote(quote)).not.toBeNull();
     expect(pricingRoomRevenueProjection(quote, charges)).toBeNull();
+    for (const code of [null, {}, { eligibleSelectionIds: [] }, { eligibleSelectionIds: ["x"] }])
+      expect(pricingRoomRevenueProjection(quote, charges, code)).toBeNull();
+  });
+  it("takes a code's discount off the nights of its rooms, after their last-minute (VAY-2566)", () => {
+    const { quote, charges } = fixture();
+    discount(quote, "one", "3000");
+    discount(quote, null, "2701");
+    expect(
+      pricingRoomRevenueProjection(quote, charges, {
+        eligibleSelectionIds: ["one"],
+      })?.nights.map((n) => n.grossRoomAmount),
+    ).toEqual(["121.49", "121.50"]);
   });
   it("takes a room's last-minute discount off its own nights by price (VAY-2566)", () => {
     const { quote, charges } = fixture();
@@ -203,6 +215,53 @@ describe("pricing room revenue projection", () => {
       [[2], "145.00"],
       [[2], "145.00"],
     ]);
+  });
+  it("takes a code's discount off its own rooms first, and the rest off the others' nights", () => {
+    const twoRooms = () => {
+      const { quote } = fixture();
+      quote.stay.rooms.push({ ...quote.stay.rooms[0], selectionId: "two" });
+      quote.rooms.push({ ...structuredClone(quote.rooms[0]), selectionId: "two" });
+      quote.evidence.lines.push(
+        { id: "r2", selectionId: "two", kind: "room", amountMinor: "30000" },
+        { id: "m2", selectionId: "two", kind: "meal", amountMinor: "6000" },
+      );
+      Object.assign(quote.evidence, {
+        totalMinor: "72000",
+        dueNowMinor: "21600",
+        dueLaterMinor: "50400",
+        requestKey: replacementStayKey(quote.stay),
+      });
+      const charges = {
+        ...calculateReplacementFixedCharges(quote.stay, {
+          version: "booking.fixed-charges.v1",
+          currency: "EUR",
+          charges: [],
+        })!,
+        sourceRevision: "charges:1",
+      };
+      quote.evidence.mandatoryChargeEvidenceId = charges.basisEvidenceId;
+      return { quote, charges };
+    };
+    const code = { eligibleSelectionIds: ["two"] };
+    const own = twoRooms();
+    discount(own.quote, null, "1000");
+    expect(
+      pricingRoomRevenueProjection(own.quote, own.charges, code)?.nights.map(
+        (n) => n.grossRoomAmount,
+      ),
+    ).toEqual(["150.00", "150.00", "145.00", "145.00"]);
+    // A fixed code bigger than its room (its extras' share): the other room's nights take the rest.
+    const spill = twoRooms();
+    discount(spill.quote, null, "40000");
+    expect(
+      pricingRoomRevenueProjection(spill.quote, spill.charges, code)?.nights.map(
+        (n) => n.grossRoomAmount,
+      ),
+    ).toEqual(["100.00", "100.00", "0.00", "0.00"]);
+    // More than all the rooms together has nowhere to go.
+    const over = twoRooms();
+    discount(over.quote, null, "60001");
+    expect(pricingRoomRevenueProjection(over.quote, over.charges, code)).toBeNull();
   });
   it("rejects a room discount larger than the room or naming a room not in the stay", () => {
     const over = fixture();
