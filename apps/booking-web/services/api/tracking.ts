@@ -1,5 +1,6 @@
 import {
   BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
+  BOOKING_WEB_PAGE_VIEW_EVENT,
   FUNNEL_ERROR_CODES,
   parseFunnelEventMetadata,
   type FunnelEventProperties,
@@ -12,6 +13,25 @@ import { getBookingWebSessionId } from "./session";
 /** One of our own API's refusal codes, or nothing: never free text or a card decline code. */
 export function funnelErrorCode(code: unknown) {
   return FUNNEL_ERROR_CODES.find((known) => known === code);
+}
+
+/** VAY-2592: counts this page view for the hotel without asking the guest. It reads and writes
+ * nothing on the device (no storage, no cookies) and sends only the slug and the type; the API
+ * makes the view's id, so a view can't be linked to another view or to the guest. */
+export function trackPageView(hotelSlug: string) {
+  if (typeof window === "undefined" || !hotelSlug) return;
+  try {
+    // Like trackEvent: straight to the API as a CORS "simple" request, without the page's address.
+    void fetch(`${bookingWebDirect().baseURL}/api/booking-web/events`, {
+      method: "POST",
+      mode: "cors",
+      credentials: "omit",
+      headers: { "Content-Type": "text/plain;charset=UTF-8" },
+      body: JSON.stringify({ hotelSlug, eventType: BOOKING_WEB_PAGE_VIEW_EVENT }),
+      keepalive: true,
+      referrerPolicy: "no-referrer",
+    }).catch(() => {});
+  } catch {}
 }
 
 /** A funnel event, only with analytics consent and only with the properties its type allows

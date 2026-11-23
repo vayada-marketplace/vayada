@@ -2,8 +2,9 @@ import type { AiActionLogRetentionStore, AiRetentionBatch } from "../ai/actionLo
 
 /**
  * VAY-2508: deletes AI action log rows after two years and empties Inbox assist results whose
- * 30-day retention passed (design note §7.3); VAY-2524: deletes AI changes after 90 days. Runs
- * every six hours, batch by batch.
+ * 30-day retention passed (design note §7.3); VAY-2518: deletes assistant conversations 30 days
+ * after their last activity; VAY-2524: deletes AI changes after 90 days. Runs every six hours,
+ * batch by batch.
  */
 export const AI_ACTION_LOG_RETENTION_BATCH_SIZE = 500;
 export const AI_ACTION_LOG_RETENTION_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -24,16 +25,26 @@ export function startAiActionLogRetentionWorker(options: {
   let activeRun: Promise<void> | undefined;
   let closing = false;
   const drain = async (cutoff: Date) => {
-    const total: AiRetentionBatch = { logRows: 0, assistResults: 0, operations: 0 };
+    const total: AiRetentionBatch = {
+      logRows: 0,
+      assistResults: 0,
+      conversations: 0,
+      operations: 0,
+    };
     for (;;) {
       const batch = await options.store.purgeExpiredBatch(cutoff, batchSize);
       total.logRows += batch.logRows;
       total.assistResults += batch.assistResults;
+      total.conversations += batch.conversations;
       total.operations += batch.operations;
-      if (closing || Object.values(batch).every((count) => count < batchSize)) break;
+      const full = Math.max(...Object.values(batch)) >= batchSize;
+      if (closing || !full) break;
     }
-    if (total.logRows + total.assistResults + total.operations > 0)
-      options.logger.info(total, "Purged expired AI action log rows, assist results and changes");
+    if (Object.values(total).some((count) => count > 0))
+      options.logger.info(
+        total,
+        "Purged expired AI action log rows, Inbox assist results, assistant conversations and AI changes",
+      );
   };
   const runNow = (): Promise<void> => {
     if (closing) return Promise.resolve();
