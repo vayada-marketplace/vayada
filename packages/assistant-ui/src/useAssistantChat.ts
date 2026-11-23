@@ -230,11 +230,12 @@ export function useAssistantChat(api: AssistantApi, scope: AssistantScope) {
       if (mine !== epoch.current) return;
       if (!broke) settle(last, hadTurn);
       if (last?.type === "refused" && last.reason === "not_found") id = undefined;
-      // The stored chat is what counts, also after a broken stream. Until it is read, the
-      // streamed answer stays on screen (and stays if the read fails).
-      if (id && (await load(id, mine))) return;
+      // Once the API started a turn, the stored chat is what counts, also after a broken stream.
+      // Until it is read, the streamed answer stays on screen (and stays if the read fails).
+      if (hadTurn && id && (await load(id, mine))) return;
       if (mine !== epoch.current) return;
-      if (!id) setLive(null);
+      // Nothing was stored (refused, or the request failed): the question stays, with the
+      // notice under it, until the next question or chat.
       setAnswering(false);
     },
     [answering, api, conversationId, load, scope],

@@ -294,6 +294,9 @@ test("busy: Try again asks the same question again", async ({ page }, testInfo) 
   await panel.getByRole("textbox").fill(question);
   await panel.getByRole("textbox").press("Enter");
   await expect(panel.getByText("The assistant is busy right now")).toBeVisible();
+  // Nothing was stored, but the question stays above the notice (board 09, panel 5).
+  await expect(panel.getByText(question)).toBeVisible();
+  await expect(panel.getByRole("heading", { name: GREETING })).toHaveCount(0);
   await shot(page, testInfo, "09-5-busy");
   await panel.getByRole("button", { name: "Try again" }).click();
   await expect(panel.getByText("Two guests check out tomorrow.")).toBeVisible();

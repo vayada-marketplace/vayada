@@ -387,7 +387,7 @@ function OpenDrawer({
                 send(draft);
               }
             }}
-            className="max-h-36 min-h-[36px] flex-1 resize-none bg-transparent py-1.5 text-[15px] leading-6 text-gray-900 outline-none [field-sizing:content] placeholder:text-gray-400 disabled:cursor-default"
+            className="max-h-36 min-h-[36px] min-w-0 flex-1 resize-none bg-transparent py-1.5 text-[15px] leading-6 text-gray-900 outline-none [field-sizing:content] placeholder:truncate placeholder:text-gray-400 disabled:cursor-default"
           />
           {chat.answering ? (
             <button
@@ -754,10 +754,13 @@ function EndedNote({
 
 function LiveTurnView({
   live,
+  answering,
   m,
   locale,
 }: {
   live: LiveTurn;
+  /** False once the question was refused or failed: no spinner, the notice follows. */
+  answering: boolean;
   m: AssistantMessages;
   locale: string;
 }) {
@@ -776,6 +779,7 @@ function LiveTurnView({
       {live.text ? (
         <Answer m={m} text={live.text} at={started} locale={locale} />
       ) : (
+        answering &&
         !looking && (
           <div className="flex items-center gap-2 text-[13px] text-gray-500">
             <span className="flex w-4 justify-center">
@@ -859,7 +863,9 @@ function Transcript({
           }
           return null;
         })}
-        {chat.live && <LiveTurnView live={chat.live} m={m} locale={locale} />}
+        {chat.live && (
+          <LiveTurnView live={chat.live} answering={chat.answering} m={m} locale={locale} />
+        )}
         {chat.notice && <Notice chat={chat} messages={m} onRetry={onRetry} />}
         {chat.blocker?.kind === "read_only" && (
           <Box
