@@ -121,11 +121,15 @@ function sendError(
   return reply.status(refusal.statusCode).send(body);
 }
 
-/** Why this request may not answer: only the vayada apps' own signed-in sessions may. */
+/**
+ * Why this request may not see or answer: only the vayada apps' own signed-in sessions may. Staff
+ * signed in as the person (WorkOS impersonation) may look at the card but never answer it.
+ */
 function firstPartyProblem(
   request: FastifyRequest,
   context: RequestContext,
   allowedOrigins: readonly string[],
+  answering: boolean,
 ): string | null {
   if (context.audit.source === "agent" || context.delegation) {
     return "An AI can't see or answer its own changes.";
@@ -135,6 +139,9 @@ function firstPartyProblem(
   }
   const origin = request.headers.origin;
   if (!origin || !allowedOrigins.includes(origin)) return "Answer in a vayada app.";
+  if (answering && context.actor.providerIdentity.impersonated) {
+    return "You're signed in as someone else. Only they can answer.";
+  }
   return null;
 }
 
@@ -240,9 +247,10 @@ export async function registerPendingActionRoutes(
   async function load(
     request: FastifyRequest<{ Params: Params }>,
     reply: FastifyReply,
+    answering: boolean,
   ): Promise<{ context: RequestContext; operation: AiOperation } | undefined> {
     const context = requireAuthContext(request);
-    const problem = firstPartyProblem(request, context, options.allowedOrigins);
+    const problem = firstPartyProblem(request, context, options.allowedOrigins, answering);
     if (problem) {
       sendError(reply, { statusCode: 403, code: "first_party_only", message: problem });
       return undefined;
@@ -402,7 +410,7 @@ export async function registerPendingActionRoutes(
     });
 
   app.get<{ Params: Params }>("/pending-actions/:id", async (request, reply) => {
-    const loaded = await load(request, reply);
+    const loaded = await load(request, reply, false);
     if (!loaded) return reply;
     try {
       const settled = await settle(loaded.context, loaded.operation, authorizationOf(request));
@@ -416,7 +424,7 @@ export async function registerPendingActionRoutes(
   app.post<{ Params: Params; Body: unknown }>(
     "/pending-actions/:id/answer",
     async (request, reply) => {
-      const loaded = await load(request, reply);
+      const loaded = await load(request, reply, true);
       if (!loaded) return reply;
       const body = request.body as { answer?: unknown; cardSha256?: unknown } | null;
       const invalid = (message: string) =>
