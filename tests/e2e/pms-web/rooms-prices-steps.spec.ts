@@ -430,7 +430,7 @@ test("edits a priced room on the simple card and publishes only what changed (VA
   await page.screenshot({ path: testInfo.outputPath("rates-last-minute-hint.png") });
   await expect(
     main(page).getByText(
-      "Guests booking less than 7 days before arrival can't cancel for free. The booking page still shows this rate, with a note that free cancellation isn't available for those dates.",
+      "Guests booking less than 7 days before arrival can't cancel for free. The booking page tells them before they book.",
     ),
   ).toBeVisible();
   // The Save bar: the lowest night is the Low season's €80, 10% less on the Non-refundable rate.
@@ -767,7 +767,7 @@ test("says from when guests of a partial-refund rate get no refund", async ({ pa
   await expect(steps).toBeVisible();
   await expect(
     main(page).getByText(
-      "Guests booking less than 14 days before arrival get no refund. The booking page still shows this rate, with a note that there's no refund for those dates.",
+      "Guests booking less than 14 days before arrival get no refund. The booking page tells them before they book.",
     ),
   ).toBeVisible();
   await assertHealthy();

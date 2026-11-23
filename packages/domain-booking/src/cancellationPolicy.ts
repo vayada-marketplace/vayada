@@ -436,7 +436,11 @@ export function cancellationLine(blocks: readonly PolicyBlock[]): {
       tone,
       lead: { key: "rooms" },
       rest: blocks.map((block) => ({
-        key: `room.${block.policy.badge.kind}`,
+        // VAY-2587: a room booked after its free cancellation ended says so, as one room does.
+        key:
+          block.policy.note.kind === "lateBooking"
+            ? "room.lateBooking"
+            : `room.${block.policy.badge.kind}`,
         rooms: block.rooms,
         date: date(block.policy.badge),
       })),

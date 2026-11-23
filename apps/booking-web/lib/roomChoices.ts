@@ -12,13 +12,28 @@ import type { StayOfferPrice } from "@/services/api/stayPrices";
 export type ChoiceKeys = PricingOfferNameKey & { mealDescription?: string };
 
 /** One room's choices, in order. A choice keeps its own name for every stay (VAY-2587): when its
- * free cancellation is already over, its terms say so, it is never renamed "Non-refundable". */
-export function choiceKeys(offers: readonly PricingOffer[]): ChoiceKeys[] {
-  return pricingOfferNameKeys(
+ * free cancellation (or a partial refund's last refund day, VAY-2406) is already over, its terms
+ * say so; it is never renamed "Non-refundable". With the stay, such a choice is numbered after the
+ * room's open choices of the same name (VAY-2392), so the one the room card shows in its place
+ * keeps the plain name ("Flexible rate", not "Flexible rate 2"). */
+export function choiceKeys(
+  offers: readonly PricingOffer[],
+  stay?: { checkIn: string; timezone?: string },
+  now = new Date(),
+): ChoiceKeys[] {
+  const keys = pricingOfferNameKeys(
     offers.map(({ mealPlan, cancellation }) => ({ mealPlan, cancellation })),
-  ).map((keys, index) => {
+  );
+  const passed = keys.map(({ days }) => !!stay && days !== null && refundsEnded(stay, days, now));
+  const order = offers.map((_, index) => index).sort((a, b) => +passed[a]! - +passed[b]!);
+  const numbers = pricingOfferNameKeys(order.map((index) => offers[index]!));
+  return keys.map((own, index) => {
     const mealDescription = offers[index]!.mealDescription;
-    return { ...keys, ...(mealDescription && { mealDescription }) };
+    return {
+      ...own,
+      number: numbers[order.indexOf(index)]!.number,
+      ...(mealDescription && { mealDescription }),
+    };
   });
 }
 
@@ -40,6 +55,17 @@ function freeUntil(checkIn: string, days: number): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(checkIn) && !Number.isNaN(Date.parse(checkIn))
     ? freeCancellationUntil(checkIn, days)
     : null;
+}
+
+/** Free cancellation, or a partial refund's last step, `days` before arrival is over on the
+ * hotel's calendar today. */
+function refundsEnded(
+  stay: { checkIn: string; timezone?: string },
+  days: number,
+  now: Date,
+): boolean {
+  const until = freeUntil(stay.checkIn, days);
+  return until !== null && hotelToday(stay.timezone, now) > until;
 }
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
@@ -157,7 +183,7 @@ export function roomSaving(
   now = new Date(),
 ): number {
   if (!prices) return 0;
-  const keys = choiceKeys(offers);
+  const keys = choiceKeys(offers, stay, now);
   const all = offers.map((offer, index) => {
     const text = choiceText(keys[index]!, { ...stay, formatDate: (date) => date }, t, now);
     const price = prices.find((p) => p.publicOfferKey === offer.publicOfferKey);

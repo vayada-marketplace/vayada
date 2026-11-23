@@ -174,7 +174,7 @@ it("shows the Flexible rate always on beside the Non-refundable rate, with cance
 it("says what guests booking inside the free cancellation window get (VAY-2392)", () => {
   mount(room(), terms(["pay_at_property"], ["bank_transfer"]), ["bank_transfer"]);
   expect(textOf(card("Flexible rate"))).toContain(
-    "Guests booking less than 7 days before arrival can't cancel for free. The booking page still shows this rate, with a note that free cancellation isn't available for those dates.",
+    "Guests booking less than 7 days before arrival can't cancel for free. The booking page tells them before they book.",
   );
 });
 
@@ -199,7 +199,7 @@ it("says from when guests of a partial-refund rate get no refund (VAY-2428)", ()
     return textOf(card("Flexible rate"));
   };
   const hint = (days: string) =>
-    `Guests booking less than ${days} before arrival get no refund. The booking page still shows this rate, with a note that there's no refund for those dates.`;
+    `Guests booking less than ${days} before arrival get no refund. The booking page tells them before they book.`;
   const steps = partial([
     { minDaysBeforeCheckIn: 30, refundPercent: 100 },
     { minDaysBeforeCheckIn: 14, refundPercent: 50 },

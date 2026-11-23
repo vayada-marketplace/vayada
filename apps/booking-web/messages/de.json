@@ -616,7 +616,8 @@
         "refundsUntil": "{rooms}: Erstattung bis Ende {date}.",
         "freeEnded": "{rooms}: kostenlose Stornierung abgelaufen.",
         "noRefund": "{rooms}: keine Erstattung mehr.",
-        "nonRefundable": "{rooms}: nicht erstattbar."
+        "nonRefundable": "{rooms}: nicht erstattbar.",
+        "lateBooking": "{rooms}: keine kostenlose Stornierung."
       }
     },
     "extras": {

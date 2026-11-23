@@ -560,4 +560,20 @@ it("names each room's terms when the rooms cancel differently", () => {
     ],
   });
   expect(cancellationLine([])).toBeNull();
+  // VAY-2587: a Flexible room booked after its free cancellation ended says so, as one room does;
+  // only the Non-refundable rate reads "non-refundable".
+  const late = bookedPolicyBlocks(
+    {
+      ...booked([
+        { roomName: "Suite", cancellation: free(1), subtotalMinor: "1" },
+        { roomName: "Villa", cancellation: free(14), subtotalMinor: "1" },
+      ]),
+      bookedOn: "2026-10-25",
+    },
+    { today: "2026-10-25", ...mode },
+  );
+  expect(cancellationLine(late)?.rest).toEqual([
+    { key: "room.freeUntil", rooms: ["Suite"], date: "2026-11-05" },
+    { key: "room.lateBooking", rooms: ["Villa"], date: undefined },
+  ]);
 });

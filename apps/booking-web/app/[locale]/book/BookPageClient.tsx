@@ -750,7 +750,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const choiceName = (room: PricingRoom, publicOfferKey: string) => {
     const index = room.offers.findIndex((offer) => offer.publicOfferKey === publicOfferKey);
     return choiceText(
-      choiceKeys(room.offers)[index]!,
+      choiceKeys(room.offers, { checkIn, timezone: hotelZone }, hotelNow)[index]!,
       { checkIn, timezone: hotelZone, formatDate: (date) => date },
       t,
       hotelNow,

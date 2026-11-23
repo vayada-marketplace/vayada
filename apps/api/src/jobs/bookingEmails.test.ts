@@ -308,6 +308,20 @@ describe("booking lifecycle email jobs", () => {
     expect(await text("final_confirmation", stay(["Double", free], ["Suite $$", none]))).toContain(
       "Cancellation: Your rooms cancel differently. Double: free until the end of Fri, 9 Oct 2026. Suite $$: non-refundable.",
     );
+    // VAY-2587: a Flexible room booked after its free cancellation ended isn't called non-refundable.
+    const freeOneDay = {
+      kind: "flexible",
+      terms: { flexibleCancellationType: "free", freeCancellationDeadlineDays: 1 },
+    } as unknown as Terms;
+    expect(
+      await text(
+        "final_confirmation",
+        { ...stay(["Double", free], ["Suite", freeOneDay]), bookedOn: "2026-10-10" },
+        "2026-10-09T18:30:00.000Z",
+      ),
+    ).toContain(
+      "Cancellation: Your rooms cancel differently. Double: no free cancellation. Suite: free until the end of Sun, 11 Oct 2026.",
+    );
     // Without trusted pricing terms, and in the other emails, nothing is said about cancelling.
     expect(await text("final_confirmation", null)).not.toContain("Cancellation:");
     for (const kind of ["request_received", "booking_updated", "host_new_booking"] as const)

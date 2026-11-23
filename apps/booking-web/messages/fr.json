@@ -615,7 +615,8 @@
         "refundsUntil": "{rooms} : remboursement jusqu’à la fin du {date}.",
         "freeEnded": "{rooms} : l’annulation gratuite est terminée.",
         "noRefund": "{rooms} : plus de remboursement.",
-        "nonRefundable": "{rooms} : non remboursable."
+        "nonRefundable": "{rooms} : non remboursable.",
+        "lateBooking": "{rooms} : pas d’annulation gratuite."
       }
     },
     "extras": {

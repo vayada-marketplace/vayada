@@ -121,11 +121,20 @@ describe("room choices", () => {
 
   it("names a passed Flexible rate as its own, never as a second Non-refundable (VAY-2587)", () => {
     const inside = { ...stay, checkIn: "2026-10-16" };
-    const names = (offers: PricingOffer[]) =>
-      choiceKeys(offers).map((keys) => choiceText(keys, inside, t, now).name);
+    const names = (offers: PricingOffer[], forStay?: typeof stay) =>
+      choiceKeys(offers, forStay, now).map(
+        (keys) => choiceText(keys, forStay ?? stay, t, now).name,
+      );
     expect(
-      names([offer("room_only", free(3)), offer("room_only", { kind: "non_refundable" })]),
+      names([offer("room_only", free(3)), offer("room_only", { kind: "non_refundable" })], inside),
     ).toEqual(["Flexible rate", "Non-refundable"]);
+    // The room card hides a passed rate next to an open one of the same meal: the open one, the
+    // rate guests see, keeps the plain name (VAY-2392).
+    expect(names([offer("room_only", free(7)), offer("room_only", free(1))], inside)).toEqual([
+      "Flexible rate 2",
+      "Flexible rate",
+    ]);
+    // Without the stay, the names are numbered in order.
     expect(names([offer("room_only", free(7)), offer("room_only", free(1))])).toEqual([
       "Flexible rate",
       "Flexible rate 2",

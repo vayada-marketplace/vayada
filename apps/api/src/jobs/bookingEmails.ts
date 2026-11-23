@@ -992,6 +992,7 @@ export const CANCEL_LINE_TEXT: Readonly<Partial<Record<string, string>>> = {
   "room.freeEnded": "{rooms}: free cancellation has ended.",
   "room.noRefund": "{rooms}: no refund any more.",
   "room.nonRefundable": "{rooms}: non-refundable.",
+  "room.lateBooking": "{rooms}: no free cancellation.",
 };
 
 /** The cancel preview's money line (booking-web `myBooking`) in English, so the guest's cancellation email says

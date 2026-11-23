@@ -167,7 +167,7 @@ export default function RoomCard({
     : "";
   // The server's clock, as checkout judges the deadline (VAY-2392).
   const now = new Date(serverNow());
-  const keys = choiceKeys(room.offers);
+  const keys = choiceKeys(room.offers, { checkIn, timezone }, now);
   const all = room.offers.map((offer, index) => {
     const price = (part?.offers ?? prices?.offers)?.find(
       (p) => p.publicOfferKey === offer.publicOfferKey,
