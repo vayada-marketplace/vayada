@@ -261,10 +261,19 @@ describe("notification rows (VAY-2349)", () => {
       new Map([[item({}).key, "read"]]),
     );
     expect(hidden.badge).toBe("red");
-    const all = withMarks(current, "all");
+    const all = withMarks(current, { readBefore: current.generatedAt });
     expect(all.unread).toEqual({ all: 0, bookings: 0, needsAction: 0, updates: 0 });
     expect(all.items.every((entry) => entry.read)).toBe(true);
     expect(all.badge).toBe("none");
+    // Mark all is what the person saw: a booking that came in since stays unread (and still toasts).
+    const late = item({ key: "late", occurredAt: "2026-10-25T12:05:00Z" });
+    const since = withMarks(feed({ ...current, items: [late, ...current.items] }), {
+      readBefore: current.generatedAt,
+    });
+    expect(since.items[0]!.read).toBe(false);
+    expect(since.items.slice(1).every((entry) => entry.read)).toBe(true);
+    expect(since.unread).toEqual({ all: 1, bookings: 1, needsAction: 0, updates: 0 });
+    expect(since.badge).toBe("blue");
   });
 
   it("marks rows unread and done at once, and done leaves Needs action (VAY-2591)", () => {
@@ -315,7 +324,7 @@ describe("notification rows (VAY-2349)", () => {
     expect(read.syncAlert?.read).toBe(true);
     expect(read.unread).toEqual({ all: 1, bookings: 1, needsAction: 0, updates: 0 });
     expect(read.badge).toBe("red");
-    const all = withMarks(failing, "all");
+    const all = withMarks(failing, { readBefore: failing.generatedAt });
     expect(all.unread.all).toBe(0);
     expect(all.badge).toBe("red");
   });

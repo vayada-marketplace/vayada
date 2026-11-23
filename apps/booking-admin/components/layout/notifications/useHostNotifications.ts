@@ -21,17 +21,21 @@ type Client = Pick<
 /** What a mark does to an item (VAY-2591): read, unread (on a done item: no longer done), or done (needs-action
  * items only; a done item is read). */
 export type NotificationMark = "read" | "unread" | "done";
+/** "Mark all read" as the person saw it: everything up to the feed's generatedAt (not what came since). */
+type ReadAll = { readBefore: string };
 
 /** loading until the first read; unavailable when there is no property or the person may not read its
  * notifications (the bell then hides); failed when a read went wrong (the next one tries again). */
 export type NotificationsStatus = "loading" | "ready" | "failed" | "unavailable";
 
 /** Marks sent but not yet confirmed by a later read: per key the latest mark and how many are on their way,
- * and "all" while a Mark all read runs. */
+ * and how many "Mark all read" are running. */
 type Pending = {
   hotelId: string;
   keys: Map<string, { mark: NotificationMark; count: number }>;
   all: number;
+  /** The latest generatedAt a running "Mark all read" was made from. */
+  allBefore: string;
 };
 
 /** Red: the channel sync is failing, read or not (it stays red until it is fixed), or a missed payment is
@@ -47,10 +51,15 @@ function hasUrgent(feed: HostNotificationFeed): boolean {
  * cover all 30 days, beyond the 50 rows) and the badge. */
 export function withMarks(
   feed: HostNotificationFeed,
-  marks: ReadonlyMap<string, NotificationMark> | "all",
+  marks: ReadonlyMap<string, NotificationMark> | ReadAll,
 ): HostNotificationFeed {
-  const markOf = (key: string): NotificationMark | undefined =>
-    marks === "all" ? "read" : marks.get(key);
+  const readAll = "readBefore" in marks ? Date.parse(marks.readBefore) : null;
+  const markOf = (key: string, occurredAt?: string): NotificationMark | undefined =>
+    readAll !== null
+      ? occurredAt === undefined || Date.parse(occurredAt) <= readAll
+        ? "read"
+        : undefined
+      : (marks as ReadonlyMap<string, NotificationMark>).get(key);
   const unread = { ...feed.unread };
   const count = (category: string, step: 1 | -1) => {
     unread.all += step;
@@ -59,7 +68,7 @@ export function withMarks(
     else unread.updates += step;
   };
   const items = feed.items.map((item) => {
-    const mark = markOf(item.key);
+    const mark = markOf(item.key, item.occurredAt);
     if (mark === "read" || (mark === "done" && item.category !== "needs_action")) {
       if (item.read) return item;
       count(item.category, -1);
@@ -86,12 +95,17 @@ export function withMarks(
     count("needs_action", 1);
     syncAlert = { ...syncAlert, read: false };
   }
-  if (marks === "all") Object.assign(unread, { all: 0, bookings: 0, needsAction: 0, updates: 0 });
+  // Mark all covers the 30 days beyond the rows too; what came since is listed first, so the rows decide.
+  if (readAll !== null) {
+    Object.assign(unread, { all: 0, bookings: 0, needsAction: 0, updates: 0 });
+    for (const item of items) if (!item.read) count(item.category, 1);
+    if (syncAlert && !syncAlert.read) count("needs_action", 1);
+  }
   for (const key of Object.keys(unread) as (keyof typeof unread)[])
     unread[key] = Math.max(0, unread[key]);
   const next = { ...feed, items, syncAlert, unread };
   // A red badge from an item beyond the 50 rows stays red until the next read.
-  const hiddenUrgent = feed.badge === "red" && !hasUrgent(feed) && marks !== "all";
+  const hiddenUrgent = feed.badge === "red" && !hasUrgent(feed) && readAll === null;
   const badge = hasUrgent(next) ? "red" : unread.all === 0 ? "none" : hiddenUrgent ? "red" : "blue";
   return { ...next, badge };
 }
@@ -103,7 +117,7 @@ function withPendingMarks(
   hotelId: string,
 ): HostNotificationFeed {
   if (!pending || pending.hotelId !== hotelId) return feed;
-  const all = pending.all > 0 ? withMarks(feed, "all") : feed;
+  const all = pending.all > 0 ? withMarks(feed, { readBefore: pending.allBefore }) : feed;
   if (pending.keys.size === 0) return all;
   return withMarks(all, new Map(Array.from(pending.keys, ([key, { mark }]) => [key, mark])));
 }
@@ -177,21 +191,23 @@ export function useHostNotifications(
   /** Runs a mark: shown at once, and kept over reads that started before it was saved. */
   const mark = useCallback(
     async (
-      keys: string[] | "all",
+      keys: string[] | ReadAll,
       kind: NotificationMark,
       send: (propertyId: string) => Promise<void>,
     ) => {
       if (!propertyId) return;
       if (pending.current?.hotelId !== propertyId)
-        pending.current = { hotelId: propertyId, keys: new Map(), all: 0 };
+        pending.current = { hotelId: propertyId, keys: new Map(), all: 0, allBefore: "" };
       const marks = pending.current;
-      if (keys === "all") marks.all += 1;
-      else
+      if (!Array.isArray(keys)) {
+        marks.all += 1;
+        if (keys.readBefore > marks.allBefore) marks.allBefore = keys.readBefore;
+      } else
         for (const key of keys)
           marks.keys.set(key, { mark: kind, count: (marks.keys.get(key)?.count ?? 0) + 1 });
       setFeed((current) =>
         current
-          ? withMarks(current, keys === "all" ? "all" : new Map(keys.map((key) => [key, kind])))
+          ? withMarks(current, Array.isArray(keys) ? new Map(keys.map((key) => [key, kind])) : keys)
           : current,
       );
       try {
@@ -199,7 +215,7 @@ export function useHostNotifications(
       } catch {
         // The next read shows the server's state again.
       } finally {
-        if (keys === "all") marks.all -= 1;
+        if (!Array.isArray(keys)) marks.all -= 1;
         else
           for (const key of keys) {
             const entry = marks.keys.get(key);
@@ -240,7 +256,7 @@ export function useHostNotifications(
 
   const markAllRead = useCallback(
     async (seen: HostNotificationFeed) => {
-      await mark("all", "read", (id) =>
+      await mark({ readBefore: seen.generatedAt }, "read", (id) =>
         client.markAllRead(id, {
           before: seen.generatedAt,
           syncAlertKey: seen.syncAlert?.key ?? null,
