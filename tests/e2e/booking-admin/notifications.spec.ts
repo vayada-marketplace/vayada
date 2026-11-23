@@ -375,6 +375,38 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
     ).toBeVisible();
   });
 
+  test("the amount steps aside while the mark button shows, so the button doesn't cover it (VAY-2591)", async ({
+    page,
+  }, testInfo) => {
+    await setUp(page, [fullFeed()]);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/settings");
+    await bell(page).click();
+
+    const row = rows(page).first();
+    const amount = row.getByText("€600", { exact: true });
+    const mark = row.getByRole("button", { name: "Mark as read: New booking" });
+    await expect(amount).toHaveCSS("opacity", "1");
+    await expect(mark).toHaveCSS("opacity", "0");
+
+    await row.hover();
+    await expect(mark).toHaveCSS("opacity", "1");
+    await expect(amount).toHaveCSS("opacity", "0");
+    await page.screenshot({ path: testInfo.outputPath("notifications-hover-amount-1440.png") });
+
+    await page.mouse.move(10, 890);
+    await expect(amount).toHaveCSS("opacity", "1");
+
+    // Keyboard: tabbing onto the button shows it, and the amount steps aside the same way.
+    // Focus on the row's other buttons leaves the amount alone.
+    await row.getByRole("button", { name: "View booking" }).focus();
+    await expect(amount).toHaveCSS("opacity", "1");
+    await page.keyboard.press("Tab");
+    await expect(mark).toBeFocused();
+    await expect(mark).toHaveCSS("opacity", "1");
+    await expect(amount).toHaveCSS("opacity", "0");
+  });
+
   test("marks an item done: it leaves Needs action and stays in All as read (VAY-2591)", async ({
     page,
   }, testInfo) => {

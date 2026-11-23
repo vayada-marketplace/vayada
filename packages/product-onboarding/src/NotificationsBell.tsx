@@ -68,7 +68,7 @@ const TOUCH_MARK_BUTTON =
   "hidden h-[30px] items-center gap-1.5 rounded-[7px] border border-gray-300 bg-white px-3 text-[13px] font-medium text-primary-600 hover:bg-gray-50 [@media(hover:none)]:inline-flex";
 // With a mouse it takes the label's place while the row is hovered, or while it has keyboard focus.
 const HOVER_MARK_BUTTON =
-  "pointer-events-none absolute right-0 top-0 inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-semibold text-primary-600 opacity-0 shadow-sm transition-opacity hover:bg-gray-50 focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 [@media(hover:none)]:hidden";
+  "pointer-events-none absolute -top-1 right-0 inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-semibold text-primary-600 opacity-0 shadow-sm transition-opacity hover:bg-gray-50 focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 [@media(hover:none)]:hidden";
 
 type Notifications = ReturnType<typeof useHostNotifications>;
 
@@ -481,11 +481,12 @@ function Row({
           named: "notifications.markUnreadNamed",
           run: onMarkUnread,
         };
-  const markButton = (className: string) => (
+  const markButton = (className: string, hoverMark = false) => (
     <button
       type="button"
       onClick={() => mark.run(row.key)}
       aria-label={t(mark.named, { title: row.title })}
+      data-hover-mark={hoverMark ? "" : undefined}
       className={className}
     >
       {unread && <CheckIcon className="h-3.5 w-3.5" aria-hidden="true" />}
@@ -522,7 +523,11 @@ function Row({
             {row.title}
           </p>
           {row.amount && (
-            <span className={`shrink-0 text-[13px] font-semibold ${AMOUNT_TONE[row.amountTone]}`}>
+            // The hover button is wider than the label it replaces and would cover the amount, so the
+            // amount steps aside while the button shows (hover, or keyboard focus on it).
+            <span
+              className={`shrink-0 text-[13px] font-semibold transition-opacity [@media(hover:hover)]:group-hover:opacity-0 group-has-[[data-hover-mark]:focus-visible]:opacity-0 ${AMOUNT_TONE[row.amountTone]}`}
+            >
               {row.amount}
             </span>
           )}
@@ -570,7 +575,7 @@ function Row({
           {done && !unread && <CheckIcon className="h-3 w-3" />}
           {t(status)}
         </span>
-        {markButton(HOVER_MARK_BUTTON)}
+        {markButton(HOVER_MARK_BUTTON, true)}
       </div>
     </li>
   );
