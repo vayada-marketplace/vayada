@@ -192,7 +192,7 @@ for (const width of [1440, 390]) {
     await expect(line).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath(`confirmation-late-${width}.png`) });
     await expect(line).toContainText(
-      "Non-refundable: booked less than 14 days before arrival. If you cancel or don't arrive, you pay the full amount (€200",
+      "No free cancellation: booked less than 14 days before arrival. If you cancel or don't arrive, you pay the full amount (€200",
     );
     await expect(line).not.toContainText("Free cancellation ended");
     await line.getByRole("button", { name: "Full policy" }).click();

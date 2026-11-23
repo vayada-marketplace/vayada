@@ -299,7 +299,9 @@ describe("booking lifecycle email jobs", () => {
         { ...stay(["Double", free]), bookedOn: "2026-10-10" },
         "2026-10-09T18:30:00.000Z",
       ),
-    ).toContain(`Cancellation: Non-refundable: booked less than 3 days before arrival. ${payFull}`);
+    ).toContain(
+      `Cancellation: No free cancellation: booked less than 3 days before arrival. ${payFull}`,
+    );
     expect(await text("final_confirmation", stay(["Double", none]))).toContain(
       `Cancellation: Non-refundable. ${payFull}`,
     );
