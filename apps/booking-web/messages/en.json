@@ -938,6 +938,8 @@
     "agree": "I agree to the cancellation policy, guest rules and terms & conditions.",
     "agreeNonRefundable": "I understand this booking is non-refundable. If I cancel or don’t arrive, the full stay is charged.",
     "agreeSomeNonRefundable": "I understand some of these rooms are non-refundable. If I cancel or don’t arrive, their full price is charged.",
+    "agreeNoFreeCancellation": "I understand I can’t cancel this booking for free. If I cancel or don’t arrive, the full stay is charged.",
+    "agreeSomeNoFreeCancellation": "I understand some of these rooms can’t be cancelled for free. If I cancel or don’t arrive, their full price is charged.",
     "agreeNoTerms": "I agree to the cancellation policy and guest rules.",
     "agreeMissing": "Please tick the box to confirm your booking.",
     "hintDetails": "Fill in your details to book.",
@@ -954,6 +956,9 @@
         "refundsUntil": "Refunds until {date}",
         "freeEnded": "Free cancellation ended",
         "nonRefundable": "Non-refundable",
+        "lateBooking": "No free cancellation",
+        "lateBookingOnceAccepted": "No free cancellation once the hotel accepts",
+        "lateBookingOncePaid": "No free cancellation once paid",
         "noRefund": "No refund any more",
         "notRefundableOnceAccepted": "Not refundable once the hotel accepts",
         "notRefundableOncePaid": "Not refundable once paid"

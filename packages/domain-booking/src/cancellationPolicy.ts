@@ -81,6 +81,11 @@ export type PolicyBadge =
       kind:
         | "freeEnded"
         | "nonRefundable"
+        /** VAY-2587: a Flexible rate booked after its free cancellation ended; with a request or a
+         * bank transfer, from when the hotel accepts or the money arrives. */
+        | "lateBooking"
+        | "lateBookingOnceAccepted"
+        | "lateBookingOncePaid"
         | "noRefund"
         | "notRefundableOnceAccepted"
         | "notRefundableOncePaid";
@@ -199,13 +204,14 @@ export function cancellationPolicy(
           { when: { kind: "until", date: until }, pay: { kind: "free" }, now: false, ended: true },
           { when: { kind: "fromNow" }, pay: full, now: true, ended: false },
         ];
-    // Booked after the last free day (VAY-2392): non-refundable from the start, and why. Unknown
-    // without the booking date: then it says free cancellation ended, as before.
+    // Booked after the last free day (VAY-2392): no free cancellation from the start, and why; it
+    // is still the Flexible rate, so it isn't called non-refundable (VAY-2587). Unknown without
+    // the booking date: then it says free cancellation ended, as before.
     const late = stay.bookedOn !== undefined && stay.bookedOn > until;
     badge = refundable
       ? { kind: "freeUntil", date: until }
       : late
-        ? { kind: "nonRefundable" }
+        ? { kind: "lateBooking" }
         : { kind: "freeEnded" };
     note = late
       ? { kind: "lateBooking", date: until, days: terms.freeCancellationDeadlineDays }
@@ -230,7 +236,11 @@ export function cancellationPolicy(
             : row.when,
       })),
     ];
-    if (!refundable) badge = { kind: "notRefundableOnceAccepted" };
+    if (!refundable)
+      badge = {
+        kind:
+          badge.kind === "lateBooking" ? "lateBookingOnceAccepted" : "notRefundableOnceAccepted",
+      };
   }
   const bankTransfer = !mode.request && !!mode.bankTransfer;
   if (bankTransfer) {
@@ -261,7 +271,10 @@ export function cancellationPolicy(
         pay: row.pay.kind === "free" ? ({ kind: "fullRefund" } as const) : row.pay,
       })),
     ];
-    if (!refundable) badge = { kind: "notRefundableOncePaid" };
+    if (!refundable)
+      badge = {
+        kind: badge.kind === "lateBooking" ? "lateBookingOncePaid" : "notRefundableOncePaid",
+      };
     // Cancelling before the transfer arrives is free, so the notes say "once it has arrived".
     if (note.kind === "freeUntil") note = { kind: "paidFreeUntil", date: note.date };
     if (note.kind === "freeEnded") note = { kind: "paidFreeEnded", date: note.date };
@@ -436,11 +449,7 @@ export function cancellationLine(blocks: readonly PolicyBlock[]): {
       tone,
       lead: { key: "rooms" },
       rest: blocks.map((block) => ({
-        // VAY-2587: a room booked after its free cancellation ended says so, as one room does.
-        key:
-          block.policy.note.kind === "lateBooking"
-            ? "room.lateBooking"
-            : `room.${block.policy.badge.kind}`,
+        key: `room.${block.policy.badge.kind}`,
         rooms: block.rooms,
         date: date(block.policy.badge),
       })),
