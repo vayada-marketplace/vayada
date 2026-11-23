@@ -1,11 +1,20 @@
 import { parseStoredPricingQuote } from "@vayada/domain-booking";
-import { isMinorAmount, pricingCurrencyScale, pricingObject } from "@vayada/domain-pms";
+import {
+  isMinorAmount,
+  pricingAmountStep,
+  pricingCurrencyScale,
+  pricingObject,
+} from "@vayada/domain-pms";
+import { splitByWeight } from "./pricingRetainedRevenue.js";
 import type { persistDirectNightlyRevenueProjection } from "./stripeBookingSettlement.js";
 
 type Projection = Parameters<typeof persistDirectNightlyRevenueProjection>[2];
 /** Pure conversion only. Charge evidence MUST come from current quote revalidation
  * on the caller's retained transaction. This does not authorize a booking write.
- * No aggregate discount or included charge is guessed into room/night amounts.
+ * A room's own discount (last-minute, VAY-2566) comes off that room's nights in proportion to
+ * their prices, largest remainder first, in whole currency steps (whole rupiah for IDR), so the
+ * nights add up to what the guest pays for the room. A booking-wide (code) discount or an
+ * included charge is never guessed into room/night amounts: such quotes are refused.
  * The persistence adapter must verify booking identity, currency, lifecycle and
  * initial/replay state under lock before calling the shared direct ledger sink. */
 export function pricingRoomRevenueProjection(
@@ -27,7 +36,12 @@ export function pricingRoomRevenueProjection(
     charges.includedChargeMinor !== "0" ||
     !isMinorAmount(charges.additionalChargeMinor) ||
     !Array.isArray(charges.charges) ||
-    quote.evidence.lines.some((line) => line.kind === "discount" && line.amountMinor !== "0")
+    quote.evidence.lines.some(
+      (line) =>
+        line.kind === "discount" &&
+        line.amountMinor !== "0" &&
+        !quote.stay.rooms.some((room) => room.selectionId === line.selectionId),
+    )
   )
     return null;
   let additional = 0n;
@@ -56,11 +70,22 @@ export function pricingRoomRevenueProjection(
   )
     return null;
   const nights: Projection["nights"][number][] = [];
+  const step = BigInt(pricingAmountStep(quote.stay.currency));
   for (const [index, selection] of quote.stay.rooms.entries()) {
     const room = quote.rooms.find((r) => r.selectionId === selection.selectionId);
     if (!room) return null;
-    for (const night of room.nights) {
-      const amount = BigInt(night.roomMinor),
+    const prices = room.nights.map((night) => BigInt(night.roomMinor));
+    const discount = quote.evidence.lines
+      .filter((line) => line.kind === "discount" && line.selectionId === selection.selectionId)
+      .reduce((n, line) => n + BigInt(line.amountMinor), 0n);
+    if (discount > prices.reduce((n, price) => n + price, 0n)) return null;
+    const split = [discount, ...prices].every((v) => v % step === 0n) ? step : 1n;
+    const shares = splitByWeight(
+      discount / split,
+      prices.map((price) => price / split),
+    );
+    for (const [nightIndex, night] of room.nights.entries()) {
+      const amount = prices[nightIndex] - shares[nightIndex] * split,
         unit = 10n ** BigInt(scale);
       // The ledger uses NUMERIC(19,4), independently of booking total precision.
       if (amount * 10n ** BigInt(4 - scale) > 9999999999999999999n) return null;

@@ -121,6 +121,51 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
     await fixture.close();
   });
 
+  it("finishes a stay with a last-minute discount, each night net of its share, and a cancel reverses it (VAY-2566)", async () => {
+    const fixture = await setupFixture(lastMinute(3001n));
+    const hostPool = new pg.Pool({ connectionString: url, max: 2 });
+    const actions = createBookingHostActions({
+      pool: hostPool,
+      guards: targetBookingHostActionGuards,
+      inventory: { reserve: async () => null, release: async () => undefined },
+    });
+    const actorUserId = randomUUID();
+    try {
+      mockOwners(fixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async (client) => {
+        await client.query(
+          "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
+          [fixture.propertyId],
+        );
+        return new Date().toISOString();
+      });
+      const accepted = await writePricingAcceptance(fixture.pool, fixture.input);
+      if (accepted.kind !== "accepted") throw new Error(`unexpected ${accepted.kind}`);
+      expect(await discountedNights(fixture)).toEqual(expectedDiscountedNights(fixture));
+
+      await fixture.observer.query(
+        "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
+        [actorUserId, `${actorUserId}@example.test`],
+      );
+      const scope = { propertyId: fixture.propertyId, bookingId: accepted.bookingId, actorUserId };
+      const preview = await actions.preview(scope, { action: "cancel", reason: "Overbooked" });
+      await expect(actions.apply(scope, preview.previewId, "lm-cancel")).resolves.toMatchObject({
+        lifecycleStatus: "canceled",
+      });
+      // The cancel reverses exactly the net nights that were recorded.
+      const left = await fixture.observer.query(
+        `SELECT sum(gross_room_amount)::text AS amount,sum(occupied_room_nights)::int AS nights
+         FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1`,
+        [accepted.bookingId],
+      );
+      expect(left.rows[0]).toEqual({ amount: "0.0000", nights: 0 });
+    } finally {
+      await actions.close();
+      await hostPool.end().catch(() => undefined);
+      await fixture.close();
+    }
+  });
+
   it("rolls back booking, inventory, revenue, acceptance and jobs after the final gate", async () => {
     const fixture = await setupFixture();
     mockOwners(fixture);
@@ -1686,6 +1731,39 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     });
     return { event, log, amountMinor };
   }
+
+  it("charges a last-minute discounted card stay and records each night net of its share once paid (VAY-2566)", async () => {
+    const { fixture, slug, createPaymentIntent, retrievePaymentIntent, provider } =
+      await cardFixture(undefined, undefined, "instant", lastMinute(3001n));
+    try {
+      const result = await writePricingAcceptance(fixture.pool, fixture.input, { provider });
+      if (result.kind !== "payment_required") throw new Error(`unexpected ${result.kind}`);
+      expect(createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({ amountMinor: 32999 }),
+      );
+      const intent = await createPaymentIntent({ amountMinor: 32999, currency: "EUR" });
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: result.bookingReference,
+        status: "succeeded",
+      });
+      await expect(
+        completePricingCardPayment(fixture.pool, provider, {
+          slug,
+          quoteId: fixture.f.current.quote.quoteId,
+          requestId: fixture.f.command.requestId,
+        }),
+      ).resolves.toMatchObject({ kind: "accepted" });
+      // Keep the shared adoption worker from claiming this fixture's job before cleanup.
+      await fixture.observer.query(
+        "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
+        [fixture.propertyId],
+      );
+      expect(await discountedNights(fixture)).toEqual(expectedDiscountedNights(fixture));
+    } finally {
+      await fixture.close();
+    }
+  });
 
   it("takes a deposit by card and leaves the rest to pay at the property, with deposits on (VAY-2205)", async () => {
     const { fixture, slug, createPaymentIntent, retrievePaymentIntent, provider } =
@@ -3807,6 +3885,52 @@ describe.skipIf(!url)("pricing acceptance writer requests (PostgreSQL)", () => {
     }
   });
 
+  it("records a request's nights net of its last-minute discount when the hotel accepts (VAY-2566)", async () => {
+    const fixture = await setupFixture((quote) => {
+      Object.assign(quote, { acceptanceMode: "request" });
+      lastMinute(3001n)(quote);
+    });
+    const pmsPool = new pg.Pool({ connectionString: url, max: 2 });
+    const pms = createTargetPmsOperationsCommandRepository({
+      connectionString: url!,
+      pool: pmsPool,
+      readRepository: {
+        findReservationByGuestBookingId: async () => ({}),
+      } as unknown as PmsOperationsReadRepository,
+    });
+    try {
+      mockOwners(fixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      const requested = await writePricingAcceptance(fixture.pool, fixture.input, undefined, true);
+      expect(await discountedNights(fixture)).toEqual([]);
+      await expect(
+        pms.acceptBooking({
+          propertyId: fixture.propertyId,
+          guestBookingId: requested.bookingId,
+          commandId: randomUUID(),
+          idempotencyKey: randomUUID(),
+          audit: {
+            actor: { kind: "system", service: "apps/api" },
+            requestId: randomUUID(),
+            reason: "Request accepted",
+            requestedAt: new Date().toISOString(),
+          },
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      // Keep the shared adoption worker from claiming this fixture's job before cleanup.
+      await fixture.observer.query(
+        "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
+        [fixture.propertyId],
+      );
+      expect(await discountedNights(fixture)).toEqual(expectedDiscountedNights(fixture));
+    } finally {
+      await pmsPool.end();
+      await fixture.close();
+    }
+  });
+
   it("lets the hotel decline a request: rooms released, guest told, no PMS job", async () => {
     const fixture = await setupFixture((quote) =>
       Object.assign(quote, { acceptanceMode: "request" }),
@@ -3983,6 +4107,53 @@ describe.skipIf(!url)("pricing acceptance writer requests (PostgreSQL)", () => {
     }
   });
 });
+
+/** VAY-2566: a last-minute discount on the first room, as the quote composes it: its own
+ * discount line, taken off the total and off what is due (now or later). */
+function lastMinute(amountMinor: bigint) {
+  return (quote: Fixture["f"]["current"]["quote"]) => {
+    const evidence = quote.evidence;
+    const less = (value: string) => (BigInt(value) - amountMinor).toString();
+    Object.assign(evidence, {
+      lines: [
+        ...evidence.lines,
+        {
+          id: "lm",
+          kind: "discount",
+          selectionId: quote.stay.rooms[0].selectionId,
+          amountMinor: amountMinor.toString(),
+        },
+      ],
+      totalMinor: less(evidence.totalMinor),
+      ...(evidence.dueLaterMinor === "0"
+        ? { dueNowMinor: less(evidence.dueNowMinor) }
+        : { dueLaterMinor: less(evidence.dueLaterMinor) }),
+    });
+  };
+}
+
+/** The booking's total and each room night's recorded revenue (VAY-2566). */
+async function discountedNights(fixture: Fixture) {
+  return (
+    await fixture.observer.query(
+      `SELECT r.stay_date::text AS date,r.gross_room_amount::text AS amount,b.total_amount::text AS total
+       FROM booking.nightly_revenue_evidence r JOIN booking.guest_bookings b ON b.id=r.guest_booking_id
+       WHERE b.property_id=$1 AND r.economic_event='room_night' ORDER BY r.stay_date`,
+      [fixture.propertyId],
+    )
+  ).rows;
+}
+
+/** 3001 off two nights of 150.00 (largest remainder, ties to the earlier night). */
+function expectedDiscountedNights(fixture: Fixture) {
+  const nights = fixture.f.current.quote.rooms[0].nights;
+  expect(nights.map((night) => night.roomMinor)).toEqual(["15000", "15000"]);
+  expect(fixture.f.current.quote.evidence.totalMinor).toBe("32999");
+  return [
+    { date: nights[0].date, amount: "134.9900", total: "329.99" },
+    { date: nights[1].date, amount: "135.0000", total: "329.99" },
+  ];
+}
 
 // K5 in another currency (STRIPE_TEST_CURRENCY): the same quote with every minor amount scaled, so the
 // card amount clears Stripe's minimum charge (EUR 360.00 becomes IDR 3,600,000.00).
@@ -4635,6 +4806,61 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
       expect(cents(state[0].net_amount)).toBe(cents(state[0].amount) - cents(state[0].fee_amount));
       // Paid: the bank details are no longer shown.
       await expect(reveal()).resolves.toBeNull();
+    } finally {
+      await pmsPool.end();
+      await bank.close();
+      await fixture.close();
+    }
+  });
+
+  it("records a paid bank transfer's nights net of its last-minute discount (VAY-2566)", async () => {
+    const fixture = await setupFixture(
+      (quote) => {
+        manualQuote("bank_transfer", "instant")(quote);
+        lastMinute(3001n)(quote);
+      },
+      undefined,
+      true,
+    );
+    const bank = bankOperations();
+    const pmsPool = new pg.Pool({ connectionString: url, max: 2 });
+    const pms = createTargetPmsOperationsCommandRepository({
+      connectionString: url!,
+      pool: pmsPool,
+      readRepository: {
+        findReservationByGuestBookingId: async () => ({}),
+      } as unknown as PmsOperationsReadRepository,
+    });
+    try {
+      mockOwners(fixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      await finance(fixture, "bank_transfer");
+      const pending = await writePricingAcceptance(fixture.pool, fixture.input, undefined, false, {
+        bankTransfers: bank,
+      });
+      await expect(
+        pms.markBookingPaid({
+          propertyId: fixture.propertyId,
+          guestBookingId: pending.bookingId,
+          commandId: randomUUID(),
+          idempotencyKey: randomUUID(),
+          allowRemoteConfirmation: true,
+          audit: {
+            actor: { kind: "system", service: "apps/api" },
+            requestId: randomUUID(),
+            reason: "Bank transfer received",
+            requestedAt: new Date().toISOString(),
+          },
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      // Keep the shared adoption worker from claiming this fixture's job before cleanup.
+      await fixture.observer.query(
+        "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
+        [fixture.propertyId],
+      );
+      expect(await discountedNights(fixture)).toEqual(expectedDiscountedNights(fixture));
     } finally {
       await pmsPool.end();
       await bank.close();
