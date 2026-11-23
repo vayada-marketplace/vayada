@@ -350,9 +350,11 @@ test("shows checkout in the guest's currency with cents, and the charged amount 
   await page.screenshot({ path: testInfo.outputPath("checkout-usd-1280.png"), fullPage: true });
   // Phones: the line is in the bottom bar before paying, without opening Details.
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByTestId("charged-currency")).toBeVisible();
+  await expect(page.getByTestId("charged-currency")).toBeInViewport();
   await expect(credit).toHaveAttribute("href", "https://www.exchangerate-api.com");
   await page.screenshot({ path: testInfo.outputPath("checkout-usd-390.png") });
+  await page.setViewportSize({ width: 390, height: 667 });
+  await page.screenshot({ path: testInfo.outputPath("checkout-usd-390x667.png") });
   await page.setViewportSize({ width: 1280, height: 720 });
 
   // In the hotel's own currency there's nothing to convert: no info line, no credit.

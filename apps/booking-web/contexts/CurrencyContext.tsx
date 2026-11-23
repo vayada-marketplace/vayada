@@ -9,6 +9,7 @@ import {
   useCallback,
   ReactNode,
 } from "react";
+import { pricingCurrencyScale } from "@vayada/domain-booking/replacement-pricing";
 import { useAgencyPage, useHotel, useSlug } from "@/contexts/HotelContext";
 import { bookingWebPublic } from "@/services/api/client";
 
@@ -216,11 +217,9 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     [selectedCurrency, baseCurrency, rates],
   );
   const chargedPrice = useCallback((amount: number, currency: string): string => {
-    // Cents only when it has them, as many as the currency has (KWD 52.425).
-    const digits = Number.isInteger(amount)
-      ? 0
-      : (new Intl.NumberFormat("en-GB", { style: "currency", currency }).resolvedOptions()
-          .maximumFractionDigits ?? 2);
+    // Cents only when it has them, as many as pricing keeps for the currency (KWD 52.425,
+    // HUF 20,000.50), as quoteMoneyAmount reads them.
+    const digits = Number.isInteger(amount) ? 0 : (pricingCurrencyScale(currency) ?? 2);
     return new Intl.NumberFormat("en-GB", {
       style: "currency",
       currency,
