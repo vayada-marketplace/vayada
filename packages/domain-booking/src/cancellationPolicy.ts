@@ -81,8 +81,11 @@ export type PolicyBadge =
       kind:
         | "freeEnded"
         | "nonRefundable"
-        /** VAY-2587: a Flexible rate booked after its free cancellation ended. */
+        /** VAY-2587: a Flexible rate booked after its free cancellation ended; with a request or a
+         * bank transfer, from when the hotel accepts or the money arrives. */
         | "lateBooking"
+        | "lateBookingOnceAccepted"
+        | "lateBookingOncePaid"
         | "noRefund"
         | "notRefundableOnceAccepted"
         | "notRefundableOncePaid";
@@ -233,7 +236,11 @@ export function cancellationPolicy(
             : row.when,
       })),
     ];
-    if (!refundable) badge = { kind: "notRefundableOnceAccepted" };
+    if (!refundable)
+      badge = {
+        kind:
+          badge.kind === "lateBooking" ? "lateBookingOnceAccepted" : "notRefundableOnceAccepted",
+      };
   }
   const bankTransfer = !mode.request && !!mode.bankTransfer;
   if (bankTransfer) {
@@ -264,7 +271,10 @@ export function cancellationPolicy(
         pay: row.pay.kind === "free" ? ({ kind: "fullRefund" } as const) : row.pay,
       })),
     ];
-    if (!refundable) badge = { kind: "notRefundableOncePaid" };
+    if (!refundable)
+      badge = {
+        kind: badge.kind === "lateBooking" ? "lateBookingOncePaid" : "notRefundableOncePaid",
+      };
     // Cancelling before the transfer arrives is free, so the notes say "once it has arrived".
     if (note.kind === "freeUntil") note = { kind: "paidFreeUntil", date: note.date };
     if (note.kind === "freeEnded") note = { kind: "paidFreeEnded", date: note.date };
