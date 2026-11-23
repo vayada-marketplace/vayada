@@ -28,7 +28,8 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 
 type Scope = { propertyId: string; viewer: HostNotificationViewer };
 
-/** Booking Admin's notifications bell (VAY-2349): the selected property's feed and the person's read marks.
+/** Booking Admin's notifications bell (VAY-2349): the selected property's feed, the person's read marks and
+ * the team's done marks (VAY-2591).
  * Anyone who may read the property's reservations sees it; promo codes, guest contact and "Retry sync"
  * follow their own permissions. */
 export async function registerBookingHostNotificationRoutes(
@@ -62,22 +63,46 @@ export async function registerBookingHostNotificationRoutes(
 
   app.post("/properties/:propertyId/notifications/read", { onRequest }, async (request, reply) => {
     const { propertyId, viewer } = scopeOf(request);
-    const body = request.body as { keys?: unknown } | null;
-    const keys = body?.keys;
-    if (
-      !body ||
-      Object.keys(body).some((key) => key !== "keys") ||
-      !Array.isArray(keys) ||
-      keys.length === 0 ||
-      keys.length > HOST_NOTIFICATION_MARK_LIMIT ||
-      !keys.every(isHostNotificationKey)
-    )
-      return reply.status(400).send({ code: "invalid_notification_keys" });
+    const keys = notificationKeys(request.body);
+    if (!keys) return reply.status(400).send({ code: "invalid_notification_keys" });
     try {
       await repository.markRead(propertyId, viewer.userId, keys);
       return reply.header("Cache-Control", "no-store").status(204).send();
     } catch (error) {
       request.log.error({ err: error, propertyId }, "Notifications mark read failed");
+      return reply.status(503).send({ code: "notifications_unavailable" });
+    }
+  });
+
+  // VAY-2591: "Mark as unread" removes the person's own read marks, and undoes "Mark as done" for the team.
+  app.post(
+    "/properties/:propertyId/notifications/unread",
+    { onRequest },
+    async (request, reply) => {
+      const { propertyId, viewer } = scopeOf(request);
+      const keys = notificationKeys(request.body);
+      if (!keys) return reply.status(400).send({ code: "invalid_notification_keys" });
+      try {
+        await repository.markUnread(propertyId, viewer, keys);
+        return reply.header("Cache-Control", "no-store").status(204).send();
+      } catch (error) {
+        request.log.error({ err: error, propertyId }, "Notifications mark unread failed");
+        return reply.status(503).send({ code: "notifications_unavailable" });
+      }
+    },
+  );
+
+  // VAY-2591: "Mark as done" counts for the property's whole team, on items that need action now.
+  app.post("/properties/:propertyId/notifications/done", { onRequest }, async (request, reply) => {
+    const { propertyId, viewer } = scopeOf(request);
+    const keys = notificationKeys(request.body);
+    if (!keys) return reply.status(400).send({ code: "invalid_notification_keys" });
+    try {
+      const marked = await repository.markDone(propertyId, viewer, keys);
+      if (marked.length === 0) return reply.status(404).send({ code: "notification_not_found" });
+      return reply.header("Cache-Control", "no-store").status(204).send();
+    } catch (error) {
+      request.log.error({ err: error, propertyId }, "Notifications mark done failed");
       return reply.status(503).send({ code: "notifications_unavailable" });
     }
   });
@@ -112,6 +137,21 @@ export async function registerBookingHostNotificationRoutes(
       }
     },
   );
+}
+
+/** `{ keys: [...] }` with 1 to 100 notification keys, or null. */
+function notificationKeys(body: unknown): string[] | null {
+  if (!body || typeof body !== "object") return null;
+  const keys = (body as { keys?: unknown }).keys;
+  if (
+    Object.keys(body).some((key) => key !== "keys") ||
+    !Array.isArray(keys) ||
+    keys.length === 0 ||
+    keys.length > HOST_NOTIFICATION_MARK_LIMIT ||
+    !keys.every(isHostNotificationKey)
+  )
+    return null;
+  return keys;
 }
 
 async function authorize(
