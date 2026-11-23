@@ -15,9 +15,12 @@ describe("assistant messages", () => {
     for (const key of Object.keys(assistantEnglish) as (keyof typeof assistantEnglish)[]) {
       const english = assistantEnglish[key];
       const german = assistantGerman[key];
-      if (typeof english === "string") expect(placeholders(german as string), key).toEqual(placeholders(english));
+      if (typeof english === "string")
+        expect(placeholders(german as string), key).toEqual(placeholders(english));
     }
-    expect(Object.keys(assistantGerman.tools).sort()).toEqual(Object.keys(assistantEnglish.tools).sort());
+    expect(Object.keys(assistantGerman.tools).sort()).toEqual(
+      Object.keys(assistantEnglish.tools).sort(),
+    );
   });
 
   it("names every tool the assistant has today (properties, rooms, calendar)", () => {

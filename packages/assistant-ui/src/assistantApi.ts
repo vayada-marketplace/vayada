@@ -16,7 +16,11 @@ export type TurnStatus =
   | "interrupted";
 export type ReadOnlyReason = "contract_changed" | "too_long";
 
-export type TurnEndEvent = { type: "end"; status: Exclude<TurnStatus, "running">; reason: string | null };
+export type TurnEndEvent = {
+  type: "end";
+  status: Exclude<TurnStatus, "running">;
+  reason: string | null;
+};
 export type RefusedEvent = {
   type: "refused";
   reason: "unavailable" | "restarting" | "not_found" | "busy" | "read_only";
@@ -81,7 +85,9 @@ export class AssistantRequestError extends Error {
 }
 
 const statusOf = (error: unknown) =>
-  typeof error === "object" && error !== null && typeof (error as { status?: unknown }).status === "number"
+  typeof error === "object" &&
+  error !== null &&
+  typeof (error as { status?: unknown }).status === "number"
     ? (error as { status: number }).status
     : undefined;
 
@@ -112,7 +118,10 @@ export function createAssistantApi(http: AssistantHttp) {
     },
 
     /** One chat; undefined when it is gone (deleted after 30 days) or not the person's. */
-    async read(scope: AssistantScope, conversationId: string): Promise<ConversationView | undefined> {
+    async read(
+      scope: AssistantScope,
+      conversationId: string,
+    ): Promise<ConversationView | undefined> {
       try {
         return await http.get<ConversationView>(
           `/api/ai/assistant/conversations/${encodeURIComponent(conversationId)}?${scopeQuery(scope)}`,

@@ -265,7 +265,9 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
 
         {/* VAY-2519: shows only while the API has the assistant switched on. */}
         <AssistantLauncher
-          property={propertyId && selectedHotel ? { id: propertyId, name: selectedHotel.name } : null}
+          property={
+            propertyId && selectedHotel ? { id: propertyId, name: selectedHotel.name } : null
+          }
           userName={userName}
           onContact={isSupportAvailable() ? () => supportDialog.current?.open() : undefined}
         />

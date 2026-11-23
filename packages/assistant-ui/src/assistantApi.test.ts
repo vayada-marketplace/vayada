@@ -87,7 +87,9 @@ describe("createAssistantApi", () => {
     );
     const api = createAssistantApi(fakeHttp({ stream }));
     const seen: string[] = [];
-    const last = await api.ask(scope, { question: "Which rooms?" }, (event) => seen.push(event.type));
+    const last = await api.ask(scope, { question: "Which rooms?" }, (event) =>
+      seen.push(event.type),
+    );
     expect(stream).toHaveBeenCalledWith(
       "/api/ai/assistant/turns",
       { ...scope, question: "Which rooms?" },
@@ -100,7 +102,11 @@ describe("createAssistantApi", () => {
   it("sends the chat's id when the question continues a chat", async () => {
     const stream = vi.fn(async () => new Response(body(sse({ type: "refused", reason: "busy" }))));
     const api = createAssistantApi(fakeHttp({ stream }));
-    const last = await api.ask(scope, { question: "And tomorrow?", conversationId: "c1" }, () => {});
+    const last = await api.ask(
+      scope,
+      { question: "And tomorrow?", conversationId: "c1" },
+      () => {},
+    );
     expect(stream).toHaveBeenCalledWith(
       "/api/ai/assistant/turns",
       { ...scope, question: "And tomorrow?", conversationId: "c1" },
@@ -110,19 +116,23 @@ describe("createAssistantApi", () => {
   });
 
   it("resolves with nothing when the connection breaks before the turn ends", async () => {
+    // The first read gets the turn, the next one the network error.
+    let reads = 0;
     const broken = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(
-          new TextEncoder().encode(sse({ type: "turn", conversationId: "c1", turnId: "t1" })),
-        );
-        controller.error(new TypeError("network error"));
+      pull(controller) {
+        reads += 1;
+        if (reads === 1)
+          controller.enqueue(
+            new TextEncoder().encode(sse({ type: "turn", conversationId: "c1", turnId: "t1" })),
+          );
+        else controller.error(new TypeError("network error"));
       },
     });
     const api = createAssistantApi(fakeHttp({ stream: async () => new Response(broken) }));
     const seen: string[] = [];
-    await expect(api.ask(scope, { question: "Hi" }, (event) => seen.push(event.type))).resolves.toBe(
-      undefined,
-    );
+    await expect(
+      api.ask(scope, { question: "Hi" }, (event) => seen.push(event.type)),
+    ).resolves.toBe(undefined);
     expect(seen).toEqual(["turn"]);
   });
 

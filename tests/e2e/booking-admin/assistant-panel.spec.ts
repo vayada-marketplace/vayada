@@ -60,7 +60,9 @@ test("asks about the selected property as Booking Admin and shows the answer bes
   await panel.getByRole("button", { name: "Send" }).click();
   await expect(panel.getByText(answer)).toBeVisible();
   await expect(panel.getByText("Looked at your properties")).toBeVisible();
-  expect(seen.turns).toEqual([{ propertyId: BOOKING_ADMIN_PROPERTY_ID, app: "booking_admin", question }]);
+  expect(seen.turns).toEqual([
+    { propertyId: BOOKING_ADMIN_PROPERTY_ID, app: "booking_admin", question },
+  ]);
   expect(seen.lists[0]?.searchParams.get("app")).toBe("booking_admin");
   await page.screenshot({ path: testInfo.outputPath("06-booking-admin-answer.png") });
   await healthy();

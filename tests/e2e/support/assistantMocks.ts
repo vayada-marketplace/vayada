@@ -28,7 +28,12 @@ export type FakeChat = {
     startedAt: string;
     endedAt: string | null;
   }[];
-  messages: { seq: number; turnId: string; message: { role: string; content: unknown }; createdAt: string }[];
+  messages: {
+    seq: number;
+    turnId: string;
+    message: { role: string; content: unknown };
+    createdAt: string;
+  }[];
 };
 export type TurnRequest = {
   propertyId: string;
@@ -86,14 +91,18 @@ export function chatView(
                     output:
                       tool.result === "ok"
                         ? { type: "json", value: { ok: true } }
-                        : { type: "error-json", value: { code: tool.result === "failed" ? "forbidden" : "not_run" } },
+                        : {
+                            type: "error-json",
+                            value: { code: tool.result === "failed" ? "forbidden" : "not_run" },
+                          },
                   },
                 ]
               : [],
           ),
         });
     }
-    if (turn.answer) push(turnId, { role: "assistant", content: [{ type: "text", text: turn.answer }] });
+    if (turn.answer)
+      push(turnId, { role: "assistant", content: [{ type: "text", text: turn.answer }] });
     const status = turn.status ?? "done";
     return {
       id: turnId,
@@ -117,7 +126,9 @@ export function chatView(
 /** The events of one answer, as the API streams them. */
 export function sseBody(events: object[]): string {
   return events
-    .map((event) => `event: ${(event as { type: string }).type}\ndata: ${JSON.stringify(event)}\n\n`)
+    .map(
+      (event) => `event: ${(event as { type: string }).type}\ndata: ${JSON.stringify(event)}\n\n`,
+    )
     .join(": keep-alive\n\n");
 }
 
@@ -162,7 +173,10 @@ export async function routeAssistant(
       const chat = chats.get(read[1]!);
       return chat
         ? route.fulfill({ json: chat })
-        : route.fulfill({ status: 404, json: { statusCode: 404, code: "not_found", message: "No such chat." } });
+        : route.fulfill({
+            status: 404,
+            json: { statusCode: 404, code: "not_found", message: "No such chat." },
+          });
     }
     if (request.method() === "POST" && path.endsWith("/api/ai/assistant/turns")) {
       const body = request.postDataJSON() as TurnRequest;
@@ -171,11 +185,17 @@ export async function routeAssistant(
       if (reply.stored) chats.set(reply.stored.id, reply.stored);
       return route.fulfill({
         status: 200,
-        headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" },
+        headers: {
+          "content-type": "text/event-stream; charset=utf-8",
+          "cache-control": "no-cache",
+        },
         body: sseBody(reply.events),
       });
     }
-    return route.fulfill({ status: 404, json: { statusCode: 404, code: "not_found", message: "Not found" } });
+    return route.fulfill({
+      status: 404,
+      json: { statusCode: 404, code: "not_found", message: "Not found" },
+    });
   });
   return seen;
 }

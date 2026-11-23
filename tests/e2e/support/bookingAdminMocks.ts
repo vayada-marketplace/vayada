@@ -693,7 +693,10 @@ export async function mockBookingAdminShellRoutes(
     .route(/\/api\/ai\/assistant\//, (route) =>
       route.request().method() === "OPTIONS"
         ? fulfillCorsPreflight(route)
-        : route.fulfill({ status: 404, json: { statusCode: 404, code: "not_found", message: "Not found" } }),
+        : route.fulfill({
+            status: 404,
+            json: { statusCode: 404, code: "not_found", message: "Not found" },
+          }),
     );
   // The header's notifications bell (VAY-2349): nothing yet. Specs that need a feed route their own.
   await page.route(

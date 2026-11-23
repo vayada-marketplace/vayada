@@ -71,6 +71,8 @@ type PanelState = {
   setup: Setup;
   setSetup: (setup: Setup) => void;
   contact: { current: (() => void) | undefined };
+  /** Set by the "Ask AI" button, so the panel's question box takes the focus (not after a reload). */
+  openedByButton: { current: boolean };
   available: boolean;
   open: boolean;
   setOpen: (open: boolean) => void;
@@ -101,6 +103,7 @@ export function AssistantProvider({
   const messages = useMemo(() => assistantMessagesFor(locale), [locale]);
   const [setup, setSetup] = useState<Setup>({ property: null, userName: "", canContact: false });
   const contact = useRef<(() => void) | undefined>(undefined);
+  const openedByButton = useRef(false);
   const [available, setAvailable] = useState(false);
   const [open, setOpenState] = useState(false);
   const propertyId = setup.property?.id;
@@ -150,6 +153,7 @@ export function AssistantProvider({
       setup,
       setSetup,
       contact,
+      openedByButton,
       available,
       open: open && available,
       setOpen,
@@ -172,7 +176,7 @@ export function AssistantLauncher({
   userName?: string;
   onContact?: () => void;
 }) {
-  const { messages, available, open, setOpen, setSetup, contact } = usePanel();
+  const { messages, available, open, setOpen, setSetup, contact, openedByButton } = usePanel();
   contact.current = onContact;
   const propertyId = property?.id;
   const propertyName = property?.name;
@@ -191,7 +195,10 @@ export function AssistantLauncher({
     <button
       type="button"
       id={`${PANEL_ID}-launcher`}
-      onClick={() => setOpen(!open)}
+      onClick={() => {
+        openedByButton.current = !open;
+        setOpen(!open);
+      }}
       aria-expanded={open}
       aria-controls={PANEL_ID}
       className="inline-flex h-[30px] shrink-0 items-center gap-1.5 rounded-md bg-primary-600 px-2.5 text-sm font-semibold text-white hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600 sm:px-3"
@@ -206,9 +213,11 @@ export function AssistantLauncher({
 export function AssistantDrawer() {
   const panel = usePanel();
   const { property } = panel.setup;
+  const propertyId = property?.id;
+  // By id: the header sends the same property again when the person's name loads.
   const scope = useMemo<AssistantScope | null>(
-    () => (property ? { propertyId: property.id, app: panel.app } : null),
-    [property, panel.app],
+    () => (propertyId ? { propertyId, app: panel.app } : null),
+    [propertyId, panel.app],
   );
   if (!panel.open || !scope || !property) return null;
   return <OpenDrawer panel={panel} scope={scope} propertyName={property.name} />;
@@ -235,9 +244,12 @@ function OpenDrawer({
   const input = useRef<HTMLTextAreaElement>(null);
   const paused = chat.blocker?.kind === "off" || chat.blocker?.kind === "allowance";
 
+  // Opened with the button: straight into the question. (Reopened by a reload: focus stays put.)
   useEffect(() => {
+    if (!panel.openedByButton.current) return;
+    panel.openedByButton.current = false;
     input.current?.focus();
-  }, []);
+  }, [panel.openedByButton]);
 
   const close = () => {
     panel.setOpen(false);
@@ -310,7 +322,10 @@ function OpenDrawer({
           }}
         />
       ) : chat.blocker?.kind === "off" ? (
-        <Centred icon={<PowerIcon className="h-5 w-5 text-gray-500" aria-hidden="true" />} tile="bg-gray-100">
+        <Centred
+          icon={<PowerIcon className="h-5 w-5 text-gray-500" aria-hidden="true" />}
+          tile="bg-gray-100"
+        >
           <p className="font-semibold text-gray-900">{m.offTitle}</p>
           <p className="mt-2 text-sm text-gray-600">{m.offBody}</p>
         </Centred>
@@ -325,7 +340,13 @@ function OpenDrawer({
           notice={chat.notice ? <Notice chat={chat} messages={m} onRetry={send} /> : null}
         />
       ) : (
-        <Transcript chat={chat} messages={m} locale={panel.locale} onRetry={send} onNewChat={chat.newChat} />
+        <Transcript
+          chat={chat}
+          messages={m}
+          locale={panel.locale}
+          onRetry={send}
+          onNewChat={chat.newChat}
+        />
       )}
 
       <form
@@ -375,9 +396,15 @@ function OpenDrawer({
   );
 }
 
-function placeholderOf(chat: AssistantChat, m: AssistantMessages, propertyName: string, locale: string) {
+function placeholderOf(
+  chat: AssistantChat,
+  m: AssistantMessages,
+  propertyName: string,
+  locale: string,
+) {
   if (chat.blocker?.kind === "off") return m.offPlaceholder;
-  if (chat.blocker?.kind === "allowance") return fill(m.allowancePlaceholder, allowanceDates(locale));
+  if (chat.blocker?.kind === "allowance")
+    return fill(m.allowancePlaceholder, allowanceDates(locale));
   if (chat.blocker?.kind === "read_only") return m.readOnlyPlaceholder;
   return fill(m.placeholder, { property: propertyName });
 }
@@ -402,7 +429,9 @@ function Spinner() {
 function Centred({ icon, tile, children }: { icon: ReactNode; tile: string; children: ReactNode }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-8 text-center">
-      <div className={`mb-4 flex h-10 w-10 items-center justify-center rounded-full ${tile}`}>{icon}</div>
+      <div className={`mb-4 flex h-10 w-10 items-center justify-center rounded-full ${tile}`}>
+        {icon}
+      </div>
       {children}
     </div>
   );
@@ -412,11 +441,18 @@ function Allowance({ panel }: { panel: PanelState }) {
   const m = panel.messages;
   const dates = allowanceDates(panel.locale);
   return (
-    <Centred icon={<LightBulbIcon className="h-5 w-5 text-amber-600" aria-hidden="true" />} tile="bg-amber-50">
+    <Centred
+      icon={<LightBulbIcon className="h-5 w-5 text-amber-600" aria-hidden="true" />}
+      tile="bg-amber-50"
+    >
       <p className="font-semibold text-gray-900">{fill(m.allowanceTitle, dates)}</p>
       <p className="mt-2 text-sm text-gray-600">{fill(m.allowanceBody, dates)}</p>
       {panel.setup.canContact && (
-        <button type="button" className={`${SECONDARY_BUTTON} mt-4`} onClick={() => panel.contact.current?.()}>
+        <button
+          type="button"
+          className={`${SECONDARY_BUTTON} mt-4`}
+          onClick={() => panel.contact.current?.()}
+        >
           <EnvelopeIcon className="h-4 w-4" aria-hidden="true" />
           {m.contactVayada}
         </button>
@@ -444,8 +480,12 @@ function Welcome({
       <h3 className="text-xl font-semibold text-gray-900">
         {firstName ? fill(m.greeting, { name: firstName }) : m.greetingNoName}
       </h3>
-      <p className="mt-2 text-[15px] leading-6 text-gray-600">{fill(m.intro, { property: propertyName })}</p>
-      <p className="mt-6 text-xs font-semibold uppercase tracking-wide text-gray-500">{m.tryLabel}</p>
+      <p className="mt-2 text-[15px] leading-6 text-gray-600">
+        {fill(m.intro, { property: propertyName })}
+      </p>
+      <p className="mt-6 text-xs font-semibold uppercase tracking-wide text-gray-500">
+        {m.tryLabel}
+      </p>
       <ul className="mt-2 space-y-2">
         {m.suggestions.map((suggestion) => (
           <li key={suggestion}>
@@ -473,7 +513,15 @@ function toolLabel(m: AssistantMessages, tool: string, status: ToolLineStatus) {
   return known?.done ?? m.toolDone;
 }
 
-function ProgressLine({ m, tool, status }: { m: AssistantMessages; tool: string; status: ToolLineStatus }) {
+function ProgressLine({
+  m,
+  tool,
+  status,
+}: {
+  m: AssistantMessages;
+  tool: string;
+  status: ToolLineStatus;
+}) {
   return (
     <div className="flex items-center gap-2 text-[13px] text-gray-500">
       <span className="flex w-4 shrink-0 justify-center">
@@ -502,7 +550,17 @@ function Question({ text }: { text: string }) {
   );
 }
 
-function Answer({ m, text, at, locale }: { m: AssistantMessages; text: string; at: Date; locale: string }) {
+function Answer({
+  m,
+  text,
+  at,
+  locale,
+}: {
+  m: AssistantMessages;
+  text: string;
+  at: Date;
+  locale: string;
+}) {
   const time = new Intl.DateTimeFormat(dateLocale(locale), {
     hour: "2-digit",
     minute: "2-digit",
@@ -532,14 +590,18 @@ function Box({
   action?: ReactNode;
 }) {
   const colours =
-    tone === "amber" ? "border-amber-200 bg-amber-50 text-amber-900" : "border-gray-200 bg-gray-50 text-gray-900";
+    tone === "amber"
+      ? "border-amber-200 bg-amber-50 text-amber-900"
+      : "border-gray-200 bg-gray-50 text-gray-900";
   return (
     <div className={`rounded-lg border px-3.5 py-3 ${colours}`} role="status">
       <p className="flex items-center gap-1.5 text-sm font-semibold">
         {icon}
         {title}
       </p>
-      <p className={`mt-1 text-[13px] ${tone === "amber" ? "text-amber-800" : "text-gray-600"}`}>{body}</p>
+      <p className={`mt-1 text-[13px] ${tone === "amber" ? "text-amber-800" : "text-gray-600"}`}>
+        {body}
+      </p>
       {action && <div className="mt-2.5">{action}</div>}
     </div>
   );
@@ -562,7 +624,10 @@ function Notice({
   switch (chat.notice) {
     case "reloaded":
       return (
-        <p className="flex gap-2 rounded-lg border border-primary-100 bg-primary-50 px-3.5 py-2.5 text-[13px] text-primary-700" role="status">
+        <p
+          className="flex gap-2 rounded-lg border border-primary-100 bg-primary-50 px-3.5 py-2.5 text-[13px] text-primary-700"
+          role="status"
+        >
           <ArrowPathIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           {m.reloaded}
         </p>
@@ -574,9 +639,17 @@ function Notice({
     case "failed":
       return <Box tone="gray" title={m.failedTitle} body={m.failedBody} action={retry} />;
     case "not_found":
-      return <p className="text-[13px] text-gray-500" role="status">{m.notFound}</p>;
+      return (
+        <p className="text-[13px] text-gray-500" role="status">
+          {m.notFound}
+        </p>
+      );
     case "load_failed":
-      return <p className="text-[13px] text-gray-500" role="status">{m.loadFailed}</p>;
+      return (
+        <p className="text-[13px] text-gray-500" role="status">
+          {m.loadFailed}
+        </p>
+      );
     default:
       return null;
   }
@@ -610,17 +683,32 @@ function EndedNote({
       />
     );
   if (item.status === "failed") {
-    if (item.reason === "allowance_used_up") return <p className="text-[13px] text-gray-500">{m.allowanceEnded}</p>;
-    if (item.reason === "unavailable") return <p className="text-[13px] text-gray-500">{m.offTitle}</p>;
-    if (item.reason === "busy") return <Box tone="gray" title={m.busyTitle} body={m.busyBody} action={again} />;
+    if (item.reason === "allowance_used_up")
+      return <p className="text-[13px] text-gray-500">{m.allowanceEnded}</p>;
+    if (item.reason === "unavailable")
+      return <p className="text-[13px] text-gray-500">{m.offTitle}</p>;
+    if (item.reason === "busy")
+      return <Box tone="gray" title={m.busyTitle} body={m.busyBody} action={again} />;
     return <Box tone="gray" title={m.failedTitle} body={m.failedBody} action={again} />;
   }
   if (item.status === "stopped")
-    return <p className="text-[13px] text-gray-500">{item.reason === "user_stopped" ? m.stopped : m.endedEarly}</p>;
+    return (
+      <p className="text-[13px] text-gray-500">
+        {item.reason === "user_stopped" ? m.stopped : m.endedEarly}
+      </p>
+    );
   return null; // waiting_for_answer: the Yes/No card (VAY-2519 part 2)
 }
 
-function LiveTurnView({ live, m, locale }: { live: LiveTurn; m: AssistantMessages; locale: string }) {
+function LiveTurnView({
+  live,
+  m,
+  locale,
+}: {
+  live: LiveTurn;
+  m: AssistantMessages;
+  locale: string;
+}) {
   const started = useMemo(() => new Date(), []);
   const looking = live.tools.some((tool) => tool.status === "running");
   return (
@@ -683,7 +771,12 @@ function Transcript({
   const canRetry = !chat.answering && !chat.blocker && !chat.notice;
   return (
     <div className="flex-1 overflow-y-auto px-5 py-4">
-      <div className="flex min-h-full flex-col justify-end gap-4" role="log" aria-live="polite" aria-relevant="additions">
+      <div
+        className="flex min-h-full flex-col justify-end gap-4"
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+      >
         {grouped(chat.items).map((row) => {
           if (Array.isArray(row))
             return (
@@ -698,7 +791,9 @@ function Transcript({
             return <Question key={row.key} text={row.text} />;
           }
           if (row.kind === "answer")
-            return <Answer key={row.key} m={m} text={row.text} at={new Date(row.at)} locale={locale} />;
+            return (
+              <Answer key={row.key} m={m} text={row.text} at={new Date(row.at)} locale={locale} />
+            );
           if (row.kind === "ended") {
             const asked = question;
             return (
@@ -793,7 +888,11 @@ function History({
         </h3>
       </div>
       {failed && <p className="px-2 text-[13px] text-gray-500">{m.loadFailed}</p>}
-      {chats?.length === 0 && <p className="px-2 text-[13px] text-gray-500">{fill(m.noChats, { property: propertyName })}</p>}
+      {chats?.length === 0 && (
+        <p className="px-2 text-[13px] text-gray-500">
+          {fill(m.noChats, { property: propertyName })}
+        </p>
+      )}
       <ul className="space-y-1">
         {chats?.map((summary) => (
           <li key={summary.id}>
@@ -801,13 +900,15 @@ function History({
               type="button"
               onClick={() => onOpen(summary.id)}
               aria-current={summary.id === current ? "true" : undefined}
-              className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-gray-50 aria-[current]:bg-primary-50"
+              className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-gray-50 aria-[current=true]:bg-primary-50"
             >
               <span dir="auto" className="line-clamp-2 text-sm text-gray-900">
                 {toPlainText(summary.preview)}
               </span>
               <span className="mt-0.5 flex items-center gap-1.5 text-xs text-gray-500">
-                {summary.readOnlyReason && <LockClosedIcon className="h-3 w-3" aria-hidden="true" />}
+                {summary.readOnlyReason && (
+                  <LockClosedIcon className="h-3 w-3" aria-hidden="true" />
+                )}
                 {dateOf(summary.lastActivityAt)}
               </span>
             </button>
@@ -815,7 +916,11 @@ function History({
         ))}
       </ul>
       {next && (
-        <button type="button" className={`${SECONDARY_BUTTON} mx-auto mt-3`} onClick={() => void load(next)}>
+        <button
+          type="button"
+          className={`${SECONDARY_BUTTON} mx-auto mt-3`}
+          onClick={() => void load(next)}
+        >
           {m.showMore}
         </button>
       )}

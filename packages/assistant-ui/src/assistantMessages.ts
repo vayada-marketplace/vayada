@@ -89,17 +89,22 @@ export const assistantEnglish: AssistantMessages = {
   toolFailed: "Couldn't look this up",
   toolSkipped: "Didn't get to this",
   tools: {
-    properties_list: { running: "Looking at your properties...", done: "Looked at your properties" },
+    properties_list: {
+      running: "Looking at your properties...",
+      done: "Looked at your properties",
+    },
     rooms_list: { running: "Looking at the rooms...", done: "Looked at the rooms" },
     calendar_days: { running: "Looking at the calendar...", done: "Looked at the calendar" },
   },
   stopped: "You stopped this answer.",
   allowanceEnded: "Not answered: the AI allowance was used up.",
   cutOffTitle: "This answer was cut off",
-  cutOffBody: "vayada restarted while the AI was writing. Nothing was changed. Above is what it had looked at.",
+  cutOffBody:
+    "vayada restarted while the AI was writing. Nothing was changed. Above is what it had looked at.",
   askAgain: "Ask again",
   endedEarly: "The AI stopped before finishing this answer.",
-  reloaded: "The connection dropped, so we reloaded this chat from vayada. You see everything that was saved.",
+  reloaded:
+    "The connection dropped, so we reloaded this chat from vayada. You see everything that was saved.",
   readOnlyTitle: "This chat can't continue",
   readOnlyBody:
     "vayada was updated or your access changed, so this chat is read-only now. Start a new chat to keep going.",
@@ -156,7 +161,10 @@ export const assistantGerman: AssistantMessages = {
   toolFailed: "Konnte das nicht nachschauen",
   toolSkipped: "Nicht mehr dazu gekommen",
   tools: {
-    properties_list: { running: "Schaut Ihre Unterkünfte an...", done: "Ihre Unterkünfte angeschaut" },
+    properties_list: {
+      running: "Schaut Ihre Unterkünfte an...",
+      done: "Ihre Unterkünfte angeschaut",
+    },
     rooms_list: { running: "Schaut die Zimmer an...", done: "Die Zimmer angeschaut" },
     calendar_days: { running: "Schaut in den Kalender...", done: "In den Kalender geschaut" },
   },
@@ -214,6 +222,9 @@ export function allowanceDates(locale: string, now = new Date()) {
   const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
   return {
     month: new Intl.DateTimeFormat(dateLocale(locale), { month: "long" }).format(now),
-    resetDate: new Intl.DateTimeFormat(dateLocale(locale), { day: "numeric", month: "long" }).format(next),
+    resetDate: new Intl.DateTimeFormat(dateLocale(locale), {
+      day: "numeric",
+      month: "long",
+    }).format(next),
   };
 }

@@ -47,7 +47,10 @@ describe("transcriptOf", () => {
       view(
         [{}],
         [
-          { turnId: "t1", message: { role: "user", content: [contextNote, { type: "text", text: "Rooms?" }] } },
+          {
+            turnId: "t1",
+            message: { role: "user", content: [contextNote, { type: "text", text: "Rooms?" }] },
+          },
           {
             turnId: "t1",
             message: {
@@ -65,13 +68,31 @@ describe("transcriptOf", () => {
             message: {
               role: "tool",
               content: [
-                { type: "tool-result", toolCallId: "a", toolName: "rooms_list", output: { type: "json", value: { rooms: [] } } },
-                { type: "tool-result", toolCallId: "b", toolName: "calendar_days", output: { type: "error-json", value: { code: "forbidden" } } },
-                { type: "tool-result", toolCallId: "c", toolName: "properties_list", output: { type: "error-json", value: { code: "not_run" } } },
+                {
+                  type: "tool-result",
+                  toolCallId: "a",
+                  toolName: "rooms_list",
+                  output: { type: "json", value: { rooms: [] } },
+                },
+                {
+                  type: "tool-result",
+                  toolCallId: "b",
+                  toolName: "calendar_days",
+                  output: { type: "error-json", value: { code: "forbidden" } },
+                },
+                {
+                  type: "tool-result",
+                  toolCallId: "c",
+                  toolName: "properties_list",
+                  output: { type: "error-json", value: { code: "not_run" } },
+                },
               ],
             },
           },
-          { turnId: "t1", message: { role: "assistant", content: [{ type: "text", text: "You have 12 rooms." }] } },
+          {
+            turnId: "t1",
+            message: { role: "assistant", content: [{ type: "text", text: "You have 12 rooms." }] },
+          },
         ],
       ),
     );
@@ -92,7 +113,13 @@ describe("transcriptOf", () => {
         [{ status: "running", endedAt: null }],
         [
           { turnId: "t1", message: { role: "user", content: "Rooms?" } },
-          { turnId: "t1", message: { role: "assistant", content: [{ type: "tool-call", toolCallId: "a", toolName: "rooms_list", input: {} }] } },
+          {
+            turnId: "t1",
+            message: {
+              role: "assistant",
+              content: [{ type: "tool-call", toolCallId: "a", toolName: "rooms_list", input: {} }],
+            },
+          },
         ],
       ),
     );

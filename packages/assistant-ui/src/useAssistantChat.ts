@@ -6,6 +6,7 @@ import {
   AssistantUnavailableError,
   type AssistantApi,
   type AssistantScope,
+  type ConversationView,
   type ReadOnlyReason,
   type RefusedEvent,
   type TurnEndEvent,
@@ -16,13 +17,7 @@ import { runningTurn, transcriptOf, type TranscriptItem } from "./transcript";
 export const FOLLOW_MS = 2_000;
 
 /** What happened to the last question, shown once under the chat. */
-export type Notice =
-  | "reloaded"
-  | "busy"
-  | "restarting"
-  | "failed"
-  | "not_found"
-  | "load_failed";
+export type Notice = "reloaded" | "busy" | "restarting" | "failed" | "not_found" | "load_failed";
 
 /** Why no question can be asked here now. */
 export type Blocker =
@@ -74,7 +69,7 @@ export function useAssistantChat(api: AssistantApi, scope: AssistantScope) {
 
   const load = useCallback(
     async (id: string, key = scopeKey.current): Promise<void> => {
-      let view;
+      let view: ConversationView | undefined;
       try {
         view = await api.read(scope, id);
       } catch {
@@ -90,9 +85,10 @@ export function useAssistantChat(api: AssistantApi, scope: AssistantScope) {
         return;
       }
       setItems(transcriptOf(view));
+      const readOnlyReason = view.readOnlyReason;
       setBlocker((current) =>
-        view.readOnlyReason
-          ? { kind: "read_only", reason: view.readOnlyReason }
+        readOnlyReason
+          ? { kind: "read_only", reason: readOnlyReason }
           : current?.kind === "read_only"
             ? null
             : current,
@@ -185,8 +181,9 @@ export function useAssistantChat(api: AssistantApi, scope: AssistantScope) {
       setLive({ question: text, text: "", tools: [] });
       let id = conversationId;
       let hadTurn = false;
+      let last: TurnEndEvent | RefusedEvent | undefined;
       try {
-        const last = await api.ask(scope, { question: text, conversationId: id }, (event) => {
+        last = await api.ask(scope, { question: text, conversationId: id }, (event) => {
           if (key !== scopeKey.current) return;
           if (event.type === "turn") {
             hadTurn = true;
@@ -207,6 +204,7 @@ export function useAssistantChat(api: AssistantApi, scope: AssistantScope) {
         });
         if (key !== scopeKey.current) return;
         settle(last, hadTurn);
+        if (last?.type === "refused" && last.reason === "not_found") id = undefined;
       } catch (error) {
         if (key !== scopeKey.current) return;
         if (error instanceof AssistantUnavailableError) setBlocker({ kind: "off" });

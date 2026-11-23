@@ -8,19 +8,15 @@ import { watchPageHealth } from "../support/pageHealth";
 import { chatView, routeAssistant } from "../support/assistantMocks";
 
 // VAY-2519: the in-app assistant's panel in PMS, as on the approved Paper boards (VAY-2517).
-const HOTEL = "Hotel Alpenrose";
+// The shared PMS mocks' property and person.
+const HOTEL = "Alpenrose Munich";
+const GREETING = "Hi PMS, what do you need?";
 const DESKTOP = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
 
 async function setup(page: Page) {
   await mockPmsWebAuthenticatedSession(page);
-  await page.addInitScript(() => window.localStorage.setItem("userName", "Alex Meyer"));
   await mockPmsWebTargetRoutes(page);
-  await page.route("**/api/pms/properties", (route) =>
-    route.fulfill({
-      json: [{ id: PMS_WEB_PROPERTY_ID, name: HOTEL, slug: "alpenrose", location: "", country: "" }],
-    }),
-  );
 }
 
 /** A chat remembered by this tab (as after a reload), with the panel open. */
@@ -59,7 +55,7 @@ test("shows no Ask AI while the assistant is switched off", async ({ page }, tes
   const probe = page.waitForResponse(/\/api\/ai\/assistant\/conversations\?/);
   await page.goto("/dashboard");
   expect((await probe).status()).toBe(404);
-  await expect(page.getByRole("banner").getByText(HOTEL)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Dashboard", level: 1 })).toBeVisible();
   await expect(page.getByRole("button", { name: "Ask AI" })).toHaveCount(0);
   await expect(panelOf(page)).toHaveCount(0);
   await healthy();
@@ -82,7 +78,11 @@ test("opens beside the page, answers a suggestion as plain text and continues th
               { type: "end", status: "done", reason: null },
             ],
             stored: chatView("c-new", [
-              { question: "What arrives today?", tools: [{ name: "calendar_days", result: "ok" }], answer },
+              {
+                question: "What arrives today?",
+                tools: [{ name: "calendar_days", result: "ok" }],
+                answer,
+              },
               { question: request.question, answer: "Yes, both." },
             ]),
           },
@@ -93,9 +93,12 @@ test("opens beside the page, answers a suggestion as plain text and continues th
 
   await page.getByRole("button", { name: "Ask AI" }).click();
   const panel = panelOf(page);
-  await expect(panel.getByRole("heading", { name: "Hi Alex, what do you need?" })).toBeVisible();
+  await expect(panel.getByRole("heading", { name: GREETING })).toBeVisible();
   await expect(panel).toContainText(HOTEL);
-  await expect(panel.getByRole("textbox")).toHaveAttribute("placeholder", `Ask anything about ${HOTEL}...`);
+  await expect(panel.getByRole("textbox")).toHaveAttribute(
+    "placeholder",
+    `Ask anything about ${HOTEL}...`,
+  );
   await expect(panel.getByRole("textbox")).toBeFocused();
   // The drawer pushes the page aside: 420 px on the right, the page 420 px narrower.
   const box = (await panel.boundingBox())!;
@@ -119,7 +122,10 @@ test("opens beside the page, answers a suggestion as plain text and continues th
   await panel.getByRole("textbox").fill("Both with a balcony?");
   await panel.getByRole("textbox").press("Enter");
   await expect(panel.getByText("Yes, both.")).toBeVisible();
-  expect(seen.turns[1]).toMatchObject({ question: "Both with a balcony?", conversationId: "c-new" });
+  expect(seen.turns[1]).toMatchObject({
+    question: "Both with a balcony?",
+    conversationId: "c-new",
+  });
 
   await panel.getByRole("button", { name: "Close" }).click();
   await expect(panel).toHaveCount(0);
@@ -128,16 +134,25 @@ test("opens beside the page, answers a suggestion as plain text and continues th
   await healthy();
 });
 
-test("after a reload follows the answer still running, and Stop stops it", async ({ page }, testInfo) => {
+test("after a reload follows the answer still running, and Stop stops it", async ({
+  page,
+}, testInfo) => {
   const healthy = watchPageHealth(page, testInfo);
   await setup(page);
   await rememberChat(page, "c-run");
   const question = "Which room is free for Emma tonight?";
   const seen = await routeAssistant(page, {
-    chats: [chatView("c-run", [{ question, tools: [{ name: "calendar_days" }], status: "running" }])],
+    chats: [
+      chatView("c-run", [{ question, tools: [{ name: "calendar_days" }], status: "running" }]),
+    ],
     onStop: () =>
       chatView("c-run", [
-        { question, tools: [{ name: "calendar_days", result: "not_run" }], status: "stopped", endReason: "user_stopped" },
+        {
+          question,
+          tools: [{ name: "calendar_days", result: "not_run" }],
+          status: "stopped",
+          endReason: "user_stopped",
+        },
       ]),
   });
   await page.goto("/dashboard");
@@ -148,7 +163,9 @@ test("after a reload follows the answer still running, and Stop stops it", async
   await expect(panel.getByText("You stopped this answer.")).toBeVisible();
   await expect(panel.getByText("Didn't get to this")).toBeVisible();
   await expect(panel.getByRole("button", { name: "Send" })).toBeVisible();
-  expect(seen.stops).toEqual([{ propertyId: PMS_WEB_PROPERTY_ID, app: "pms", turnId: "c-run-turn-1" }]);
+  expect(seen.stops).toEqual([
+    { propertyId: PMS_WEB_PROPERTY_ID, app: "pms", turnId: "c-run-turn-1" },
+  ]);
   await healthy();
 });
 
@@ -163,7 +180,8 @@ test("a cut-off answer can be asked again", async ({ page }, testInfo) => {
         {
           question,
           tools: [{ name: "calendar_days", result: "ok" }],
-          answer: "14 guests arrive this week. Three have special requests: Lukas Brandt asks for a quiet room, and...",
+          answer:
+            "14 guests arrive this week. Three have special requests: Lukas Brandt asks for a quiet room, and...",
           status: "interrupted",
           endReason: "shutdown",
         },
@@ -207,10 +225,14 @@ test("a dropped connection reloads the chat from vayada", async ({ page }, testI
   await healthy();
 });
 
-test("switched off for the account: the panel says so and nothing can be asked", async ({ page }, testInfo) => {
+test("switched off for the account: the panel says so and nothing can be asked", async ({
+  page,
+}, testInfo) => {
   const healthy = watchPageHealth(page, testInfo);
   await setup(page);
-  await routeAssistant(page, { answer: () => ({ events: [{ type: "refused", reason: "unavailable" }] }) });
+  await routeAssistant(page, {
+    answer: () => ({ events: [{ type: "refused", reason: "unavailable" }] }),
+  });
   await page.goto("/dashboard");
   await page.getByRole("button", { name: "Ask AI" }).click();
   const panel = panelOf(page);
@@ -245,10 +267,13 @@ test("a chat that can't continue offers a new chat", async ({ page }, testInfo) 
   const panel = panelOf(page);
   await expect(panel.getByText("This chat can't continue")).toBeVisible();
   await expect(panel.getByRole("textbox")).toBeDisabled();
-  await expect(panel.getByRole("textbox")).toHaveAttribute("placeholder", "Start a new chat to continue");
+  await expect(panel.getByRole("textbox")).toHaveAttribute(
+    "placeholder",
+    "Start a new chat to continue",
+  );
   await shot(page, testInfo, "09-4-read-only");
   await panel.getByRole("button", { name: "Start a new chat" }).click();
-  await expect(panel.getByRole("heading", { name: "Hi Alex, what do you need?" })).toBeVisible();
+  await expect(panel.getByRole("heading", { name: GREETING })).toBeVisible();
   await expect(panel.getByRole("textbox")).toBeEnabled();
   await healthy();
 });
@@ -296,7 +321,9 @@ test("allowance used up (B): paused with Contact vayada", async ({ page }, testI
   const panel = panelOf(page);
   await panel.getByRole("button", { name: "What arrives today?" }).click();
   await expect(panel.getByText("Your AI allowance for December is used up")).toBeVisible();
-  await expect(panel).toContainText("before the allowance resets on 1 January, ask vayada to raise it");
+  await expect(panel).toContainText(
+    "before the allowance resets on 1 January, ask vayada to raise it",
+  );
   await expect(panel.getByRole("textbox")).toHaveAttribute(
     "placeholder",
     "Paused until vayada raises it or 1 January",
@@ -314,7 +341,11 @@ test("Your chats lists the person's chats and opens one", async ({ page }, testI
   await routeAssistant(page, {
     chats: [
       chatView("c-a", [{ question: "What arrives today?", answer: "Four guests arrive today." }]),
-      chatView("c-b", [{ question: "Which rooms are closed?", answer: "None are closed." }], "too_long"),
+      chatView(
+        "c-b",
+        [{ question: "Which rooms are closed?", answer: "None are closed." }],
+        "too_long",
+      ),
     ],
   });
   await page.goto("/dashboard");
@@ -324,7 +355,9 @@ test("Your chats lists the person's chats and opens one", async ({ page }, testI
   await expect(panel.getByRole("heading", { name: "Your chats" })).toBeVisible();
   await panel.getByRole("button", { name: /Which rooms are closed\?/ }).click();
   await expect(panel.getByText("None are closed.")).toBeVisible();
-  await expect(panel.getByText("This chat is too long to continue. Start a new chat to keep going.")).toBeVisible();
+  await expect(
+    panel.getByText("This chat is too long to continue. Start a new chat to keep going."),
+  ).toBeVisible();
   await healthy();
 });
 
@@ -336,12 +369,16 @@ test.describe("on a phone", () => {
     await setup(page);
     await routeAssistant(page, {
       answer: (request) =>
-        answered("c-phone", request.question, "4 guests arrive today. Anna Keller still owes €360."),
+        answered(
+          "c-phone",
+          request.question,
+          "4 guests arrive today. Anna Keller still owes €360.",
+        ),
     });
     await page.goto("/dashboard");
     await page.getByRole("button", { name: "Ask AI" }).click();
     const panel = panelOf(page);
-    await expect(panel.getByRole("heading", { name: "Hi Alex, what do you need?" })).toBeVisible();
+    await expect(panel.getByRole("heading", { name: GREETING })).toBeVisible();
     expect(await panel.boundingBox()).toEqual({ x: 0, y: 0, ...PHONE });
     await shot(page, testInfo, "11-phone-empty");
     await panel.getByRole("button", { name: "What arrives today?" }).click();

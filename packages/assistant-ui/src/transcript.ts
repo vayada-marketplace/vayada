@@ -48,7 +48,10 @@ function resultStatus(output: unknown): ToolLineStatus {
   const value = output["value"];
   const code = isRecord(value) ? (value["code"] ?? value["error"]) : undefined;
   // Never ran: cut off, stopped, a repeat, a restart.
-  return code === "not_run" || code === "interrupted" || code === "repeat_limit" || code === "stopped"
+  return code === "not_run" ||
+    code === "interrupted" ||
+    code === "repeat_limit" ||
+    code === "stopped"
     ? "skipped"
     : "failed";
 }
@@ -81,7 +84,8 @@ export function transcriptOf(view: ConversationView): TranscriptItem[] {
       const text = questionText(content);
       if (text.trim()) items.push({ kind: "question", key: `q-${row.seq}`, text });
     } else if (role === "assistant") {
-      const parts = typeof content === "string" ? [{ type: "text", text: content }] : partsOf(content);
+      const parts =
+        typeof content === "string" ? [{ type: "text", text: content }] : partsOf(content);
       // Progress lines first, then the text: the panel shows what was looked at, then the answer.
       for (const part of parts.filter((each) => each["type"] === "tool-call")) {
         const line = {
