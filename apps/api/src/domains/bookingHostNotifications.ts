@@ -8,8 +8,10 @@ import {
 import { readPropertyPlan } from "./propertyPlanReadModel.js";
 
 /** Booking Admin's notifications bell (VAY-2349): the selected property's last 30 days, built on each read
- * from the rows that already record what happened. Only read marks are stored (migration 0514). */
+ * from the rows that already record what happened. Only each person's read marks (migration 0514) and the
+ * team's done marks (0551, VAY-2591) are stored. */
 export const HOST_NOTIFICATION_WINDOW_DAYS = 30;
+/** Read and done marks older than this are deleted on the next mark. */
 export const HOST_NOTIFICATION_READ_RETENTION_DAYS = 60;
 /** Rows per tab category; the unread counts cover all 30 days. */
 export const HOST_NOTIFICATION_LIST_LIMIT = 50;
@@ -72,6 +74,9 @@ export type HostNotification = {
   category: HostNotificationCategory;
   occurredAt: string;
   read: boolean;
+  /** Someone on the property's team marked it done (VAY-2591). Only items that need action can be; a
+   * done item counts as read for everyone. */
+  done: boolean;
   booking?: HostNotificationBooking;
   promo?: HostNotificationPromo;
   /** The new member's name, or null when their account has none. */
@@ -134,6 +139,20 @@ export type BookingHostNotificationsRepository = {
   /** Null when the property doesn't exist. */
   read(propertyId: string, viewer: HostNotificationViewer): Promise<HostNotificationFeed | null>;
   markRead(propertyId: string, userId: string, keys: readonly string[]): Promise<void>;
+  /** Removes the person's own read marks. On an item someone marked done it also takes the done mark away,
+   * for the whole team: "Mark as unread" is how done is undone. */
+  markUnread(
+    propertyId: string,
+    viewer: HostNotificationViewer,
+    keys: readonly string[],
+  ): Promise<void>;
+  /** Marks items done for the property's whole team: only the given keys that are needs-action items in
+   * the person's feed now. Returns the keys it marked. */
+  markDone(
+    propertyId: string,
+    viewer: HostNotificationViewer,
+    keys: readonly string[],
+  ): Promise<string[]>;
   markAllRead(
     propertyId: string,
     viewer: HostNotificationViewer,
@@ -206,6 +225,8 @@ export type HostNotificationSources = {
   promos: PromoRow[];
   members: MemberRow[];
   readKeys: ReadonlySet<string>;
+  /** The property's done marks, the whole team's. */
+  doneKeys: ReadonlySet<string>;
   /** Whether the property's plan lets hosts see guest contact before acceptance. */
   guestContactAlways: boolean;
 };
@@ -302,6 +323,16 @@ export const HOST_NOTIFICATION_BOOKING_EVENTS = [
   "guest_booking.rejected",
 ] as const;
 
+/** Done counts for the whole team, and only on items that need action; a done item is read. */
+function readState(
+  sources: HostNotificationSources,
+  key: string,
+  category: HostNotificationCategory,
+): Pick<HostNotification, "read" | "done"> {
+  const done = category === "needs_action" && sources.doneKeys.has(key);
+  return { read: done || sources.readKeys.has(key), done };
+}
+
 function bookingNotifications(
   sources: HostNotificationSources,
   viewer: HostNotificationViewer,
@@ -327,7 +358,7 @@ function bookingNotifications(
       kind,
       category,
       occurredAt: row.occurredAt.toISOString(),
-      read: sources.readKeys.has(key),
+      ...readState(sources, key, category),
       booking: {
         id: row.bookingId,
         reference: row.reference,
@@ -403,7 +434,7 @@ function promoNotifications(
         kind: "promo_limit_reached",
         category: "needs_action",
         occurredAt: row.limitReachedAt.toISOString(),
-        read: sources.readKeys.has(key),
+        ...readState(sources, key, "needs_action"),
         promo,
       });
     } else if (row.endingSince && row.validUntil) {
@@ -413,7 +444,7 @@ function promoNotifications(
         kind: "promo_ending",
         category: "needs_action",
         occurredAt: row.endingSince.toISOString(),
-        read: sources.readKeys.has(key),
+        ...readState(sources, key, "needs_action"),
         promo,
       });
     }
@@ -435,7 +466,7 @@ function allNotifications(
         kind: "team_member_joined",
         category: "updates",
         occurredAt: row.joinedAt.toISOString(),
-        read: sources.readKeys.has(key),
+        ...readState(sources, key, "updates"),
         member: { name: row.name, role: row.role },
       };
     }),
@@ -444,8 +475,9 @@ function allNotifications(
 
 const URGENT: ReadonlySet<HostNotificationKind> = new Set(["payment_not_received"]);
 
-/** Turns the source rows into the bell's feed: newest first, the newest 50 of each tab's category, and
- * unread counts over all 30 days. */
+/** Turns the source rows into the bell's feed: newest first, the newest 50 of each tab's category (done
+ * items counted apart, so they never push out what still needs action), and unread counts over all 30
+ * days. */
 export function buildHostNotificationFeed(
   sources: HostNotificationSources,
   viewer: HostNotificationViewer,
@@ -460,15 +492,17 @@ export function buildHostNotificationFeed(
     unread.all += 1;
     unread.needsAction += 1;
   }
-  const shown: Record<HostNotificationCategory, number> = {
+  const shown: Record<HostNotificationCategory | "done", number> = {
     bookings: 0,
     needs_action: 0,
     updates: 0,
+    done: 0,
   };
   const listed: HostNotification[] = [];
   for (const item of items) {
-    if (shown[item.category] < HOST_NOTIFICATION_LIST_LIMIT) {
-      shown[item.category] += 1;
+    const bucket = item.done ? "done" : item.category;
+    if (shown[bucket] < HOST_NOTIFICATION_LIST_LIMIT) {
+      shown[bucket] += 1;
       listed.push(item);
     }
     if (item.read) continue;
@@ -503,6 +537,19 @@ export function readAllKeys(
   const alert = syncAlert(sources.syncStatuses, sources, viewer);
   if (alert && !alert.read && alert.key === seen.syncAlertKey) keys.push(alert.key);
   return keys;
+}
+
+/** The given keys that "Mark as done" may mark: needs-action items in the person's feed now. The failing
+ * sync card is never one: it clears itself once the sync works again. */
+export function doneableKeys(
+  sources: HostNotificationSources,
+  viewer: HostNotificationViewer,
+  keys: readonly string[],
+): string[] {
+  const wanted = new Set(keys);
+  return allNotifications(sources, viewer)
+    .filter((item) => item.category === "needs_action" && wanted.has(item.key))
+    .map((item) => item.key);
 }
 
 // ---------------------------------------------------------------- SQL
@@ -643,6 +690,32 @@ INSERT INTO booking.host_notification_reads (user_id, property_id, notification_
 SELECT $1::uuid, $2::uuid, key FROM unnest($3::text[]) AS key
 ON CONFLICT (user_id, property_id, notification_key) DO UPDATE SET read_at = EXCLUDED.read_at`;
 
+const UNMARK_SQL = `
+DELETE FROM booking.host_notification_reads
+WHERE user_id = $1::uuid AND property_id = $2::uuid AND notification_key = ANY($3::text[])`;
+
+const DONE_KEYS_SQL = `
+SELECT notification_key AS key FROM booking.host_notification_done WHERE property_id = $1::uuid`;
+
+const DONE_AMONG_SQL = `
+SELECT notification_key AS key FROM booking.host_notification_done
+WHERE property_id = $1::uuid AND notification_key = ANY($2::text[])`;
+
+const UNDONE_SQL = `
+DELETE FROM booking.host_notification_done
+WHERE property_id = $1::uuid AND notification_key = ANY($2::text[])`;
+
+// The first person to mark an item done keeps it; the property's other done marks older than 60 days go.
+const DONE_SQL = `
+WITH pruned AS (
+  DELETE FROM booking.host_notification_done
+  WHERE property_id = $1::uuid AND done_at < now() - make_interval(days => $4)
+    AND NOT (notification_key = ANY($3::text[]))
+)
+INSERT INTO booking.host_notification_done (property_id, notification_key, done_by)
+SELECT $1::uuid, key, $2::uuid FROM unnest($3::text[]) AS key
+ON CONFLICT (property_id, notification_key) DO NOTHING`;
+
 type Client = Pick<pg.PoolClient, "query">;
 
 /** One short transaction per call on one connection, with a statement timeout set inside it: a pool-level
@@ -705,6 +778,7 @@ export function createPgBookingHostNotificationsRepository(
       viewer.userId,
       propertyId,
     ]);
+    const doneRows = await rows<{ key: string }>(client, DONE_KEYS_SQL, [propertyId]);
     const windowStart = Date.now() - HOST_NOTIFICATION_WINDOW_DAYS * 24 * 60 * 60 * 1000;
     const needsContact =
       viewer.canReadGuestContact &&
@@ -720,6 +794,7 @@ export function createPgBookingHostNotificationsRepository(
       ),
       members,
       readKeys: new Set(readRows.map((row) => row.key)),
+      doneKeys: new Set(doneRows.map((row) => row.key)),
       guestContactAlways: plan ? propertyCanAccessGuestContact(plan, false) : false,
     };
   }
@@ -738,6 +813,39 @@ export function createPgBookingHostNotificationsRepository(
       if (valid.length === 0) return;
       await inTransaction(false, (client) => mark(client, userId, propertyId, valid));
     },
+    async markUnread(propertyId, viewer, keys) {
+      const valid = [...new Set(keys)].filter(isHostNotificationKey);
+      if (valid.length === 0) return;
+      await inTransaction(false, async (client) => {
+        await client.query(UNMARK_SQL, [viewer.userId, propertyId, valid]);
+        const done = await rows<{ key: string }>(client, DONE_AMONG_SQL, [propertyId, valid]);
+        if (done.length === 0) return;
+        // Undone only what the person may mark done: needs-action items in their own feed.
+        const sources = await readSources(client, propertyId, viewer);
+        const undone = sources
+          ? doneableKeys(
+              sources,
+              viewer,
+              done.map((row) => row.key),
+            )
+          : [];
+        if (undone.length > 0) await client.query(UNDONE_SQL, [propertyId, undone]);
+      });
+    },
+    markDone: (propertyId, viewer, keys) =>
+      inTransaction(false, async (client) => {
+        const sources = await readSources(client, propertyId, viewer);
+        if (!sources) return [];
+        const marked = doneableKeys(sources, viewer, keys.filter(isHostNotificationKey));
+        if (marked.length > 0)
+          await client.query(DONE_SQL, [
+            propertyId,
+            viewer.userId,
+            marked,
+            HOST_NOTIFICATION_READ_RETENTION_DAYS,
+          ]);
+        return marked;
+      }),
     markAllRead: (propertyId, viewer, seen) =>
       inTransaction(false, async (client) => {
         const sources = await readSources(client, propertyId, viewer);

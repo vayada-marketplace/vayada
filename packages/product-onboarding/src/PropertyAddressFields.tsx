@@ -109,6 +109,7 @@ export default function PropertyAddressFields({
   locale = "en",
   markerTitle,
   linkMode = null,
+  countryId,
 }: {
   value: PropertyAddress;
   onChange: (patch: Partial<PropertyAddress>) => void;
@@ -119,6 +120,8 @@ export default function PropertyAddressFields({
   locale?: string;
   markerTitle?: string;
   linkMode?: PropertyAddressLinkMode | null;
+  /** The country select's id (Booking Admin's live hotel question gives the focus back to it, VAY-2586). */
+  countryId?: string;
 }) {
   const t = translate ?? ((key) => propertyAddressEnglish[key]);
   const id = useId();
@@ -382,6 +385,7 @@ export default function PropertyAddressFields({
         <label className={labelClass}>
           {t("propertyAddress.country")}
           <select
+            id={countryId}
             className={inputClass}
             value={value.countryCode}
             disabled={disabled}

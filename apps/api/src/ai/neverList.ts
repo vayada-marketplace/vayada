@@ -65,6 +65,9 @@ export const NEVER_ROUTES: Readonly<Record<string, NeverEntry>> = Object.freeze(
   "PUT /api/finance/properties/:propertyId/payout-destination": {
     area: "bank_accounts_and_payouts",
   },
+  "GET /api/finance/properties/:propertyId/payout-statement": {
+    area: "bank_accounts_and_payouts",
+  },
   "GET /api/finance/properties/:propertyId/payouts": { area: "bank_accounts_and_payouts" },
   "POST /api/finance/properties/:propertyId/payouts/:payoutId/dispatch": {
     area: "bank_accounts_and_payouts",

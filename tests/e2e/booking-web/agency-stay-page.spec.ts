@@ -76,6 +76,10 @@ test("a chosen rate shows the dark bar, whose Continue opens the stay's checkout
   await expect(bar).toContainText("Suite");
   // EUR 300.00, shown in the agency's display currency (US$1 = €0.90).
   await expect(bar).toContainText("≈ US$333");
+  // VAY-2588: the bar's "≈" is still explained here, with the rates' credit.
+  const note = page.getByTestId("approximate-amounts-note");
+  await expect(note).toContainText("Amounts marked ≈ are approximate conversions.");
+  await expect(note.getByRole("link", { name: "Rates By Exchange Rate API" })).toBeVisible();
   const href = await bar.getByRole("link", { name: "Continue" }).getAttribute("href");
   const url = new URL(href!, page.url());
   // VAY-2462: on the agency's address, under the stay.

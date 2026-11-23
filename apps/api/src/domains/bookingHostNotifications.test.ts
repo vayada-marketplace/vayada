@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   readAllKeys,
   buildHostNotificationFeed,
+  doneableKeys,
   isHostNotificationKey,
   type BookingEventRow,
   type HostNotificationSources,
@@ -60,6 +61,7 @@ function sources(overrides: Partial<HostNotificationSources> = {}): HostNotifica
     promos: [],
     members: [],
     readKeys: new Set(),
+    doneKeys: new Set(),
     guestContactAlways: false,
     ...overrides,
   };
@@ -199,6 +201,89 @@ describe("Booking Admin notifications feed (VAY-2349)", () => {
     expect(noContact.items[0]!.booking!.guestEmail).toBeNull();
   });
 
+  it("marks needs-action items done for the whole team: done is read, and no longer red (VAY-2591)", () => {
+    const missed = event({
+      eventType: "guest_booking.expired",
+      actorType: "system",
+      lifecycleStatus: "expired",
+      paymentMethod: "bank_transfer",
+      cancellationReason: "pending_booking_expired",
+    });
+    const created = event();
+    const missedKey = `booking-event:${missed.eventId}`;
+    const createdKey = `booking-event:${created.eventId}`;
+    const failing = {
+      connectionId: "c0000000-0000-4000-8000-000000000001",
+      domain: "ari" as const,
+      lastAttemptAt: new Date("2026-10-25T11:00:00Z"),
+      lastSuccessAt: null,
+    };
+    const promo = {
+      id: "p0000000-0000-4000-8000-000000000001",
+      code: "WELCOME10",
+      validUntil: null,
+      uses: 50,
+      maxUses: 50,
+      endingSince: null,
+      limitReachedAt: new Date("2026-10-24T10:00:00Z"),
+    };
+    const promoKey = `promo-limit:${promo.id}:50`;
+    const base = sources({ bookingEvents: [missed, created], promos: [promo] });
+    const before = buildHostNotificationFeed(base, viewer);
+    expect(before.items.every((item) => item.done === false)).toBe(true);
+    expect(before.badge).toBe("red");
+
+    // Only needs-action items can be done: never a booking, a team update or the sync card.
+    const syncKey = buildHostNotificationFeed(sources({ syncStatuses: [failing] }), viewer)
+      .syncAlert!.key;
+    expect(
+      doneableKeys(base, viewer, [missedKey, promoKey, createdKey, syncKey, "promo-limit:gone:1"]),
+    ).toEqual([missedKey, promoKey]);
+    // Promo codes stay out for people who may not read them.
+    expect(doneableKeys(base, { ...viewer, canReadPromos: false }, [promoKey])).toEqual([]);
+
+    const done = buildHostNotificationFeed(
+      { ...base, doneKeys: new Set([missedKey, createdKey]) },
+      viewer,
+    );
+    const byKey = new Map(done.items.map((item) => [item.key, item]));
+    expect(byKey.get(missedKey)).toMatchObject({ done: true, read: true });
+    // A done mark on something that doesn't need action changes nothing.
+    expect(byKey.get(createdKey)).toMatchObject({ done: false, read: false });
+    expect(done.unread).toEqual({ all: 2, bookings: 1, needsAction: 1, updates: 0 });
+    expect(done.badge).toBe("blue");
+    // Done items have their own 50 rows: 50 newer done items never push out one that still needs action.
+    const many = Array.from({ length: 51 }, (_, index) =>
+      event({
+        eventType: "guest_booking.expired",
+        actorType: "system",
+        lifecycleStatus: "expired",
+        paymentMethod: "bank_transfer",
+        cancellationReason: "pending_booking_expired",
+        occurredAt: new Date(Date.UTC(2026, 9, 25, 9, index)),
+      }),
+    );
+    const open = many[0]!;
+    const crowded = buildHostNotificationFeed(
+      sources({
+        bookingEvents: many,
+        doneKeys: new Set(many.slice(1).map((row) => `booking-event:${row.eventId}`)),
+      }),
+      viewer,
+    );
+    expect(crowded.items.filter((item) => !item.done).map((item) => item.key)).toEqual([
+      `booking-event:${open.eventId}`,
+    ]);
+    expect(crowded.items.filter((item) => item.done)).toHaveLength(50);
+    // "Mark all read" leaves done items alone: they are read already.
+    expect(
+      readAllKeys({ ...base, doneKeys: new Set([missedKey]) }, viewer, {
+        before: new Date("2026-10-26T00:00:00Z"),
+        syncAlertKey: null,
+      }),
+    ).not.toContain(missedKey);
+  });
+
   it("pins a failing channel sync until it recovers, as one item per failure episode", () => {
     const failing = {
       connectionId: "c0000000-0000-4000-8000-000000000001",
@@ -315,6 +400,7 @@ describe("Booking Admin notifications feed (VAY-2349)", () => {
         category: "updates",
         occurredAt: "2026-10-21T16:05:00.000Z",
         read: false,
+        done: false,
         member: { name: "Anna Keller", role: "Front desk" },
       },
     ]);

@@ -336,7 +336,16 @@ export async function mockAgencyPage(
     return route.fulfill(custom ?? { json: stayPricesAnswer(url, from) }).catch(() => undefined);
   });
   await page.route(`**/api/booking-web/hotels/${staySlug("escape")}/exchange-rates`, (route) =>
-    route.fulfill({ json: { base: "USD", rates: { EUR: 0.9 } } }),
+    route.fulfill({
+      json: {
+        base: "USD",
+        rates: { EUR: 0.9 },
+        attribution: {
+          label: "Rates By Exchange Rate API",
+          url: "https://www.exchangerate-api.com",
+        },
+      },
+    }),
   );
   await page.route("https://images.vayada.com/agency-e2e/**", (route) => {
     const id = route

@@ -317,6 +317,8 @@ const REFERENCES = [
   "identity.organizations <- identity.account_admin_transfer_proofs(organization_id) c",
   "identity.organizations <- identity.organization_roles(organization_id) c",
   "identity.product_entitlements <- finance.billing_entitlements(identity_entitlement_id) n",
+  // 0551 (VAY-2591): who marked a notification done clears with the user; the done mark stays.
+  "identity.users <- booking.host_notification_done(done_by) n",
   // 0514 (VAY-2349): a removed user's notification read marks go with the user.
   "identity.users <- booking.host_notification_reads(user_id) c",
   "identity.users <- distribution.external_api_clients(created_by_user_id) n",

@@ -99,13 +99,15 @@ it("shows the quick facts, local hotel time and the policy for this stay (VAY-23
     "MealsRoom only",
     "ChildrenWelcome · 18+ count as adults",
     "All times are local hotel time (Sri Lanka).",
-    // VAY-2392: booked after free cancellation's last day (23 Oct), it was never refundable.
-    "Non-refundable",
+    // VAY-2392: booked after free cancellation's last day (23 Oct), it was never refundable; it
+    // is still the Flexible rate, so the badge says there's no free cancellation (VAY-2587).
+    "No free cancellation",
     "From now until check-in· applies nowFull amount (US$175)",
     "You’re booking less than 3 days before arrival, so this booking can’t be cancelled for free. If you cancel or don’t arrive, you pay the full amount.",
   ])
     expect(text()).toContain(part);
   expect(text()).not.toContain("Free cancellation ended");
+  expect(text()).not.toContain("Non-refundable");
   const now = document.querySelector('[role="row"][aria-current="true"]')!;
   expect(now.textContent).toContain("From now until check-in");
 });
@@ -145,10 +147,14 @@ it("agrees to everything with one tick and says why when it was missed", () => {
 
 it("says first in the consent when rooms can't be refunded (VAY-2392)", () => {
   const label = () => document.querySelector("input[data-consent]")!.closest("label")!.textContent;
+  // VAY-2587: a Flexible rate booked after its free cancellation ended can't be cancelled for
+  // free; it isn't called non-refundable.
   render();
   expect(label()).toBe(
-    "I understand this booking is non-refundable. If I cancel or don’t arrive, the full stay is charged. I agree to the cancellation policy, guest rules and terms & conditions.",
+    "I understand I can’t cancel this booking for free. If I cancel or don’t arrive, the full stay is charged. I agree to the cancellation policy, guest rules and terms & conditions.",
   );
+  render({}, "de");
+  expect(label()).toBe(`${de.beforeYouBook.agreeNoFreeCancellation} ${de.beforeYouBook.agree}`);
   // One room still free to cancel, one not.
   const mixed = {
     ...quote,
@@ -166,6 +172,49 @@ it("says first in the consent when rooms can't be refunded (VAY-2392)", () => {
   expect(label()).toBe(
     "I understand some of these rooms are non-refundable. If I cancel or don’t arrive, their full price is charged. I agree to the cancellation policy, guest rules and terms & conditions.",
   );
+  // A Flexible room booked late next to a Non-refundable one: neither can be cancelled for free,
+  // and the Flexible one isn't called non-refundable.
+  render({ quote: mixed, roomNames: { a: "Villa Four", b: "Garden" } });
+  expect(label()).toBe(
+    "I understand I can’t cancel this booking for free. If I cancel or don’t arrive, the full stay is charged. I agree to the cancellation policy, guest rules and terms & conditions.",
+  );
+  // Only the Non-refundable rate: it says so.
+  render({
+    quote: {
+      ...quote,
+      rooms: [
+        { selectionId: "a", mealPlan: "room_only", cancellation: { kind: "non_refundable" } },
+      ],
+    },
+  });
+  expect(label()).toBe(
+    "I understand this booking is non-refundable. If I cancel or don’t arrive, the full stay is charged. I agree to the cancellation policy, guest rules and terms & conditions.",
+  );
+  // With a request, its badge says when free cancellation ends (VAY-2587).
+  render({ quote: { ...quote, acceptanceMode: "request" } });
+  expect(text()).toContain("No free cancellation once the hotel accepts");
+  expect(text()).not.toContain("Not refundable");
+  // One Flexible room booked late, one still free to cancel until the end of today.
+  const oneLate = {
+    ...mixed,
+    rooms: [
+      ...quote.rooms,
+      {
+        selectionId: "b",
+        mealPlan: "room_only",
+        cancellation: {
+          kind: "flexible",
+          terms: { flexibleCancellationType: "free", freeCancellationDeadlineDays: 1 },
+        },
+      },
+    ],
+  } as unknown as PublicBookingQuote;
+  render({ quote: oneLate, roomNames: { a: "Villa Four", b: "Garden" } });
+  expect(label()).toBe(
+    "I understand some of these rooms can’t be cancelled for free. If I cancel or don’t arrive, their full price is charged. I agree to the cancellation policy, guest rules and terms & conditions.",
+  );
+  expect(text()).toContain("No free cancellation");
+  expect(text()).not.toContain("Non-refundable");
 });
 
 it("offers a retry when the guest rules couldn't be checked", () => {
@@ -181,6 +230,7 @@ it("offers a retry when the guest rules couldn't be checked", () => {
 it("speaks the page's language", () => {
   render({}, "de");
   expect(text()).toContain("Vor der Buchung");
-  expect(text()).toContain("Nicht erstattbar");
+  expect(text()).toContain("Keine kostenlose Stornierung");
+  expect(text()).not.toContain("Nicht erstattbar");
   expect(text()).toContain("Alle Zeiten in Ortszeit des Hotels (Sri Lanka).");
 });

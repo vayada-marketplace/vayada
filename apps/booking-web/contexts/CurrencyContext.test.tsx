@@ -62,6 +62,22 @@ it("shows the charged amount with cents first and the conversion as approximate"
   unmount();
 });
 
+it("shows a price in the guest's currency only: converted in whole units, its own exactly (VAY-2588)", async () => {
+  get.mockResolvedValue(rates);
+  const { currency, unmount } = await renderCurrency();
+  expect(currency().displayPrice(610.25, "EUR")).toBe("€610.25");
+  expect(currency().displayPrice(600, "EUR")).toBe("€600");
+  act(() => currency().setSelectedCurrency("USD"));
+  // 671.275 and 52.415: rounded to the whole dollar, never "≈", never the euro amount.
+  expect(currency().displayPrice(610.25, "EUR")).toBe("US$671");
+  expect(currency().displayPrice(47.65, "EUR")).toBe("US$52");
+  act(() => currency().setSelectedCurrency("JPY"));
+  expect(currency().displayPrice(10.25, "EUR")).toBe("JP¥1,640");
+  // An amount in a currency without a rate stays in it, exactly.
+  expect(currency().displayPrice(12.5, "GBP")).toBe("£12.50");
+  unmount();
+});
+
 it("converts another booking currency through the hotel currency, never a zero amount", async () => {
   get.mockResolvedValue(rates);
   const { currency, unmount } = await renderCurrency();

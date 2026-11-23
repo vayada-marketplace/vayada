@@ -14,13 +14,19 @@ import { buildApp } from "./app.js";
 import {
   createPgPartnerConnectionsRepository,
   pkceChallenge,
+  sha256Hex,
   type PartnerConnectionsRepository,
 } from "./domains/partnerConnections.js";
 import {
   createHotelSetupOrdinaryLoginFixture,
   type HotelSetupOrdinaryLoginFixture,
 } from "./hotelSetupOrdinaryLogin.fixture.js";
-import { registerPartnerApp } from "./platform/partnerAppRegistration.js";
+import {
+  PartnerAppRegistrationRefusal,
+  PartnerRegistrationIncomplete,
+  registerPartnerApp,
+  registerPartnerAppIntoSecretStore,
+} from "./platform/partnerAppRegistration.js";
 
 /**
  * VAY-2436: a hotel connects a partner app once and the app gets tokens for that hotel only; a
@@ -575,5 +581,87 @@ describe.skipIf(!url)("partner apps and the hotel's one-time approval (VAY-2436)
       [grant.accessToken, grant.refreshToken],
     );
     expect(stored.rows[0].n).toBe(0);
+  });
+
+  it("saves an app only once the secret store holds its credentials (VAY-2441)", async () => {
+    const registration = {
+      name: "Creator Links test",
+      redirectUris: [
+        "http://localhost:3000/admin/connect/vayada",
+        "http://localhost:3000/hotel/connect/vayada",
+      ],
+      scopes: ["promo_codes", "bookings"] as ("promo_codes" | "bookings")[],
+      webhookUrl: null,
+      contactEmail: null,
+      termsVersion: "partner-contract-2026-10-31",
+    };
+    const secrets = new Map<string, string>();
+    const saved = await registerPartnerAppIntoSecretStore(
+      pool,
+      registration,
+      "partner-apps/test/creator-links-test",
+      async (name, value) => {
+        secrets.set(name, value);
+      },
+    );
+    expect(Object.keys(saved).sort()).toEqual(["appId", "clientId"]);
+    const credentials = JSON.parse(secrets.get("partner-apps/test/creator-links-test")!);
+    expect(Object.keys(credentials).sort()).toEqual(["clientId", "clientSecret"]);
+    expect(credentials.clientId).toBe(saved.clientId);
+    const row = await admin.query(
+      `SELECT credential_hash_ref, redirect_uris FROM distribution.external_api_clients
+       WHERE public_client_id = $1`,
+      [saved.clientId],
+    );
+    expect(row.rows[0]).toEqual({
+      credential_hash_ref: `sha256:${sha256Hex(credentials.clientSecret)}`,
+      redirect_uris: registration.redirectUris,
+    });
+
+    // Storing fails (a timeout, say): nothing is saved, and the error names the secret and client
+    // id so a secret that did get stored is never handed over.
+    let failedClientId = "";
+    const failure = await registerPartnerAppIntoSecretStore(
+      pool,
+      registration,
+      "partner-apps/test/timed-out",
+      async (_name, value) => {
+        failedClientId = JSON.parse(value).clientId;
+        throw Object.assign(new Error("timed out"), { name: "TimeoutError" });
+      },
+    ).then(
+      () => null,
+      (caught: unknown) => caught,
+    );
+    expect(failure).toBeInstanceOf(PartnerRegistrationIncomplete);
+    expect(failure).toMatchObject({
+      secretName: "partner-apps/test/timed-out",
+      clientId: failedClientId,
+      appSaved: "no",
+    });
+    expect((failure as Error).message).not.toContain("vyp_cs_");
+
+    // The name is taken: refused, nothing saved.
+    let refusedClientId = "";
+    await expect(
+      registerPartnerAppIntoSecretStore(
+        pool,
+        registration,
+        "partner-apps/test/taken",
+        async (_name, value) => {
+          refusedClientId = JSON.parse(value).clientId;
+          throw new PartnerAppRegistrationRefusal("partner-apps/test/taken already exists");
+        },
+      ),
+    ).rejects.toBeInstanceOf(PartnerAppRegistrationRefusal);
+
+    const none = await admin.query(
+      `SELECT count(*)::int AS n FROM distribution.external_api_clients
+       WHERE public_client_id = ANY($1::text[])`,
+      [[failedClientId, refusedClientId]],
+    );
+    expect(failedClientId).toMatch(/^partner_[0-9a-f]{24}$/);
+    expect(refusedClientId).toMatch(/^partner_[0-9a-f]{24}$/);
+    expect(none.rows[0].n).toBe(0);
   });
 });

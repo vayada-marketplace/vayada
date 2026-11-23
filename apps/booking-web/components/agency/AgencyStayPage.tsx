@@ -353,6 +353,7 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
         onEditDates={editDates}
         onEditGuests={openGuests}
         intro={wide ? box : undefined}
+        conversionNote
       />
 
       <AgencyNearbyStays

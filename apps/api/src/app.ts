@@ -189,6 +189,7 @@ import { registerFinanceProfitLossRoutes } from "./routes/financeProfitLoss.js";
 import { registerFinanceRevenueRoutes } from "./routes/financeRevenue.js";
 import { registerFinanceBankTransferRoutes } from "./routes/financeBankTransfer.js";
 import { registerFinancePayoutDestinationRoutes } from "./routes/financePayoutDestination.js";
+import { registerFinancePayoutStatementRoutes } from "./routes/financePayoutStatement.js";
 import { registerVayadaPaymentWebhookRoutes } from "./routes/vayadaPaymentWebhooks.js";
 import { registerVayadaPaymentPayoutRoutes } from "./routes/vayadaPaymentPayouts.js";
 import { registerFinancePaymentWindowsRoutes } from "./routes/financePaymentWindows.js";
@@ -511,6 +512,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   financeRevenue?: Parameters<typeof registerFinanceRevenueRoutes>[1];
   financeBankTransfer?: Parameters<typeof registerFinanceBankTransferRoutes>[1];
   financePayoutDestination?: Parameters<typeof registerFinancePayoutDestinationRoutes>[1];
+  financePayoutStatement?: Parameters<typeof registerFinancePayoutStatementRoutes>[1];
   /** VAY-2442: events from vayada Payment's own Stripe account. */
   vayadaPaymentWebhooks?: Parameters<typeof registerVayadaPaymentWebhookRoutes>[1];
   /** VAY-2442: the live-mode endpoint, registered only with the live webhook secret. */
@@ -1247,6 +1249,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api",
       publicBookabilityPublisher: options.publicBookabilityPublisher,
       ...options.financePayoutDestination,
+      propertyAccessRepository: options.auth?.propertyAccessRepository,
+    });
+  }
+  // VAY-2584: the hotel owner's own payout statement, only while vayada Payment is switched on.
+  if (options.financePayoutStatement) {
+    app.register(registerFinancePayoutStatementRoutes, {
+      prefix: "/api",
+      ...options.financePayoutStatement,
       propertyAccessRepository: options.auth?.propertyAccessRepository,
     });
   }
