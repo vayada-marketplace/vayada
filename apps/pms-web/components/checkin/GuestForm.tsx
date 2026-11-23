@@ -214,11 +214,12 @@ export function GuestForm({
     </span>
   );
   /** A value from the booking: shown as it is, on white, with a lock under it (VAY-2418). */
-  const lockedInput = (label: string, isRequired: boolean, value: string) => (
+  const lockedInput = (label: string, isRequired: boolean, value: string, placeholder?: string) => (
     <label className="block">
       {caption(label, isRequired)}
       <input
         value={value}
+        placeholder={placeholder}
         readOnly
         className={`${INPUT_CLASS} cursor-default focus:border-gray-300 focus:ring-0`}
       />
@@ -290,7 +291,7 @@ export function GuestForm({
       default: {
         const key = name as "email" | "phone" | "documentNumber";
         if ((key === "email" || key === "phone") && lockedFields.has(key))
-          return lockedInput(label, required(name), values[key]);
+          return lockedInput(label, required(name), values[key], notProvided ?? undefined);
         return (
           <label className="block">
             {caption(label, required(name))}

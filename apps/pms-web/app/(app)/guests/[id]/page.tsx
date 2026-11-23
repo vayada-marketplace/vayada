@@ -175,10 +175,13 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
     }
   };
 
-  // VAY-2577: a guest who only booked through one channel gets "Not provided by Airbnb".
+  // VAY-2577: a guest who only booked through one channel gets "Not provided by Airbnb". A channel
+  // sends the booker's contact only, so a stay as someone's additional guest keeps the plain text.
   const stayChannels = Array.from(new Set(guest.stays.map((stay) => stay.channel)));
   const contactNotProvided =
-    (stayChannels.length === 1 && notProvidedByChannel(stayChannels[0], t)) ||
+    (stayChannels.length === 1 &&
+      guest.stays.every((stay) => stay.role !== "additional_guest") &&
+      notProvidedByChannel(stayChannels[0], t)) ||
     t("guests.notProvided");
   const fieldValue = (field: keyof GuestFields): ReactNode => {
     const value = guest.fields[field];

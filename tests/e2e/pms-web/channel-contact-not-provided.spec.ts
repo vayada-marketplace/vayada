@@ -93,6 +93,31 @@ test("shows the booker's missing phone as not provided by the channel at check-i
   await assertHealthy();
 });
 
+test("says so in the booker's locked phone when their guest record can't be reached (VAY-2577)", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockCheckinFlow(
+    page,
+    { confirmSpecialRequest: false },
+    { primaryGuest: { ...pmsWebReservation.primaryGuest, phone: null } },
+  );
+  // No guest record for the booker: their name and contact show locked, as booked.
+  await page.route(`${reservationPath}/guest-profiles`, (route) =>
+    route.fulfill({ json: { guestBookingId: PMS_WEB_RESERVATION_ID, guests: [] } }),
+  );
+  await page.goto(`/check-in/${PMS_WEB_RESERVATION_ID}`);
+  const main = page.locator("main").first();
+  await main.getByRole("button", { name: "Confirm arrival" }).click();
+  await main.getByRole("button", { name: /^Edit Ada Lovelace/ }).click();
+  const phone = main
+    .getByRole("form", { name: "Ada Lovelace" })
+    .getByRole("textbox", { name: /^Phone/ });
+  await expect(phone).not.toBeEditable();
+  await expect(phone).toHaveAttribute("placeholder", "Not provided by Booking.com");
+  await assertHealthy();
+});
+
 const airbnbStay = stay({ channel: "airbnb", directSource: null });
 const noEmail = {
   firstName: "Timo",
@@ -118,14 +143,17 @@ test("names the channel on a guest who only booked through it (VAY-2577)", async
   await assertHealthy();
 });
 
-test("keeps the plain wording on a guest who also booked directly (VAY-2577)", async ({
-  page,
-}, testInfo) => {
-  const assertHealthy = watchPageHealth(page, testInfo);
-  await mockGuests(page, { email: null, fields: noEmail, stays: [airbnbStay, stay()] });
-  await page.goto(`/guests/${TIMO}`);
-  const data = page.getByRole("region", { name: "Guest data" });
-  await expect(data.getByText("Not provided", { exact: true })).toHaveCount(5);
-  await expect(data.getByText(/^Not provided by/)).toHaveCount(0);
-  await assertHealthy();
-});
+for (const [who, stays] of [
+  ["also booked directly", [airbnbStay, stay()]],
+  // A channel sends the booker's contact only; staff entered this guest's.
+  ["only came along on a channel booking", [{ ...airbnbStay, role: "additional_guest" }]],
+] as const)
+  test(`keeps the plain wording on a guest who ${who} (VAY-2577)`, async ({ page }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockGuests(page, { email: null, fields: noEmail, stays });
+    await page.goto(`/guests/${TIMO}`);
+    const data = page.getByRole("region", { name: "Guest data" });
+    await expect(data.getByText("Not provided", { exact: true })).toHaveCount(5);
+    await expect(data.getByText(/^Not provided by/)).toHaveCount(0);
+    await assertHealthy();
+  });
