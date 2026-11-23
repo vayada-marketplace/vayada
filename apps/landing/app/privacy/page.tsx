@@ -582,19 +582,21 @@ export default function PrivacyPage() {
                   <li>
                     <strong>Technical data:</strong> our servers log each request, including your IP
                     address, to keep the booking site secure and working. These logs are kept for 30
-                    days. When you look up a booking, we also count the attempts from your IP
-                    address for one minute, in memory only, to stop abuse; this count is not stored
-                    (Article 6(1) lit. f GDPR).
+                    days. When you look up a booking, or the booking site counts a page view or
+                    sends an analytics event, we also count these requests from your IP address for
+                    one minute, in memory only, to stop abuse; this count is not stored (Article
+                    6(1) lit. f GDPR).
                   </li>
                   <li>
                     <strong>Page views: </strong>each time you open the hotel&apos;s page on the
                     booking site, we count one page view for the hotel. A page view holds only the
-                    hotel, the time and a random number made for that one view. Nothing is read from
-                    or saved on your device for it, and we keep no IP address, browser details or
-                    identifier with it, so a page view can&apos;t be linked to another page view or
-                    to you. Your browser&apos;s user agent is checked only to leave out automated
-                    visits and is not kept. The hotel sees how many people open its booking site. We
-                    keep page views for 13 months (Article 6(1) lit. f GDPR).
+                    hotel, the quarter hour in which it happened and a random number our server
+                    makes for that one view. Nothing is read from or saved on your device for it,
+                    and we keep no IP address, browser details or identifier with it, so a page view
+                    can&apos;t be linked to another page view or to you. Your browser&apos;s user
+                    agent is checked only to leave out automated visits and is not kept. The hotel
+                    sees how many people open its booking site. We keep page views for 13 months
+                    (Article 6(1) lit. f GDPR).
                   </li>
                   <li>
                     <strong>Optional analytics (only if you allow it): </strong>which pages and
