@@ -300,6 +300,8 @@ export type ApiConfig = {
   /** VAY-2504: one email a month when vayada's total AI spend passes the threshold; unset sends none. */
   aiSpendAlertEmail?: string;
   aiSpendAlertThresholdMicroUsd: number;
+  /** VAY-2518: mounts the in-app assistant's API. Off unless AI_ASSISTANT_ENABLED=true. */
+  aiAssistantEnabled: boolean;
   providerWebhooks: ProviderWebhookConfig;
   airbnbImport?: ReturnType<typeof loadAirbnbImportConfig>;
   airbnbAlterations?: { propertyIds: readonly string[] };
@@ -1657,6 +1659,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       Boolean(bookingEmailDelivery),
     ),
     aiSpendAlertThresholdMicroUsd: readAiSpendAlertThreshold(env),
+    aiAssistantEnabled: readBooleanEnv(env, "AI_ASSISTANT_ENABLED"),
     providerWebhooks: prospectiveConfig.providerWebhooks,
     channexManagement,
     airbnbImport: loadAirbnbImportConfig(env),

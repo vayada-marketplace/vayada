@@ -63,13 +63,14 @@ describe("AI route classification (VAY-2507)", () => {
     // Raise these floors when routes are added to the never list; lowering them is a decision.
     expect(Object.keys(NEVER_ROUTES).length).toBeGreaterThanOrEqual(52);
     expect(NEVER_RULES.length).toBeGreaterThanOrEqual(5);
-    expect(ROUTE_MANIFEST.filter((route) => neverArea(route)).length).toBeGreaterThanOrEqual(123);
+    expect(ROUTE_MANIFEST.filter((route) => neverArea(route)).length).toBeGreaterThanOrEqual(127);
   });
 
   // Flamur's never list (2026-11-20): one real route per area, so a renamed or reclassified route
   // in an area fails here.
   const NEVER: Record<NeverArea, string[]> = {
-    ai_connections: ["GET /api/ai/activity"],
+    // VAY-2518: the in-app assistant itself; an AI never runs it.
+    ai_connections: ["GET /api/ai/activity", "POST /api/ai/assistant/turns"],
     bank_accounts_and_payouts: [
       "PUT /api/finance/properties/:propertyId/payout-destination",
       "GET /api/finance/properties/:propertyId/payout-destination",
