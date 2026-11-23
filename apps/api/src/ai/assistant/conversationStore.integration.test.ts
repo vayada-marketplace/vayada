@@ -245,9 +245,12 @@ describe.skipIf(!url)("assistant conversation store on PostgreSQL (VAY-2518)", (
         }),
       ).toEqual({ status: "not_found" });
       expect(await store.list(stranger, CONTRACT.sha256, { limit: 100 })).toEqual([]);
-      expect(await store.exists(stranger, conversationId)).toBe(false);
+      // exists() ignores the app (VAY-2524: an AI change's operation doesn't store it).
+      expect(await store.exists(stranger, conversationId)).toBe(stranger.app !== owner.app);
     }
     expect(await store.exists(owner, conversationId)).toBe(true);
+    const person = { organizationId: org, propertyId: property, userId: user };
+    expect(await store.exists(person, conversationId)).toBe(true);
     expect(await read("not-a-uuid")).toBeUndefined();
     expect(await store.exists(owner, "not-a-uuid")).toBe(false);
     expect(await store.exists(owner, randomUUID())).toBe(false);
