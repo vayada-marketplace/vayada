@@ -96,10 +96,13 @@ it("shows checkout amounts exactly in the guest's currency, with its cents (VAY-
   act(() => currency().setSelectedCurrency("JPY"));
   // The yen has no cents.
   expect(currency().displayExact(10.25, "EUR")).toBe("JP¥1,640");
-  // As charged, with as many decimals as pricing keeps for the currency.
-  expect(currency().chargedPrice(52.425, "KWD")).toBe("KWD 52.425");
-  expect(currency().chargedPrice(20000.5, "HUF")).toBe("HUF 20,000.50");
-  expect(currency().chargedPrice(950000, "IDR")).toBe("IDR 950,000");
+  // As charged, with as many decimals as pricing keeps for the currency (Intl puts a no-break
+  // space after a currency code).
+  const charged = (amount: number, code: string) =>
+    currency().chargedPrice(amount, code).replace(/\s/g, " ");
+  expect(charged(52.425, "KWD")).toBe("KWD 52.425");
+  expect(charged(20000.5, "HUF")).toBe("HUF 20,000.50");
+  expect(charged(950000, "IDR")).toBe("IDR 950,000");
   unmount();
 });
 
