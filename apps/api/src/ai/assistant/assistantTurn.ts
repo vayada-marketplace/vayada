@@ -282,9 +282,9 @@ export async function runAssistantTurn(
         const key = `${call.toolName} ${canonicalJson(call.input ?? null)}`;
         const seen = (seenCalls.get(key) ?? 0) + 1;
         seenCalls.set(key, seen);
-        const outcome = waitsForAnswer
-          ? failure("not_run", "A change is waiting for the user's answer: ask again after it.")
-          : await runTool(call, seen);
+        // Every call of the step runs: a change tool only asks (vayada's card waits for the
+        // person's Yes), so "block 12 and 14" asks both. The turn ends after the step.
+        const outcome = await runTool(call, seen);
         if (outcome.ok && outcome.waitsForAnswer) waitsForAnswer = true;
         toolMessages.push({ role: "tool", content: [resultPart(call, outcome)] });
       }

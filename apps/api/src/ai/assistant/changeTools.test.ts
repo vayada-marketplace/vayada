@@ -61,7 +61,7 @@ describe("in-app change tools (VAY-2518, VAY-2524)", () => {
 
     expect(tool!.asksFirst).toBe(true);
     expect(tool!.definition.name).toBe(roomBlockCreate.name);
-    expect(tool!.definition.description).toContain("only their Yes makes the change");
+    expect(tool!.definition.description).toBe(roomBlockCreate.description);
     expect(tool!.definition.inputSchema).toMatchObject({ type: "object" });
 
     const input = { propertyId: WORLD.P1, reason: "Shower repair" };
@@ -79,9 +79,9 @@ describe("in-app change tools (VAY-2518, VAY-2524)", () => {
     expect(outcome).toEqual({ ok: true, data: PENDING, waitsForAnswer: true });
   });
 
-  it("doesn't wait for an answer a retry finds already given", async () => {
+  it("doesn't wait for an answer already given: a change asked again that is being made", async () => {
     const context = await worldContext(WORLD.OWNER, WORLD.ORG_A, BLOCK_RIGHTS);
-    const done = { ...PENDING, status: "done", created: false };
+    const done = { ...PENDING, status: "running", created: false };
     const [tool] = changeTools({
       context,
       contextFor: async () => context,

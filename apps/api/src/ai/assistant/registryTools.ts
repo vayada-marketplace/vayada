@@ -16,6 +16,7 @@ import { listActionsFor, toolDefinition } from "../actions/registry.js";
 import { runRouteAction } from "../actions/runRouteAction.js";
 import type { AssistantToolsFor } from "./assistantRuntime.js";
 import type { AssistantTool, ToolOutcome } from "./assistantTurn.js";
+import type { ChangeAction } from "../actions/defineChangeAction.js";
 import { changeTools, type AssistantChangeProposer } from "./changeTools.js";
 
 /**
@@ -49,6 +50,14 @@ export function registryTools(
       return Promise.race([result, abandoned(call.signal)]);
     },
   }));
+}
+
+/** `providerIdentity.impersonated` (VAY-2524 follow-up, #4225); absent before it lands. */
+export function isImpersonated(session: RequestContext): boolean {
+  const identity = session.actor.providerIdentity as
+    | (typeof session.actor.providerIdentity & { impersonated?: true })
+    | undefined;
+  return identity?.impersonated === true;
 }
 
 function abandoned(signal: AbortSignal): Promise<ToolOutcome> {
@@ -85,6 +94,8 @@ export function delegatedAssistantTools(
      * become tools that ask for a change. Without it the assistant only reads.
      */
     propose?: AssistantChangeProposer;
+    /** For tests: the change actions to offer from (the registry's by default). */
+    changeActions?: readonly ChangeAction[];
   },
 ): AssistantToolsFor {
   return async ({ session, propertyId, conversationId }) => {
@@ -109,10 +120,18 @@ export function delegatedAssistantTools(
     if (!delegatedPropertyIds(context).includes(propertyId)) return undefined;
     const model = options.model();
     const reads = registryTools(app, { context, contextFor: delegate, log: options.log, model });
-    if (!options.propose) return reads;
+    // Staff signed in as the person (WorkOS impersonation, flagged by VAY-2524's follow-up) only
+    // read: a change they asked for would wait in the person's chat as if the person had asked.
+    if (!options.propose || isImpersonated(session)) return reads;
     return [
       ...reads,
-      ...changeTools({ context, contextFor: delegate, propose: options.propose, model }),
+      ...changeTools({
+        context,
+        contextFor: delegate,
+        propose: options.propose,
+        model,
+        ...(options.changeActions ? { actions: options.changeActions } : {}),
+      }),
     ];
   };
 }

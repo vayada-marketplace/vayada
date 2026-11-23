@@ -41,14 +41,6 @@ export type AssistantChangeProposer = (
   request: InAppChangeRequest,
 ) => Promise<InAppChangeResult>;
 
-const PROPOSAL = z.object({
-  ok: z.literal(true),
-  pendingActionId: z.string(),
-  status: z.string(),
-  expiresAt: z.string().nullable(),
-  created: z.boolean(),
-});
-
 /** The change actions to offer this user in the app: on the in-app surface, with every right the route checks. */
 export function inAppChangeActions(
   context: RequestContext,
@@ -78,12 +70,14 @@ export function changeTools(options: {
     asksFirst: true,
     definition: {
       name: action.name,
-      description: `${action.description} This only asks: vayada shows the person a Yes/No card, and only their Yes makes the change.`,
+      // The action's own words, as MCP lists it ("The person confirms it in vayada before it runs").
+      description: action.description,
       inputSchema: z.toJSONSchema(action.input, { io: "input", unrepresentable: "any" }) as Record<
         string,
         unknown
       >,
-      outputSchema: z.toJSONSchema(PROPOSAL, { io: "output" }) as Record<string, unknown>,
+      // Not sent to the model (only the description and input are); the proposer's result.
+      outputSchema: { type: "object" },
     },
     run: async (input, call) => {
       const result = await options.propose(await options.contextFor(call.toolCallId), {

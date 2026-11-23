@@ -303,7 +303,7 @@ describe("assistant turn (VAY-2518)", () => {
     expect(costly.end).toMatchObject({ status: "stopped", reason: "token_limit" });
   });
 
-  it("ends the turn when a change waits for the user's Yes, and asks the model nothing more", async () => {
+  it("asks every change of the step, then ends the turn to wait for the user's Yes", async () => {
     const memory = memoryConversationStore();
     const ask: AssistantTool = {
       definition: {
@@ -312,11 +312,14 @@ describe("assistant turn (VAY-2518)", () => {
         inputSchema: {},
         outputSchema: {},
       },
-      run: async () => ({
+      run: async (input) => ({
         ok: true,
         data: {
-          status: "waiting_for_answer",
-          pendingActionId: "33333333-3333-4333-8333-333333333333",
+          status: "pending",
+          pendingActionId:
+            (input as { roomId: string }).roomId === "r1"
+              ? "33333333-3333-4333-8333-333333333333"
+              : "44444444-4444-4444-8444-444444444444",
         },
         waitsForAnswer: true,
       }),
@@ -339,21 +342,15 @@ describe("assistant turn (VAY-2518)", () => {
     });
     expect(end).toEqual({ type: "end", status: "waiting_for_answer", reason: null });
     expect(model.inputs).toHaveLength(1);
-    // One change waits for the user; the second one in the same step is not even asked.
+    // Both changes are asked (two cards); the model is asked nothing more.
     expect(resultsOf(memory.messages).map((part) => part.output)).toEqual([
       {
         type: "json",
-        value: {
-          status: "waiting_for_answer",
-          pendingActionId: "33333333-3333-4333-8333-333333333333",
-        },
+        value: { status: "pending", pendingActionId: "33333333-3333-4333-8333-333333333333" },
       },
       {
-        type: "error-json",
-        value: {
-          code: "not_run",
-          message: "A change is waiting for the user's answer: ask again after it.",
-        },
+        type: "json",
+        value: { status: "pending", pendingActionId: "44444444-4444-4444-8444-444444444444" },
       },
     ]);
   });
