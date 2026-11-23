@@ -239,7 +239,9 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
     },
   );
 
-  it("refuses a code used up since the quote as a conflict and writes nothing (VAY-2566)", async () => {
+  // Real acceptance refuses a used-up code earlier, at revalidation (a conflict); this mocked
+  // revalidation lets it through, so the redemption's own guard must still write nothing.
+  it("never takes a code's use past its limit and writes nothing (VAY-2566)", async () => {
     const promo = promoCode();
     const fixture = await setupFixture(promo.change, undefined, false, promo.calculation);
     try {
@@ -249,7 +251,7 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
         new Date().toISOString(),
       );
       await expect(writePricingAcceptance(fixture.pool, fixture.input)).rejects.toMatchObject({
-        code: "conflict",
+        code: "unexpected",
       });
       await expect(snapshot(fixture.observer, fixture)).resolves.toEqual({
         bookings: 0,

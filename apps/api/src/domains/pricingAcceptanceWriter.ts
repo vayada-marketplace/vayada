@@ -58,8 +58,6 @@ const conflictMessages = new Set([
   "Pricing booking lifecycle is unavailable",
   "Pricing booking revenue is unavailable",
   "Pricing card payment is unavailable",
-  // VAY-2566: the code was used up (or changed) since the quote; a new quote says so.
-  "Quote promotion is unavailable",
 ]);
 
 export async function writePricingAcceptance(
@@ -189,7 +187,9 @@ export async function writePricingAcceptance(
       manualTerms,
     );
     // VAY-2566: a code's use counts with its booking, in this transaction, whichever way the
-    // guest pays (Flamur, 2026-11-23). A booking that lapses or is cancelled gives it back.
+    // guest pays (Flamur, 2026-11-23). A booking that lapses or is cancelled gives it back. A code
+    // used up or changed since the quote already failed revalidation above (a conflict), so a
+    // refusal here is a fault and stays an unexpected error.
     const code = quote.evidence.lines.find(
       (line) => line.kind === "discount" && line.selectionId === null && line.amountMinor !== "0",
     );

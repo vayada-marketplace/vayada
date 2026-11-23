@@ -1655,6 +1655,8 @@ describe("Booking Web public bootstrap parity", () => {
           lifecycleStatus = "canceled";
           return { rows: [booking()] };
         }
+        // The booking used a code, so the cancel gives its use back (VAY-2566).
+        if (text.includes("SELECT 1 FROM booking.promo_applications")) return { rows: [{}] };
         return { rows: [] };
       },
       async end() {},
