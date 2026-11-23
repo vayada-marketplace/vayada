@@ -518,6 +518,7 @@
   "bookings.detail.confirmPaypalAfterReceipt": "Confirm the PayPal payment after it reaches your account.",
   "bookings.detail.acceptCardRequest": "Accept the request to capture the authorized card and confirm the booking.",
   "bookings.detail.acceptAtPropertyRequest": "Accept the request to confirm the booking with payment due at the property.",
+  "bookings.detail.waitingForCardPayment": "Waiting for the guest's card payment. You can accept the request once the card is authorised.",
   "bookings.detail.acceptBankTransferRequest": "Accept the booking to send bank transfer instructions to the guest.",
   "bookings.detail.cancelsAllRooms": "Cancels all {count} {roomLabel} in this booking.",
   "bookings.detail.reasonRequired": "A reason is required.",

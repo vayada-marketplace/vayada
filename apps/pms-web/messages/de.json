@@ -516,6 +516,7 @@
   "bookings.detail.confirmPaypalAfterReceipt": "Bestätigen Sie die PayPal-Zahlung, sobald sie auf Ihrem Konto eingegangen ist.",
   "bookings.detail.acceptCardRequest": "Nehmen Sie die Anfrage an, um die autorisierte Kartenzahlung einzuziehen und die Buchung zu bestätigen.",
   "bookings.detail.acceptAtPropertyRequest": "Nehmen Sie die Anfrage an, um die Buchung mit Zahlung vor Ort zu bestätigen.",
+  "bookings.detail.waitingForCardPayment": "Wir warten auf die Kartenzahlung des Gastes. Sie können die Anfrage annehmen, sobald die Karte autorisiert ist.",
   "bookings.detail.acceptBankTransferRequest": "Nehmen Sie die Buchung an, um dem Gast die Überweisungsdaten zu senden.",
   "bookings.detail.cancelsAllRooms": "Storniert alle {count} {roomLabel} dieser Buchung.",
   "bookings.detail.reasonRequired": "Ein Grund ist erforderlich.",
