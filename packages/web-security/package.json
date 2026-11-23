@@ -1,0 +1,27 @@
+{
+  "name": "@vayada/web-security",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Browser-side protection shared by PMS and Booking Admin: the Content-Security-Policy, its violation reports, and plain-text rendering for untrusted text.",
+  "exports": {
+    "./csp": "./src/csp.ts",
+    "./plain-text": "./src/PlainText.tsx"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "next": "16.2.6",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "next": "16.2.6",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "^5",
+    "vitest": "^4.0.15"
+  }
+}

@@ -113,8 +113,7 @@
     "nonRefundableRate": "Non-Refundable Rate",
     "nonRefundableDesc": "Non-refundable",
     "off": "-15% OFF",
-    "perNightly": "{price} / per night",
-    "youPay": "You pay {price}",
+    "taxesIncluded": "incl. taxes & fees",
     "includes": "Includes:",
     "dailyBreakfast": "Daily breakfast for {count}",
     "welcomeDrink": "Welcome drink",
@@ -139,7 +138,7 @@
       "availabilityUnavailableTooltip": "Availability unavailable"
     },
     "choice": {
-      "freeCancellation": "Free cancellation",
+      "freeCancellation": "Flexible rate",
       "nonRefundable": "Non-refundable",
       "partialRefund": "Partial refund",
       "mealNonRefundable": "{meal}, non-refundable",
@@ -147,8 +146,8 @@
       "freeUntil": "Free cancellation until {date}, 23:59 (local time)",
       "noRefund": "No refund if you cancel or don't arrive",
       "partialRefundTerms": "Part of the price is refunded if you cancel. See our terms on the next step",
-      "windowPassed": "Free cancellation ends {days, plural, one {# day} other {# days}} before arrival. For these dates, no refund if you cancel or don't arrive",
-      "refundsPassed": "Refunds end {days, plural, one {# day} other {# days}} before arrival. For these dates, no refund if you cancel or don't arrive",
+      "windowPassed": "No free cancellation for these dates",
+      "refundsPassed": "No refund for these dates",
       "freeEnded": "Free cancellation has ended",
       "refundsEnded": "No refund any more",
       "meal": {
@@ -593,7 +592,7 @@
       "freeEnded": "Free cancellation ended on {date}.",
       "noRefund": "Refunds ended on {date}.",
       "nonRefundable": "Non-refundable.",
-      "lateBooking": "Non-refundable: booked less than {days} before arrival.",
+      "lateBooking": "No free cancellation: booked less than {days} before arrival.",
       "days": "{count, plural, one {# day} other {# days}}",
       "payFull": "If you cancel or don't arrive, you pay the full amount ({amount}).",
       "beforeAccept": "Free to withdraw until we answer.",
@@ -616,7 +615,8 @@
         "refundsUntil": "{rooms}: refunds until the end of {date}.",
         "freeEnded": "{rooms}: free cancellation has ended.",
         "noRefund": "{rooms}: no refund any more.",
-        "nonRefundable": "{rooms}: non-refundable."
+        "nonRefundable": "{rooms}: non-refundable.",
+        "lateBooking": "{rooms}: no free cancellation."
       }
     },
     "extras": {
@@ -937,6 +937,8 @@
     "agree": "I agree to the cancellation policy, guest rules and terms & conditions.",
     "agreeNonRefundable": "I understand this booking is non-refundable. If I cancel or don’t arrive, the full stay is charged.",
     "agreeSomeNonRefundable": "I understand some of these rooms are non-refundable. If I cancel or don’t arrive, their full price is charged.",
+    "agreeNoFreeCancellation": "I understand I can’t cancel this booking for free. If I cancel or don’t arrive, the full stay is charged.",
+    "agreeSomeNoFreeCancellation": "I understand some of these rooms can’t be cancelled for free. If I cancel or don’t arrive, their full price is charged.",
     "agreeNoTerms": "I agree to the cancellation policy and guest rules.",
     "agreeMissing": "Please tick the box to confirm your booking.",
     "hintDetails": "Fill in your details to book.",
@@ -953,6 +955,9 @@
         "refundsUntil": "Refunds until {date}",
         "freeEnded": "Free cancellation ended",
         "nonRefundable": "Non-refundable",
+        "lateBooking": "No free cancellation",
+        "lateBookingOnceAccepted": "No free cancellation once the hotel accepts",
+        "lateBookingOncePaid": "No free cancellation once paid",
         "noRefund": "No refund any more",
         "notRefundableOnceAccepted": "Not refundable once the hotel accepts",
         "notRefundableOncePaid": "Not refundable once paid"

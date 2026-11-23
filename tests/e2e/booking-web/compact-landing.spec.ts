@@ -74,22 +74,24 @@ test("keeps the rooms close to the search on a laptop", async ({ page }, testInf
   await assertHealthy();
 });
 
-test("keeps the sort on the title's line when the approximate-amounts note shows", async ({
+test("keeps the sort on the title's line, with no conversion note above the rooms (VAY-2588)", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockBookingApis(page, { displayDefaultCurrency: "USD" });
   await mockGroup(page, []);
   await page.goto(HOTEL);
-  const note = page.getByTestId("approximate-amounts-note");
-  await expect(note).toBeVisible();
-  const [title, select, below] = await Promise.all([
+  await expect(page.locator("nav").getByRole("button", { name: "USD", exact: true })).toBeVisible();
+  const [title, select] = await Promise.all([
     page.getByRole("heading", { name: "Available Accommodations" }).boundingBox(),
     page.getByRole("combobox", { name: "Sort by" }).boundingBox(),
-    note.boundingBox(),
   ]);
   expect(Math.abs(select!.y + select!.height / 2 - (title!.y + title!.height / 2))).toBeLessThan(3);
-  expect(below!.y).toBeGreaterThanOrEqual(select!.y + select!.height);
+  await expect(page.getByTestId("approximate-amounts-note")).toHaveCount(0);
+  // The rates' credit moved to the footer.
+  await expect(
+    page.locator("footer").getByRole("link", { name: "Rates By Exchange Rate API" }),
+  ).toBeVisible();
 });
 
 test("keeps a small Sort button on the heading's row on a phone (VAY-2494)", async ({

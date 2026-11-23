@@ -12,9 +12,9 @@ import type { PricingRoom } from "@/services/api/replacementOffers";
 import RoomCard from "./RoomCard";
 import RoomTabs, { RoomsHelp } from "./RoomsProgress";
 import AccommodationViews from "./AccommodationViews";
-import ApproximateAmountsNote from "./ApproximateAmountsNote";
 import RoomSortSheet from "./RoomSortSheet";
 import StickySearchBar from "./StickySearchBar";
+import ApproximateAmountsNote from "./ApproximateAmountsNote";
 
 // VAY-2449: the sort menu's options, as the hotel's Room Sorting lists them.
 const SORT_LABELS: Record<RoomSortKey, string> = {
@@ -43,6 +43,7 @@ export default function StayRooms({
   heading: headingText,
   intro,
   searchBar = false,
+  conversionNote = false,
 }: {
   model: StayRoomsModel;
   onEditDates: () => void;
@@ -53,6 +54,10 @@ export default function StayRooms({
   intro?: ReactNode;
   /** The phone's compact search bar (StickySearchBar), on the hotel page only. */
   searchBar?: boolean;
+  /** The "≈" note with the rates' credit (VAY-2390), for the agency stay page, whose choice bar
+   * still shows "≈" amounts. The hotel page shows the guest's currency only and credits the
+   * rates in its footer (VAY-2588). */
+  conversionNote?: boolean;
 }) {
   const locale = useLocale();
   const t = useTranslations("home");
@@ -302,7 +307,7 @@ export default function StayRooms({
     </>
   );
 
-  // On the heading's row the "≈" note takes a line of its own below it, so the sort stays
+  // On the heading's row a note (the agency stay page's "≈" note) takes a line of its own below it, so the sort stays
   // centred on the title. Phones (VAY-2494): the heading and what the search found make one
   // column that takes the room left of the sort; a long translation wraps inside it.
   const heading = (
@@ -323,8 +328,9 @@ export default function StayRooms({
           </p>
         ) : null}
       </div>
-      {/* VAY-2390: the cards lead with "≈" amounts in the guest's display currency. */}
-      <ApproximateAmountsNote currency={hotel.currency} className="order-last basis-full" />
+      {conversionNote && (
+        <ApproximateAmountsNote currency={hotel.currency} className="order-last basis-full" />
+      )}
     </>
   );
 

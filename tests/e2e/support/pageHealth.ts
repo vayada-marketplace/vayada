@@ -6,6 +6,9 @@ const ignoredConsoleErrorPatterns = [
   /favicon.*net::ERR_ABORTED/i,
   /webpack-hmr/i,
   /WebSocket connection .* failed/i,
+  // VAY-2516: what the report-only CSP would block is only logged. content-security-policy.spec.ts
+  // checks the main pages for it; the mocks' made-up image hosts are not on the policy.
+  /^\[Report Only\]/,
 ];
 
 /** The PMS mocks answer their test property's (PMS_WEB_PROPERTY_ID in pmsWebMocks.ts) pricing-v2 read with 404

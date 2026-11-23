@@ -133,12 +133,12 @@ const designTerms = {
 describe("option names and summaries", () => {
   it("names options from meal and cancellation, falls back to the meal plan, and numbers repeats", () => {
     expect(optionNames(design, designTerms, english)).toEqual({
-      flexible: "Free cancellation",
+      flexible: "Flexible rate",
       nonrefundable: "Non-refundable",
       breakfast: "Breakfast included",
     });
     expect(optionNames(design, { flexible: flexibleTerms() }, english)).toEqual({
-      flexible: "Free cancellation",
+      flexible: "Flexible rate",
       nonrefundable: "Option 2 · room only",
       breakfast: "Option 3 · breakfast",
     });
@@ -149,8 +149,8 @@ describe("option names and summaries", () => {
         english,
       ),
     ).toEqual({
-      flexible: "Free cancellation",
-      nonrefundable: "Free cancellation 2",
+      flexible: "Flexible rate",
+      nonrefundable: "Flexible rate 2",
       breakfast: "Breakfast included, non-refundable",
     });
     // The booking page's words (VAY-2188): a partial refund isn't called free cancellation.

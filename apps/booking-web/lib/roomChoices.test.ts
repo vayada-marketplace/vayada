@@ -51,7 +51,7 @@ describe("room choices", () => {
         offer("room_only"),
       ]),
     ).toEqual([
-      "Free cancellation | Free cancellation until 2026-11-03, 23:59 (local time)",
+      "Flexible rate | Free cancellation until 2026-11-03, 23:59 (local time)",
       "Non-refundable | No refund if you cancel or don't arrive",
       "Breakfast included | Breakfast every morning · Free cancellation until 2026-11-03, 23:59 (local time)",
       "Breakfast included, non-refundable | Breakfast every morning · No refund if you cancel or don't arrive",
@@ -79,46 +79,47 @@ describe("room choices", () => {
         offer("room_only", free(7)),
         offer("room_only", free(1)),
       ]).map((line) => line.split(" | ")[0]),
-    ).toEqual(["Free cancellation", "Free cancellation 2", "Free cancellation 3"]);
+    ).toEqual(["Flexible rate", "Flexible rate 2", "Flexible rate 3"]);
   });
 
-  it("names free cancellation non-refundable once its last day has passed in the hotel's time zone (VAY-2392)", () => {
+  it("keeps a rate's own name once its free cancellation has passed, and says so (VAY-2587)", () => {
     const keys = choiceKeys([offer("breakfast", free(3))])[0]!;
-    // The last free day itself still counts, as on the old booking page.
+    // The last free day itself still counts, as on the old booking page (VAY-2392).
     expect(choiceText(keys, { ...stay, checkIn: "2026-10-17" }, t, now)).toMatchObject({
       name: "Breakfast included",
       refundable: true,
       cancellationPassed: false,
     });
-    const passed =
-      "Free cancellation ends 3 days before arrival. For these dates, no refund if you cancel or don't arrive";
+    const passed = "No free cancellation for these dates";
     expect(choiceText(keys, { ...stay, checkIn: "2026-10-16" }, t, now)).toEqual({
-      name: "Breakfast included, non-refundable",
+      name: "Breakfast included",
       terms: `Breakfast every morning · ${passed}`,
       meal: "Breakfast included",
       cancellationTerms: passed,
-      refundable: false,
+      refundable: true,
       cancellationPassed: true,
     });
-    // Never the meal as the name: a room-only rate reads "Non-refundable", whatever the language.
+    // A room-only Flexible rate stays "Flexible rate", whatever the language: never
+    // "Non-refundable", which only the hotel's Non-refundable rate is called.
     const roomOnly = (days: number) => choiceKeys([offer("room_only", free(days))])[0]!;
-    expect(choiceText(roomOnly(3), { ...stay, checkIn: "2026-10-16" }, t, now)).toMatchObject({
-      name: "Non-refundable",
+    expect(choiceText(roomOnly(14), { ...stay, checkIn: "2026-10-16" }, t, now)).toMatchObject({
+      name: "Flexible rate",
       terms: passed,
+      refundable: true,
+      cancellationPassed: true,
     });
-    expect(choiceText(roomOnly(1), { ...stay, checkIn: "2026-10-14" }, t, now).terms).toBe(
-      "Free cancellation ends 1 day before arrival. For these dates, no refund if you cancel or don't arrive",
-    );
-    for (const [locale, messages] of Object.entries({ de, es, fr, id })) {
+    expect(choiceText(roomOnly(1), { ...stay, checkIn: "2026-10-14" }, t, now).terms).toBe(passed);
+    for (const [locale, messages] of Object.entries({ de, en, es, fr, id })) {
       const tl = translator(locale, messages);
       const text = choiceText(roomOnly(3), { ...stay, checkIn: "2026-10-16" }, tl, now);
-      expect(text.name, locale).toBe(tl("choice.nonRefundable"));
-      expect(text.terms, locale).toMatch(/3/);
+      expect(text.name, locale).toBe(tl("choice.freeCancellation"));
+      expect(text.name, locale).not.toBe(tl("choice.nonRefundable"));
+      expect(text.terms, locale).toBe(tl("choice.windowPassed"));
       expect(text.terms, locale).not.toMatch(/[{}#]/);
     }
   });
 
-  it("numbers a passed free cancellation after the room's own non-refundable choice (VAY-2392)", () => {
+  it("names a passed Flexible rate as its own, never as a second Non-refundable (VAY-2587)", () => {
     const inside = { ...stay, checkIn: "2026-10-16" };
     const names = (offers: PricingOffer[], forStay?: typeof stay) =>
       choiceKeys(offers, forStay, now).map(
@@ -126,20 +127,21 @@ describe("room choices", () => {
       );
     expect(
       names([offer("room_only", free(3)), offer("room_only", { kind: "non_refundable" })], inside),
-    ).toEqual(["Non-refundable 2", "Non-refundable"]);
-    // A free cancellation that is still open keeps the plain name once the other has passed.
+    ).toEqual(["Flexible rate", "Non-refundable"]);
+    // The room card hides a passed rate next to an open one of the same meal: the open one, the
+    // rate guests see, keeps the plain name (VAY-2392).
     expect(names([offer("room_only", free(7)), offer("room_only", free(1))], inside)).toEqual([
-      "Non-refundable",
-      "Free cancellation",
+      "Flexible rate 2",
+      "Flexible rate",
     ]);
-    // Without the stay, the names are numbered as before.
+    // Without the stay, the names are numbered in order.
     expect(names([offer("room_only", free(7)), offer("room_only", free(1))])).toEqual([
-      "Free cancellation",
-      "Free cancellation 2",
+      "Flexible rate",
+      "Flexible rate 2",
     ]);
   });
 
-  it("names a partial refund non-refundable once its last refund day has passed (VAY-2406)", () => {
+  it("keeps a partial refund's name once its last refund day has passed, and says so (VAY-2587)", () => {
     const partial = (days?: number) => ({
       kind: "partial_refund" as const,
       ...(days !== undefined && { days }),
@@ -151,25 +153,23 @@ describe("room choices", () => {
       refundable: true,
       cancellationPassed: false,
     });
-    const passed =
-      "Refunds end 7 days before arrival. For these dates, no refund if you cancel or don't arrive";
+    const passed = "No refund for these dates";
     expect(choiceText(keys, { ...stay, checkIn: "2026-10-20" }, t, now)).toEqual({
-      name: "Half board, non-refundable",
+      name: "Half board, partial refund",
       terms: `Breakfast and dinner every day · ${passed}`,
       meal: "Half board",
       cancellationTerms: passed,
-      refundable: false,
+      refundable: true,
       cancellationPassed: true,
     });
-    // Numbered after the room's own non-refundable choice, as a passed free cancellation is.
+    // Next to the hotel's own Non-refundable rate, each keeps its name.
     const inside = { ...stay, checkIn: "2026-10-20" };
     expect(
-      choiceKeys(
-        [offer("room_only", partial(7)), offer("room_only", { kind: "non_refundable" })],
-        inside,
-        now,
-      ).map((k) => choiceText(k, inside, t, now).name),
-    ).toEqual(["Non-refundable 2", "Non-refundable"]);
+      choiceKeys([
+        offer("room_only", partial(7)),
+        offer("room_only", { kind: "non_refundable" }),
+      ]).map((k) => choiceText(k, inside, t, now).name),
+    ).toEqual(["Partial refund", "Non-refundable"]);
     // An older API without the day: still a partial refund.
     const older = choiceKeys([offer("half_board", partial())])[0]!;
     expect(choiceText(older, inside, t, now)).toMatchObject({
@@ -180,11 +180,11 @@ describe("room choices", () => {
     for (const [locale, messages] of Object.entries({ de, en, es, fr, id })) {
       const tl = translator(locale, messages);
       const text = choiceText(roomOnly, inside, tl, now);
-      expect(text.name, locale).toBe(tl("choice.nonRefundable"));
-      expect(text.terms, locale).toMatch(/7/);
+      expect(text.name, locale).toBe(tl("choice.partialRefund"));
+      expect(text.terms, locale).toBe(tl("choice.refundsPassed"));
       expect(text.terms, locale).not.toMatch(/[{}#]/);
-      // Refunds end, not free cancellation: the rate never had free cancellation.
-      expect(text.terms, locale).not.toBe(tl("choice.windowPassed", { days: 7 }));
+      // No refund, not "no free cancellation": the rate never had free cancellation.
+      expect(text.terms, locale).not.toBe(tl("choice.windowPassed"));
     }
   });
 
@@ -202,7 +202,7 @@ describe("room choices", () => {
   it("names a choice before the stay's dates are known", () => {
     const keys = choiceKeys([offer("room_only", free(3))])[0]!;
     expect(choiceText(keys, { ...stay, checkIn: "" }, t, now)).toEqual({
-      name: "Free cancellation",
+      name: "Flexible rate",
       terms: "",
       meal: null,
       cancellationTerms: null,

@@ -113,8 +113,7 @@
     "nonRefundableRate": "Tarif Tidak Dapat Dikembalikan",
     "nonRefundableDesc": "Tidak dapat dikembalikan",
     "off": "-15% DISKON",
-    "perNightly": "{price} / per malam",
-    "youPay": "Anda membayar {price}",
+    "taxesIncluded": "termasuk pajak & biaya",
     "includes": "Termasuk:",
     "dailyBreakfast": "Sarapan harian untuk {count}",
     "welcomeDrink": "Minuman selamat datang",
@@ -139,7 +138,7 @@
       "availabilityUnavailableTooltip": "Ketersediaan tidak dapat dimuat"
     },
     "choice": {
-      "freeCancellation": "Pembatalan gratis",
+      "freeCancellation": "Tarif fleksibel",
       "nonRefundable": "Tidak dapat dikembalikan",
       "partialRefund": "Pengembalian sebagian",
       "mealNonRefundable": "{meal}, tidak dapat dikembalikan",
@@ -147,8 +146,8 @@
       "freeUntil": "Pembatalan gratis hingga {date}, 23.59 (waktu setempat)",
       "noRefund": "Tidak ada pengembalian dana jika Anda membatalkan atau tidak datang",
       "partialRefundTerms": "Jika Anda membatalkan, kami mengembalikan sebagian harga. Lihat ketentuan kami di langkah berikutnya",
-      "windowPassed": "Pembatalan gratis berakhir {days} hari sebelum kedatangan. Untuk tanggal ini, tidak ada pengembalian dana jika Anda membatalkan atau tidak datang",
-      "refundsPassed": "Pengembalian dana berakhir {days} hari sebelum kedatangan. Untuk tanggal ini, tidak ada pengembalian dana jika Anda membatalkan atau tidak datang",
+      "windowPassed": "Tidak ada pembatalan gratis untuk tanggal ini",
+      "refundsPassed": "Tidak ada pengembalian dana untuk tanggal ini",
       "freeEnded": "Pembatalan gratis sudah berakhir",
       "refundsEnded": "Tidak ada pengembalian dana lagi",
       "meal": {
@@ -592,7 +591,7 @@
       "freeEnded": "Pembatalan gratis berakhir pada {date}.",
       "noRefund": "Pengembalian dana berakhir pada {date}.",
       "nonRefundable": "Tidak dapat dikembalikan.",
-      "lateBooking": "Tidak dapat dikembalikan: dipesan kurang dari {days} sebelum kedatangan.",
+      "lateBooking": "Tidak ada pembatalan gratis: dipesan kurang dari {days} sebelum kedatangan.",
       "days": "{count} hari",
       "payFull": "Jika Anda membatalkan atau tidak datang, Anda membayar jumlah penuh ({amount}).",
       "beforeAccept": "Gratis ditarik sampai kami menjawab.",
@@ -615,7 +614,8 @@
         "refundsUntil": "{rooms}: pengembalian dana hingga akhir {date}.",
         "freeEnded": "{rooms}: pembatalan gratis telah berakhir.",
         "noRefund": "{rooms}: tidak ada pengembalian dana lagi.",
-        "nonRefundable": "{rooms}: tidak dapat dikembalikan."
+        "nonRefundable": "{rooms}: tidak dapat dikembalikan.",
+        "lateBooking": "{rooms}: tidak ada pembatalan gratis."
       }
     },
     "extras": {
@@ -936,6 +936,8 @@
     "agree": "Saya menyetujui kebijakan pembatalan, aturan tamu, serta syarat & ketentuan.",
     "agreeNonRefundable": "Saya memahami bahwa pemesanan ini tidak dapat dikembalikan dananya. Jika saya membatalkan atau tidak datang, seluruh masa menginap akan ditagih.",
     "agreeSomeNonRefundable": "Saya memahami bahwa beberapa kamar ini tidak dapat dikembalikan dananya. Jika saya membatalkan atau tidak datang, harga penuhnya akan ditagih.",
+    "agreeNoFreeCancellation": "Saya memahami bahwa saya tidak dapat membatalkan pemesanan ini secara gratis. Jika saya membatalkan atau tidak datang, seluruh masa menginap akan ditagih.",
+    "agreeSomeNoFreeCancellation": "Saya memahami bahwa beberapa kamar ini tidak dapat dibatalkan secara gratis. Jika saya membatalkan atau tidak datang, harga penuhnya akan ditagih.",
     "agreeNoTerms": "Saya menyetujui kebijakan pembatalan dan aturan tamu.",
     "agreeMissing": "Silakan centang kotak untuk mengonfirmasi pemesanan Anda.",
     "hintDetails": "Isi data Anda untuk memesan.",
@@ -952,6 +954,9 @@
         "refundsUntil": "Pengembalian dana hingga {date}",
         "freeEnded": "Pembatalan gratis berakhir",
         "nonRefundable": "Tidak dapat dikembalikan",
+        "lateBooking": "Tidak ada pembatalan gratis",
+        "lateBookingOnceAccepted": "Tidak ada pembatalan gratis setelah hotel menerima",
+        "lateBookingOncePaid": "Tidak ada pembatalan gratis setelah dibayar",
         "noRefund": "Tidak ada pengembalian dana lagi",
         "notRefundableOnceAccepted": "Tidak dapat dikembalikan setelah hotel menerima",
         "notRefundableOncePaid": "Tidak dapat dikembalikan setelah dibayar"

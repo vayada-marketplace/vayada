@@ -835,6 +835,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "guest_policy_revisions",
         "guest_profiles",
         "host_action_previews",
+        "host_notification_done",
         "host_notification_reads",
         "nightly_revenue_evidence",
         "nightly_revenue_room_scopes",

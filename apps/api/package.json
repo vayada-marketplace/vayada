@@ -24,6 +24,7 @@
     "identity:workos-user-resync:dist": "node dist/cli/workosUserResync.js",
     "partner:register-app": "tsx src/cli/registerPartnerApp.ts",
     "partner:register-app:dist": "node dist/cli/registerPartnerApp.js",
+    "partner:secret-to-keychain": "tsx src/cli/copyPartnerSecretToKeychain.ts",
     "pretypecheck": "npm run build:backend-packages",
     "typecheck": "tsc --noEmit"
   },

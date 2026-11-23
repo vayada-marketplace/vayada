@@ -282,7 +282,7 @@ function HomePageContent() {
         />
       ) : null}
 
-      <BookingFooter />
+      <BookingFooter rateCredit />
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );

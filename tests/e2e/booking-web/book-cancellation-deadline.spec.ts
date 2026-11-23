@@ -51,9 +51,11 @@ for (const width of [1440, 390]) {
     const policy = page.getByRole("table", { name: "Cancellation policy" });
     await expect(policy).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath(`payment-${width}.png`), fullPage: true });
-    // The amber badge, the row that applies now and the note all say it can't be refunded.
+    // The amber badge, the row that applies now and the note all say it can't be refunded. The
+    // badge says so as the rate box does: no free cancellation, not "Non-refundable" (VAY-2587).
     const before = page.getByRole("region", { name: "Before you book" });
-    await expect(before.getByText("Non-refundable", { exact: true })).toBeVisible();
+    await expect(before.getByText("No free cancellation", { exact: true })).toBeVisible();
+    await expect(before).not.toContainText("Non-refundable");
     await expect(policy.getByRole("row", { name: /From now until check-in/ })).toHaveAttribute(
       "aria-current",
       "true",
@@ -69,10 +71,14 @@ for (const width of [1440, 390]) {
     );
     await expect(before).not.toContainText("Free cancellation ended");
     await expect(before).toContainText("All times are local hotel time (Switzerland).");
+    // VAY-2587: the rate is still the Flexible rate, and the summary says so.
+    await expect(page.getByRole("complementary", { name: "Your stay" })).toContainText(
+      /Flexible rate · 2 adults/i,
+    );
     // The consent says it first.
     await expect(
       page.getByRole("checkbox", {
-        name: /^I understand this booking is non-refundable\. If I cancel or don’t arrive, the full stay is charged\. I agree to the cancellation policy/,
+        name: /^I understand I can’t cancel this booking for free\. If I cancel or don’t arrive, the full stay is charged\. I agree to the cancellation policy/,
       }),
     ).toBeVisible();
   });
@@ -134,7 +140,14 @@ async function openDetails(
           {
             roomTypeId: "double",
             name: "Double",
-            offers: [{ publicOfferKey: offerKey, currency: "EUR", mealPlan: "room_only" }],
+            offers: [
+              {
+                publicOfferKey: offerKey,
+                currency: "EUR",
+                mealPlan: "room_only",
+                cancellation: { kind: "free_until_days_before_arrival", days: stay.freeDays },
+              },
+            ],
           },
         ],
       },
