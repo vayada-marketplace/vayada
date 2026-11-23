@@ -63,9 +63,10 @@ export function transcriptOf(view: ConversationView): TranscriptItem[] {
   const lineOf = new Map<string, Extract<TranscriptItem, { kind: "progress" }>>();
   const turns = new Map(view.turns.map((turn) => [turn.id, turn]));
   let currentTurn: string | undefined;
-  // A turn's change cards come after its text, as on the boards, whatever order it was stored in.
+  // A turn's change cards come after its text, as on the boards, whatever order it was stored in;
+  // each once per turn. A later turn that asks again for a change still waiting (it joins the
+  // same pending action) shows its card again there.
   let cards: Extract<TranscriptItem, { kind: "change" }>[] = [];
-  const seenCards = new Set<string>();
 
   const closeTurn = (turnId: string | undefined) => {
     items.push(...cards);
@@ -121,10 +122,12 @@ export function transcriptOf(view: ConversationView): TranscriptItem[] {
           // The card says what the change is; a "Looked something up" line would not.
           const at = line ? items.indexOf(line) : -1;
           if (at !== -1) items.splice(at, 1);
-          if (!seenCards.has(pendingActionId)) {
-            seenCards.add(pendingActionId);
-            cards.push({ kind: "change", key: `c-${pendingActionId}`, pendingActionId });
-          }
+          if (!cards.some((card) => card.pendingActionId === pendingActionId))
+            cards.push({
+              kind: "change",
+              key: `c-${row.turnId}-${pendingActionId}`,
+              pendingActionId,
+            });
         } else if (line) line.status = resultStatus(part["output"]);
       }
     }

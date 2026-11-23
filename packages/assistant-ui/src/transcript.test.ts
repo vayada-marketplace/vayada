@@ -201,7 +201,7 @@ describe("transcriptOf", () => {
       { kind: "question", key: "q-1", text: "Block room 12 from the 12th" },
       { kind: "progress", key: "t-a", tool: "calendar_days", status: "ok" },
       { kind: "answer", key: "a-2", text: "Room 12 is free, so I can block it.", at: AT },
-      { kind: "change", key: `c-${pendingActionId}`, pendingActionId },
+      { kind: "change", key: `c-t1-${pendingActionId}`, pendingActionId },
     ]);
   });
 
@@ -241,6 +241,55 @@ describe("transcriptOf", () => {
       ),
     );
     expect(items.map((item) => item.kind)).toEqual(["question", "answer", "change", "question"]);
+  });
+
+  it("shows a change asked again in a later turn there too, once per turn", () => {
+    const pendingActionId = "8f3c2a10-1b2c-4d5e-8f90-123456789abc";
+    const asked = (turnId: string, seq: number) => [
+      { turnId, message: { role: "user" as const, content: `Block room 12 (${seq})` } },
+      {
+        turnId,
+        message: {
+          role: "assistant" as const,
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: `${turnId}-a`,
+              toolName: "room_block_create",
+              input: {},
+            },
+            {
+              type: "tool-call",
+              toolCallId: `${turnId}-b`,
+              toolName: "room_block_create",
+              input: {},
+            },
+          ],
+        },
+      },
+      {
+        turnId,
+        message: {
+          role: "tool" as const,
+          content: [`${turnId}-a`, `${turnId}-b`].map((toolCallId) => ({
+            type: "tool-result",
+            toolCallId,
+            toolName: "room_block_create",
+            output: { type: "json", value: { pendingActionId } },
+          })),
+        },
+      },
+    ];
+    const items = transcriptOf(
+      view(
+        [{ status: "waiting_for_answer" }, { status: "waiting_for_answer" }],
+        [...asked("t1", 1), ...asked("t2", 2)],
+      ),
+    );
+    expect(items.filter((item) => item.kind === "change").map((item) => item.key)).toEqual([
+      `c-t1-${pendingActionId}`,
+      `c-t2-${pendingActionId}`,
+    ]);
   });
 
   it("makes no card of a result that only looks like one", () => {
