@@ -456,6 +456,9 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   // summary's last line names the charged amount once.
   const money = (minor: string, currency: string) =>
     displayExact(quoteMoneyAmount(minor, currency), currency);
+  // Cancellation fees are what the hotel charges, so they show in its currency (Flamur, 2026-11-23).
+  const chargedMoney = (minor: string, currency: string) =>
+    chargedPrice(quoteMoneyAmount(minor, currency), currency);
   const chargedFor = (price?: PublicBookingQuote) =>
     price && converts(price.currency)
       ? {
@@ -1235,7 +1238,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
               key={block.key}
               block={block}
               titled={sheetPolicies.length > 1}
-              formatMoney={(minor) => money(minor, quote.currency)}
+              formatMoney={(minor) => chargedMoney(minor, quote.currency)}
               compact
             />
           ))}
@@ -1604,7 +1607,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                     today={hotelDate}
                     hotelCountry={hotelCountry}
                     termsText={pagePayment.termsText}
-                    formatMoney={(minor) => money(minor, quote.currency)}
+                    formatMoney={(minor) => chargedMoney(minor, quote.currency)}
                   />
                 )
               }

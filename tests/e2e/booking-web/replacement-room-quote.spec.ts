@@ -345,9 +345,13 @@ test("shows checkout in the guest's currency with cents, and the charged amount 
     "The hotel charges in Euro: €315. The US$346.50 shown uses today’s exchange rate.",
   );
   await expect(page.getByText("You pay at the hotel when you arrive.")).toBeVisible();
-  const body = await page.locator("body").innerText();
-  expect(body.split("€315").length - 1).toBe(1);
-  expect(body).not.toContain("≈");
+  // The summary names the charged €315 once, in its last line.
+  expect((await summary.innerText()).split("€315").length - 1).toBe(1);
+  // The cancellation fees are what the hotel charges: in its currency (Flamur, 2026-11-23).
+  const policy = page.getByRole("table", { name: "Cancellation policy" });
+  await expect(policy).toContainText("Full amount (€315)");
+  await expect(policy).not.toContainText("US$");
+  expect(await page.locator("body").innerText()).not.toContain("≈");
   await expect(page.getByTestId("approximate-amounts-note")).toHaveCount(0);
   const credit = page.getByRole("link", { name: "Rates By Exchange Rate API" });
   await expect(credit).toHaveAttribute("href", "https://www.exchangerate-api.com");
