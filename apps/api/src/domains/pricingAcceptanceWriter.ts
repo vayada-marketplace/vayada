@@ -28,6 +28,7 @@ import {
 } from "./pricingManualPayment.js";
 import { pricingManualLeadTimeAllows } from "./pricingManualPaymentLead.js";
 import { pricingPaymentWindowAllows } from "./pricingPaymentWindows.js";
+import { redeemLockedCurrentQuotePromo } from "./currentQuotePromoRedemption.js";
 
 export class PricingAcceptanceError extends Error {
   constructor(
@@ -57,6 +58,8 @@ const conflictMessages = new Set([
   "Pricing booking lifecycle is unavailable",
   "Pricing booking revenue is unavailable",
   "Pricing card payment is unavailable",
+  // VAY-2566: the code was used up (or changed) since the quote; a new quote says so.
+  "Quote promotion is unavailable",
 ]);
 
 export async function writePricingAcceptance(
@@ -185,6 +188,21 @@ export async function writePricingAcceptance(
       bookingId,
       manualTerms,
     );
+    // VAY-2566: a code's use counts with its booking, in this transaction, whichever way the
+    // guest pays (Flamur, 2026-11-23). A booking that lapses or is cancelled gives it back.
+    const code = quote.evidence.lines.find(
+      (line) => line.kind === "discount" && line.selectionId === null && line.amountMinor !== "0",
+    );
+    if (code) {
+      const redeemed = await redeemLockedCurrentQuotePromo(
+        client,
+        input.slug,
+        prepared.current,
+        bookingId,
+      );
+      if (redeemed.kind !== "applied" || redeemed.discountMinor !== code.amountMinor)
+        throw new Error("Quote promotion is unavailable");
+    }
     if (manualTerms) {
       // Bank transfer and PayPal: the rooms stay held with the booking `pending_payment` until the
       // hotel confirms the payment; the guest gets the instructions and the hotel is told.

@@ -163,3 +163,32 @@ async function redeemQuotePromo(
     replayed: false,
   };
 }
+
+/** Gives a booking's applied code back: its application `reversed`, the code's use count one
+ * lower. In the caller's transaction, with the booking's own cancel, decline or lapse; a booking
+ * without an applied code changes nothing. */
+export async function reverseTargetPromoRedemption(
+  pool: { query(text: string, values?: readonly unknown[]): Promise<unknown> },
+  propertyId: string,
+  guestBookingId: string,
+  occurredAt: Date,
+): Promise<void> {
+  await pool.query(
+    `WITH reversed AS (
+       UPDATE booking.promo_applications
+          SET application_status = 'reversed',
+              metadata = metadata || jsonb_build_object('reversedAt', $3::text)
+        WHERE property_id = $1::uuid
+          AND guest_booking_id = $2::uuid
+          AND application_status = 'applied'
+      RETURNING promo_definition_id
+     )
+     UPDATE booking.promo_definitions promo
+        SET current_uses = GREATEST(promo.current_uses - 1, 0),
+            updated_at = $3::timestamptz
+       FROM reversed
+      WHERE promo.id = reversed.promo_definition_id
+        AND promo.property_id = $1::uuid`,
+    [propertyId, guestBookingId, occurredAt.toISOString()],
+  );
+}

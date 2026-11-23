@@ -11,15 +11,18 @@ import type { persistDirectNightlyRevenueProjection } from "./stripeBookingSettl
 type Projection = Parameters<typeof persistDirectNightlyRevenueProjection>[2];
 /** Pure conversion only. Charge evidence MUST come from current quote revalidation
  * on the caller's retained transaction. This does not authorize a booking write.
- * A room's own discount (last-minute, VAY-2566) comes off that room's nights in proportion to
- * their prices, largest remainder first, in whole currency steps (whole rupiah for IDR), so the
- * nights add up to what the guest pays for the room. A booking-wide (code) discount or an
- * included charge is never guessed into room/night amounts: such quotes are refused.
+ * Discounts come off the room nights (VAY-2566), in proportion to their prices, largest
+ * remainder first, in whole currency steps (whole rupiah for IDR): a room's own (last-minute)
+ * discount off that room's nights, then a code's discount off the nights of the rooms it applies
+ * to (`code.eligibleSelectionIds` from the quote's stored calculation). Its share for add-ons
+ * comes off those nights too (Flamur, 2026-11-23); what they can't take, the other rooms' nights
+ * do. An included charge is never guessed into room/night amounts: such quotes are refused.
  * The persistence adapter must verify booking identity, currency, lifecycle and
  * initial/replay state under lock before calling the shared direct ledger sink. */
 export function pricingRoomRevenueProjection(
   quoteValue: unknown,
   chargeValue: unknown,
+  codeValue?: unknown,
 ): Projection | null {
   const quote = parseStoredPricingQuote(quoteValue);
   if (!quote || !pricingObject(chargeValue)) return null;
@@ -39,7 +42,7 @@ export function pricingRoomRevenueProjection(
     quote.evidence.lines.some(
       (line) =>
         line.kind === "discount" &&
-        line.amountMinor !== "0" &&
+        line.selectionId !== null &&
         !quote.stay.rooms.some((room) => room.selectionId === line.selectionId),
     )
   )
@@ -69,8 +72,21 @@ export function pricingRoomRevenueProjection(
         .reduce((n, line) => n + BigInt(line.amountMinor), 0n)
   )
     return null;
-  const nights: Projection["nights"][number][] = [];
   const step = BigInt(pricingAmountStep(quote.stay.currency));
+  const share = (amount: bigint, weights: bigint[]) => {
+    const unit = [amount, ...weights].every((v) => v % step === 0n) ? step : 1n;
+    return splitByWeight(
+      amount / unit,
+      weights.map((weight) => weight / unit),
+    ).map((part) => part * unit);
+  };
+  const rows: {
+    selectionId: string;
+    roomTypeId: string;
+    position: number;
+    date: string;
+    amount: bigint;
+  }[] = [];
   for (const [index, selection] of quote.stay.rooms.entries()) {
     const room = quote.rooms.find((r) => r.selectionId === selection.selectionId);
     if (!room) return null;
@@ -79,26 +95,56 @@ export function pricingRoomRevenueProjection(
       .filter((line) => line.kind === "discount" && line.selectionId === selection.selectionId)
       .reduce((n, line) => n + BigInt(line.amountMinor), 0n);
     if (discount > prices.reduce((n, price) => n + price, 0n)) return null;
-    const split = [discount, ...prices].every((v) => v % step === 0n) ? step : 1n;
-    const shares = splitByWeight(
-      discount / split,
-      prices.map((price) => price / split),
-    );
-    for (const [nightIndex, night] of room.nights.entries()) {
-      const amount = prices[nightIndex] - shares[nightIndex] * split,
-        unit = 10n ** BigInt(scale);
-      // The ledger uses NUMERIC(19,4), independently of booking total precision.
-      if (amount * 10n ** BigInt(4 - scale) > 9999999999999999999n) return null;
-      nights.push({
-        stayDate: night.date,
-        grossRoomAmount:
-          scale === 0
-            ? amount.toString()
-            : `${amount / unit}.${(amount % unit).toString().padStart(scale, "0")}`,
+    const shares = share(discount, prices);
+    for (const [nightIndex, night] of room.nights.entries())
+      rows.push({
+        selectionId: selection.selectionId,
         roomTypeId: selection.roomTypeId,
-        roomPositions: [index + 1],
+        position: index + 1,
+        date: night.date,
+        amount: prices[nightIndex] - shares[nightIndex],
       });
+  }
+  let code = quote.evidence.lines
+    .filter((line) => line.kind === "discount" && line.selectionId === null)
+    .reduce((n, line) => n + BigInt(line.amountMinor), 0n);
+  if (code > 0n) {
+    const eligible = pricingObject(codeValue) ? codeValue.eligibleSelectionIds : null;
+    if (
+      !Array.isArray(eligible) ||
+      !eligible.length ||
+      !eligible.every((id) => quote.stay.rooms.some((room) => room.selectionId === id))
+    )
+      return null;
+    for (const group of [
+      rows.filter((row) => eligible.includes(row.selectionId)),
+      rows.filter((row) => !eligible.includes(row.selectionId)),
+    ]) {
+      const total = group.reduce((n, row) => n + row.amount, 0n);
+      const taken = code < total ? code : total;
+      share(
+        taken,
+        group.map((row) => row.amount),
+      ).forEach((part, i) => (group[i].amount -= part));
+      code -= taken;
     }
+    if (code > 0n) return null;
+  }
+  const nights: Projection["nights"][number][] = [];
+  for (const row of rows) {
+    const amount = row.amount,
+      unit = 10n ** BigInt(scale);
+    // The ledger uses NUMERIC(19,4), independently of booking total precision.
+    if (amount * 10n ** BigInt(4 - scale) > 9999999999999999999n) return null;
+    nights.push({
+      stayDate: row.date,
+      grossRoomAmount:
+        scale === 0
+          ? amount.toString()
+          : `${amount / unit}.${(amount % unit).toString().padStart(scale, "0")}`,
+      roomTypeId: row.roomTypeId,
+      roomPositions: [row.position],
+    });
   }
   if (!nights.length) return null;
   return {
