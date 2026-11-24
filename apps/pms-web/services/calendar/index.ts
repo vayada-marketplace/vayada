@@ -7,6 +7,7 @@ import {
 import { pmsManualBookingClient } from "../api/pmsManualBookingClient";
 import { BookingAddon } from "../bookings";
 import { orderRoomsByRoomType } from "../../lib/roomOrdering";
+import type { BookedNight } from "../../lib/bookings/nightlyPrices";
 
 // prettier-ignore
 type ManualAddonApi = { addOns: Array<{ addonItemId: string; name: string; description: string; price: string; currency: string; category: string; pricingModel: "per_stay" | "per_night" | "per_guest" | "per_guest_night"; maxGuests: number | null; maxQuantity: number; }> };
@@ -82,6 +83,11 @@ export interface CalendarBooking {
   assignmentId: string | null;
   /** The reservation's total as recorded (VAY-2411); null when the amount is unverified or missing. */
   bookingValue?: PmsOperationsMoney | null;
+  /** Nights of the whole reservation, which the booking value covers (a moved stay's bar shows fewer). */
+  stayNights?: number;
+  /** VAY-2576: each night's booked room price, all rooms added up, in the booking value's currency; null when
+   * any night of any room has none. */
+  bookedNights?: BookedNight[] | null;
 }
 
 export interface CalendarBlock {
@@ -221,6 +227,8 @@ type PmsOperationalReservation = {
     position: number;
     channel: string;
     stay?: { checkIn: string; checkOut: string };
+    /** The room's booked price for each night (VAY-2576); `applied` is null when none was recorded. */
+    nightly?: Array<{ serviceDate: string; applied: PmsOperationsMoney | null }>;
   }>;
   roomCount?: number;
 };
@@ -519,6 +527,12 @@ function calendarBookingsForReservation(
     Array.from({ length: line.roomCount }, () => line),
   );
   const [guestFirstName, guestLastName] = splitGuestName(reservation.primaryGuest.displayName);
+  const bookingValue =
+    reservation.pricing && reservation.pricing.amountStatus !== "unverified"
+      ? reservation.pricing.totalAmount
+      : null;
+  const stayNights = daysBetweenDateOnly(reservation.stay.checkIn, reservation.stay.checkOut);
+  const bookedNights = bookingValue ? bookedNightsOf(reservation, bookingValue.currency) : null;
   return assignments
     .map((assignment, index): CalendarBooking | null => {
       const stay = assignment?.stay ?? (numberOfRooms === 1 || awaiting ? reservation.stay : null);
@@ -548,16 +562,58 @@ function calendarBookingsForReservation(
         numberOfRooms,
         roomPosition: assignment ? Math.max(assignment.position - 1, 0) : index,
         assignmentId: assignment?.assignmentId ?? null,
-        bookingValue:
-          reservation.pricing && reservation.pricing.amountStatus !== "unverified"
-            ? reservation.pricing.totalAmount
-            : null,
+        bookingValue,
+        stayNights,
+        bookedNights,
       };
     })
     .filter(
       (booking): booking is CalendarBooking =>
         booking !== null && booking.checkIn < range.end && booking.checkOut > range.start,
     );
+}
+
+/** VAY-2576: the reservation's booked room price for each night, all its rooms added up; null unless every night
+ * of every room has one in `currency`. Rooms an OTA change removed sit above the room count and don't count. A room
+ * moved mid-stay has one stay per room, each with its own nights; prices are kept per room position and night. */
+function bookedNightsOf(
+  reservation: PmsOperationalReservation,
+  currency: string,
+): BookedNight[] | null {
+  const rooms = reservation.assignments.filter(
+    (assignment) => reservation.roomCount == null || assignment.position <= reservation.roomCount,
+  );
+  if (!rooms.length) return null;
+  const prices = new Map<string, number>();
+  for (const { position, nightly } of rooms)
+    for (const { serviceDate, applied } of nightly ?? []) {
+      const amount = Number(applied?.amountDecimal);
+      if (applied?.currency === currency && Number.isFinite(amount))
+        prices.set(`${position}:${serviceDate}`, amount);
+    }
+  const byDate = new Map<string, number>();
+  const counted = new Set<string>();
+  for (const room of rooms) {
+    const stay = room.stay ?? reservation.stay;
+    const nights = daysBetweenDateOnly(stay.checkIn, stay.checkOut);
+    if (!(nights > 0)) return null;
+    for (let night = 0; night < nights; night++) {
+      const date = addDaysDateOnly(stay.checkIn, night);
+      const key = `${room.position}:${date}`;
+      const amount = prices.get(key);
+      if (amount === undefined) return null;
+      if (counted.has(key)) continue;
+      counted.add(key);
+      byDate.set(date, (byDate.get(date) ?? 0) + amount);
+    }
+  }
+  return Array.from(byDate, ([date, amount]) => ({ date, amount })).sort((a, b) =>
+    a.date.localeCompare(b.date),
+  );
+}
+
+function daysBetweenDateOnly(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 }
 
 function splitGuestName(displayName: string): [string, string] {
