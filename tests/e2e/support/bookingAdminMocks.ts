@@ -730,6 +730,19 @@ export async function mockBookingAdminShellRoutes(
       },
     }),
   );
+  // Page view tracking (VAY-2594): counted, so no amber banner.
+  await page.route("**/api/booking/properties/*/dashboard/tracking**", (route) =>
+    route.fulfill({
+      json: {
+        tracking: {
+          propertyId: "property-1",
+          bookingPageBookingCount: 0,
+          pageViewCount: 0,
+          trackingMissing: false,
+        },
+      },
+    }),
+  );
   // Guest insights (VAY-2594): no guests yet.
   await page.route("**/api/booking/properties/*/dashboard/guests**", (route) =>
     route.fulfill({

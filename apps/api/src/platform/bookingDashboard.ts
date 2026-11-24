@@ -8,6 +8,7 @@ import type {
   BookingDashboardMetricsReadPort,
   BookingDate,
   BookingGuestInsightsReadModel,
+  BookingTrackingCheckReadModel,
   BookingDayBookingsReadModel,
   BookingMoney,
   BookingPageViewTimelineReadModel,
@@ -314,6 +315,20 @@ export function createTargetBookingDashboardMetricsReadPort(config: {
         previousTotal: previousBuckets.reduce((sum, bucket) => sum + bucket.count, 0),
       } satisfies BookingPageViewTimelineReadModel;
     },
+    async getTrackingCheck(input) {
+      const result = await pool.query<{ bookingPageBookingCount: string; pageViewCount: string }>(
+        trackingCheckSql(),
+        [input.propertyId, PAGE_VIEWS_COUNTED_SINCE],
+      );
+      const bookings = Number(result.rows[0]?.bookingPageBookingCount ?? 0);
+      const views = Number(result.rows[0]?.pageViewCount ?? 0);
+      return {
+        propertyId: input.propertyId,
+        bookingPageBookingCount: bookings,
+        pageViewCount: views,
+        trackingMissing: bookings >= TRACKING_MISSING_MIN_BOOKINGS && views === 0,
+      } satisfies BookingTrackingCheckReadModel;
+    },
     async getGuestInsights(input) {
       const result = await pool.query<{
         country: string | null;
@@ -613,6 +628,38 @@ function sparklineSql(): string {
    AND booking.booked_on <= bucket.bucket_end
   GROUP BY bucket.bucket_start, bucket.bucket_end
   ORDER BY bucket.bucket_start`;
+}
+
+/**
+ * Every page view counts (consented or not) since VAY-2592 went live; before, only consented
+ * visits did, so a week reaching back past it would look untracked.
+ */
+const PAGE_VIEWS_COUNTED_SINCE = "2026-11-23T07:44:00Z";
+/** Bookings a guest finished: drafts, expired and declined ones may have no page view. */
+const FINISHED_BOOKING_STATES =
+  "('pending_payment', 'confirmed', 'completed', 'canceled', 'no_show')";
+/** One lost view (a blocker, a bot match) shouldn't raise the banner for a week. */
+const TRACKING_MISSING_MIN_BOOKINGS = 2;
+
+// Page view tracking check (VAY-2594): the last 7 days' finished booking page bookings and page
+// views of guests, consented or not.
+function trackingCheckSql(): string {
+  return `${bookingScopedPropertyCte()}
+  SELECT
+    (
+      SELECT COUNT(*) FROM booking.guest_bookings booking
+      JOIN scoped_property scoped ON scoped.property_id = booking.property_id
+      WHERE booking.direct_booking_source = 'booking_engine'
+        AND booking.lifecycle_status IN ${FINISHED_BOOKING_STATES}
+        AND booking.created_at >= GREATEST(now() - INTERVAL '7 days', $2::timestamptz)
+    )::text AS "bookingPageBookingCount",
+    (
+      SELECT COUNT(*) FROM distribution.booking_web_events event
+      JOIN scoped_property scoped ON scoped.property_id = event.property_id
+      WHERE event.event_type IN ('page_view', 'page_visit')
+        AND event.traffic_class = 'human'
+        AND event.occurred_at >= now() - INTERVAL '7 days'
+    )::text AS "pageViewCount"`;
 }
 
 // Guest insights (VAY-2594): one row per booking of every channel made in the period, with its

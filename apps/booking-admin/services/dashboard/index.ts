@@ -411,6 +411,15 @@ export const dashboardService = {
     };
   },
 
+  /** Whether page views are being counted: bookings on the booking page this week, no views. */
+  getTrackingMissing: async (): Promise<boolean> => {
+    const basePath = requireDashboardBasePath();
+    const response = await apiClient.get<{ tracking: { trackingMissing: boolean } }>(
+      `${basePath}/tracking`,
+    );
+    return response.tracking.trackingMissing === true;
+  },
+
   getGuestInsights: async (range: TimeRange, timeZone: string): Promise<GuestInsights> => {
     const basePath = requireDashboardBasePath();
     const query = rangeQuery(range, timeZone);
