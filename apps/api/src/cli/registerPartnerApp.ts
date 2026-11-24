@@ -2,11 +2,12 @@
 import { CreateSecretCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import pg from "pg";
 
+import { parseWebhookSigningKey } from "../domains/partnerWebhooks.js";
 import {
   PartnerAppRegistrationRefusal,
   PartnerRegistrationIncomplete,
   parsePartnerAppRegistrationArgs,
-  refuseWebhookUntilSigning,
+  refuseWebhookWithoutSigningKey,
   registerPartnerAppIntoSecretStore,
 } from "../platform/partnerAppRegistration.js";
 
@@ -17,8 +18,10 @@ import {
 //     --contact-email … --secret-name partner-apps/prod/creator-links-test --apply
 // Without --apply it only prints what it would store. With --apply it saves the app and puts its client
 // id and secret into a new AWS Secrets Manager secret (--secret-name) in one go, and prints only the
-// client id: the secret never reaches output or logs. On the Mac that hands it to the partner,
-// `partner:secret-to-keychain` copies it into the Keychain and deletes the Secrets Manager secret.
+// client id: the secret never reaches output or logs. With --webhook-url it also holds the app's
+// webhook signing secret (VAY-2438), derived from PARTNER_WEBHOOK_SIGNING_KEY (the task has it). On
+// the Mac that hands them to the partner, `partner:secret-to-keychain` copies them into the Keychain
+// and deletes the Secrets Manager secret.
 // Vayada keeps only the secret's SHA-256. Runs as the API login (TARGET_DATABASE_URL).
 // Hand a secret over only when its client id has this task's "registered":true line.
 // Exit codes: 0 done, 64 refused, 1 failed.
@@ -35,7 +38,8 @@ async function main(): Promise<number> {
     return 0;
   }
   if (!secretName) throw new PartnerAppRegistrationRefusal("--apply needs --secret-name");
-  refuseWebhookUntilSigning(registration);
+  const signingKey = parseWebhookSigningKey(process.env["PARTNER_WEBHOOK_SIGNING_KEY"]);
+  refuseWebhookWithoutSigningKey(registration, signingKey);
   const databaseUrl = process.env["TARGET_DATABASE_URL"];
   if (!databaseUrl) throw new PartnerAppRegistrationRefusal("TARGET_DATABASE_URL is not set");
   const secrets = new SecretsManagerClient({});
@@ -51,8 +55,7 @@ async function main(): Promise<number> {
             new CreateSecretCommand({
               Name,
               SecretString,
-              Description:
-                "Vayada partner app client id and secret, until partner:secret-to-keychain",
+              Description: "Vayada partner app credentials, until partner:secret-to-keychain",
             }),
           );
         } catch (error) {
@@ -63,6 +66,7 @@ async function main(): Promise<number> {
           throw error;
         }
       },
+      signingKey,
     );
     print({ registered: true, name: registration.name, appId, clientId, secretName });
     return 0;

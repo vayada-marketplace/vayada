@@ -13,7 +13,7 @@ import {
 import {
   checkRedirectUri,
   parsePartnerAppRegistrationArgs,
-  refuseWebhookUntilSigning,
+  refuseWebhookWithoutSigningKey,
 } from "../platform/partnerAppRegistration.js";
 import { basicCredentials, bearerToken, registerPartnerApiRoutes } from "./partnerApi.js";
 
@@ -345,11 +345,17 @@ describe("partner app registration (VAY-2436)", () => {
           secretName,
         ]),
       ).toThrow(/--secret-name/);
-    // Until VAY-2438 derives the webhook signing secret, an app can't be registered with a webhook.
+    // An app with a webhook gets a signing secret derived from PARTNER_WEBHOOK_SIGNING_KEY (VAY-2438).
     expect(() =>
-      refuseWebhookUntilSigning({ webhookUrl: "https://partner.example/hooks" }),
-    ).toThrow(/VAY-2438/);
-    expect(() => refuseWebhookUntilSigning({ webhookUrl: null })).not.toThrow();
+      refuseWebhookWithoutSigningKey({ webhookUrl: "https://partner.example/hooks" }, null),
+    ).toThrow(/PARTNER_WEBHOOK_SIGNING_KEY/);
+    expect(() =>
+      refuseWebhookWithoutSigningKey(
+        { webhookUrl: "https://partner.example/hooks" },
+        Buffer.alloc(32, 1),
+      ),
+    ).not.toThrow();
+    expect(() => refuseWebhookWithoutSigningKey({ webhookUrl: null }, null)).not.toThrow();
     expect(checkRedirectUri("http://localhost:3000/callback")).toBe(true);
     expect(checkRedirectUri("http://partner.example/callback")).toBe(false);
     expect(checkRedirectUri("https://partner.example/callback#x")).toBe(false);

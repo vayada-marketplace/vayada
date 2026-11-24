@@ -1,5 +1,6 @@
 import { defaultMonthlyBudgetFromEnv, usdToMicroUsd } from "./ai/usage/budgetGate.js";
 import { loadAirbnbImportConfig } from "./airbnbImportRuntime.js";
+import { parseWebhookSigningKey } from "./domains/partnerWebhooks.js";
 import { CHANNEX_RESERVED_TEST_IDS } from "./domains/channexOwnershipGate.js";
 import { loadServerConfig } from "@vayada/backend-config";
 import { createHmac } from "node:crypto";
@@ -171,6 +172,9 @@ export type ApiConfig = {
   port: number;
   apiRuntime: ApiRuntime;
   backgroundWorkersEnabled: boolean;
+  /** VAY-2438: PARTNER_WEBHOOK_SIGNING_KEY. Unset: the booking update sweep and webhook delivery don't
+   * run (a disconnect still queues connection.revoked, sent once the key is set). */
+  partnerWebhookSigningKey: Buffer | null;
   auth?: ApiAuthConfig;
   authSession?: ApiAuthSessionConfig;
   targetDatabaseUrl?: string;
@@ -1525,6 +1529,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ...server,
     apiRuntime,
     backgroundWorkersEnabled,
+    partnerWebhookSigningKey: parseWebhookSigningKey(
+      readOptionalEnv(env, "PARTNER_WEBHOOK_SIGNING_KEY"),
+    ),
     auth,
     authSession,
     targetDatabaseUrl,

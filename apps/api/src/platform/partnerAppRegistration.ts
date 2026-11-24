@@ -6,6 +6,7 @@ import {
   sha256Hex,
   type PartnerScope,
 } from "../domains/partnerConnections.js";
+import { deriveWebhookSigningSecret } from "../domains/partnerWebhooks.js";
 
 import { PARTNER_SECRET_NAME } from "./partnerSecretToKeychain.js";
 
@@ -13,8 +14,9 @@ import { PARTNER_SECRET_NAME } from "./partnerSecretToKeychain.js";
  * VAY-2436: register a partner app (Creator Links) once per environment. Vayada keeps only the client
  * secret's SHA-256. VAY-2441: the secret goes straight into a new AWS Secrets Manager secret, never to
  * output or logs; on the Mac that hands it to the partner, `partner:secret-to-keychain` copies it into
- * the Keychain and deletes the secret (partnerSecretToKeychain.ts). The webhook signing secret comes
- * with the booking updates (VAY-2438).
+ * the Keychain and deletes the secret (partnerSecretToKeychain.ts). VAY-2438: an app with a webhook
+ * address also gets its webhook signing secret there, derived from PARTNER_WEBHOOK_SIGNING_KEY and
+ * never stored.
  */
 export type PartnerAppRegistration = {
   name: string;
@@ -105,14 +107,13 @@ export function parsePartnerAppRegistrationArgs(argv: readonly string[]): Partne
   };
 }
 
-/** Until VAY-2438, an app with a webhook address would have no signing secret to hand over. */
-export function refuseWebhookUntilSigning(
+/** VAY-2438: an app with a webhook address gets a signing secret, which needs the signing key. */
+export function refuseWebhookWithoutSigningKey(
   registration: Pick<PartnerAppRegistration, "webhookUrl">,
+  signingKey: Buffer | null,
 ) {
-  if (registration.webhookUrl !== null)
-    throw new PartnerAppRegistrationRefusal(
-      "--webhook-url needs the webhook signing secret from VAY-2438; register without it for now",
-    );
+  if (registration.webhookUrl !== null && signingKey === null)
+    throw new PartnerAppRegistrationRefusal("--webhook-url needs PARTNER_WEBHOOK_SIGNING_KEY");
 }
 
 type Queryable = {
@@ -123,17 +124,22 @@ type Queryable = {
 export async function registerPartnerApp(
   db: Queryable,
   registration: Omit<PartnerAppRegistration, "apply" | "secretName">,
-): Promise<{ appId: string; clientId: string; clientSecret: string }> {
+): Promise<{
+  appId: string;
+  clientId: string;
+  clientSecret: string;
+  webhookSecretVersion: number;
+}> {
   const clientId = `partner_${randomBytes(12).toString("hex")}`;
   const clientSecret = newSecretValue("secret");
-  const result = await db.query<{ appId: string }>(
+  const result = await db.query<{ appId: string; webhookSecretVersion: number }>(
     `INSERT INTO distribution.external_api_clients
        (public_client_id, client_name, contact_email, status, allowed_surfaces, rate_limit_tier,
         terms_version, credential_hash_ref, credential_rotated_at, redirect_uris, allowed_scopes,
         webhook_url)
      VALUES ($1, $2, $3, 'active', ARRAY['partner_connection']::text[], 'partner', $4, $5, now(),
              $6::text[], $7::text[], $8)
-     RETURNING id::text AS "appId"`,
+     RETURNING id::text AS "appId", webhook_secret_version AS "webhookSecretVersion"`,
     [
       clientId,
       registration.name,
@@ -145,7 +151,7 @@ export async function registerPartnerApp(
       registration.webhookUrl,
     ],
   );
-  return { appId: result.rows[0]!.appId, clientId, clientSecret };
+  return { ...result.rows[0]!, clientId, clientSecret };
 }
 
 /** Puts a new secret into the store (AWS Secrets Manager in production); never overwrites one. */
@@ -175,20 +181,33 @@ export class PartnerRegistrationIncomplete extends Error {
 /**
  * VAY-2441: saves the app and puts its credentials into the secret store in one go. The app commits
  * only once the store holds them, so a secret never exists without its one copy, and the credentials
- * never come back to the caller, so they can't reach output or logs.
+ * never come back to the caller, so they can't reach output or logs. With a webhook address the
+ * credentials include the app's webhook signing secret (VAY-2438), for its current secret version.
  */
 export async function registerPartnerAppIntoSecretStore(
   pool: { connect(): Promise<Queryable & { release(): void }> },
   registration: Omit<PartnerAppRegistration, "apply" | "secretName">,
   secretName: string,
   storeSecret: PartnerSecretStore,
+  signingKey: Buffer | null,
 ): Promise<{ appId: string; clientId: string }> {
+  refuseWebhookWithoutSigningKey(registration, signingKey);
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const { appId, clientId, clientSecret } = await registerPartnerApp(client, registration);
+    const { appId, clientId, clientSecret, webhookSecretVersion } = await registerPartnerApp(
+      client,
+      registration,
+    );
+    const webhookSigningSecret =
+      registration.webhookUrl !== null && signingKey !== null
+        ? deriveWebhookSigningSecret(signingKey, clientId, webhookSecretVersion)
+        : undefined;
     try {
-      await storeSecret(secretName, JSON.stringify({ clientId, clientSecret }));
+      await storeSecret(
+        secretName,
+        JSON.stringify({ clientId, clientSecret, webhookSigningSecret }),
+      );
     } catch (error) {
       // A refusal (the name is taken) stored nothing; any other failure may have stored it.
       if (error instanceof PartnerAppRegistrationRefusal) throw error;

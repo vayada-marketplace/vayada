@@ -3,6 +3,7 @@ import pg, { type PoolClient } from "pg";
 
 import { PROPERTY_CURRENCY_SQL } from "../routes/bookingPromoCodes.js";
 import { LIVE_PROMO_CODES_SQL } from "./bookingGuestModules.js";
+import { enqueuePartnerEvent } from "./partnerWebhooks.js";
 
 /**
  * VAY-2436: partner apps (Creator Links first) and a hotel's one-time approval of one: the OAuth 2.0
@@ -329,8 +330,24 @@ export function createPgPartnerConnectionsRepository(config: {
       [appId, propertyId, at],
     );
 
-  /** A revoked connection: every token stops and the app's codes there are retired. */
+  /** A revoked connection: every token stops, the app's codes there are retired and the app is
+   * told with `connection.revoked` (VAY-2438), all in the revoking transaction. */
   async function endConnection(client: PoolClient, connection: EndedConnection, at: string) {
+    // Booking updates still queued for the app at this hotel aren't sent any more, so
+    // connection.revoked is the last event it gets.
+    await client.query(
+      `UPDATE platform.outbox_events SET status = 'canceled', leased_until = NULL, updated_at = $3
+       WHERE destination = 'partner_webhook' AND property_id = $2::uuid
+         AND outbox_metadata->>'appId' = $1 AND status IN ('pending', 'leased')`,
+      [connection.clientId, connection.propertyId, at],
+    );
+    // Before the codes: the event's keys lock the property, as checkout does before the codes.
+    await enqueuePartnerEvent(client, {
+      appId: connection.clientId,
+      propertyId: connection.propertyId,
+      type: "connection.revoked",
+      occurredAt: at,
+    });
     await client.query(
       `UPDATE distribution.partner_tokens SET revoked_at = $2
        WHERE connection_id = $1::uuid AND revoked_at IS NULL`,

@@ -17,6 +17,7 @@ import {
   sha256Hex,
   type PartnerConnectionsRepository,
 } from "./domains/partnerConnections.js";
+import { deriveWebhookSigningSecret } from "./domains/partnerWebhooks.js";
 import {
   createHotelSetupOrdinaryLoginFixture,
   type HotelSetupOrdinaryLoginFixture,
@@ -27,6 +28,7 @@ import {
   registerPartnerApp,
   registerPartnerAppIntoSecretStore,
 } from "./platform/partnerAppRegistration.js";
+import { copyPartnerSecretToKeychain } from "./platform/partnerSecretToKeychain.js";
 
 /**
  * VAY-2436: a hotel connects a partner app once and the app gets tokens for that hotel only; a
@@ -603,6 +605,7 @@ describe.skipIf(!url)("partner apps and the hotel's one-time approval (VAY-2436)
       async (name, value) => {
         secrets.set(name, value);
       },
+      null,
     );
     expect(Object.keys(saved).sort()).toEqual(["appId", "clientId"]);
     const credentials = JSON.parse(secrets.get("partner-apps/test/creator-links-test")!);
@@ -629,6 +632,7 @@ describe.skipIf(!url)("partner apps and the hotel's one-time approval (VAY-2436)
         failedClientId = JSON.parse(value).clientId;
         throw Object.assign(new Error("timed out"), { name: "TimeoutError" });
       },
+      null,
     ).then(
       () => null,
       (caught: unknown) => caught,
@@ -652,6 +656,7 @@ describe.skipIf(!url)("partner apps and the hotel's one-time approval (VAY-2436)
           refusedClientId = JSON.parse(value).clientId;
           throw new PartnerAppRegistrationRefusal("partner-apps/test/taken already exists");
         },
+        null,
       ),
     ).rejects.toBeInstanceOf(PartnerAppRegistrationRefusal);
 
@@ -663,5 +668,67 @@ describe.skipIf(!url)("partner apps and the hotel's one-time approval (VAY-2436)
     expect(failedClientId).toMatch(/^partner_[0-9a-f]{24}$/);
     expect(refusedClientId).toMatch(/^partner_[0-9a-f]{24}$/);
     expect(none.rows[0].n).toBe(0);
+  });
+
+  it("hands an app with a webhook address its webhook signing secret too (VAY-2438)", async () => {
+    const registration = {
+      name: "Webhook partner",
+      redirectUris: ["https://partner.example/callback"],
+      scopes: ["promo_codes", "bookings"] as ("promo_codes" | "bookings")[],
+      webhookUrl: "https://partner.example/webhooks/vayada",
+      contactEmail: null,
+      termsVersion: "partner-contract-2026-10-31",
+    };
+    const signingKey = randomBytes(32);
+    const secrets = new Map<string, string>();
+    const store = async (name: string, value: string) => {
+      secrets.set(name, value);
+    };
+    const saved = await registerPartnerAppIntoSecretStore(
+      pool,
+      registration,
+      "partner-apps/test/webhook-partner",
+      store,
+      signingKey,
+    );
+    const text = secrets.get("partner-apps/test/webhook-partner")!;
+    const credentials = JSON.parse(text);
+    // The secret the delivery job signs with: version 1, the new app's webhook_secret_version.
+    expect(credentials).toMatchObject({
+      clientId: saved.clientId,
+      webhookSigningSecret: deriveWebhookSigningSecret(signingKey, saved.clientId, 1),
+    });
+    // The Mac command takes it as it is stored.
+    const keychain = new Map<string, string>();
+    await copyPartnerSecretToKeychain({
+      secretName: "partner-apps/test/webhook-partner",
+      source: { read: async () => text, delete: async () => undefined },
+      keychain: {
+        write: async (account, value) => {
+          keychain.set(account, value);
+        },
+        read: async (account) => keychain.get(account) ?? null,
+      },
+    });
+    expect(keychain.get("VAYADA_WEBHOOK_SECRET")).toBe(credentials.webhookSigningSecret);
+
+    // Without the signing key there would be no secret to hand over: refused, nothing saved.
+    const before = await admin.query(
+      `SELECT count(*)::int AS n FROM distribution.external_api_clients`,
+    );
+    await expect(
+      registerPartnerAppIntoSecretStore(
+        pool,
+        registration,
+        "partner-apps/test/no-key",
+        store,
+        null,
+      ),
+    ).rejects.toThrow("--webhook-url needs PARTNER_WEBHOOK_SIGNING_KEY");
+    const after = await admin.query(
+      `SELECT count(*)::int AS n FROM distribution.external_api_clients`,
+    );
+    expect(after.rows[0].n).toBe(before.rows[0].n);
+    expect(secrets.has("partner-apps/test/no-key")).toBe(false);
   });
 });
