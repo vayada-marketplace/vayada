@@ -713,15 +713,9 @@ export async function mockBookingAdminShellRoutes(
           })
         : route.fulfill({ status: 204 }),
   );
-  await page.route("**/api/booking/properties/*/dashboard/bookings-by-source**", (route) =>
-    route.fulfill({
-      json: {
-        sourceMix: {
-          totalRevenue: { amountDecimal: "0.00", currency: "EUR" },
-          items: [],
-        },
-      },
-    }),
+  // Bookings by channel (VAY-2594): nothing yet.
+  await page.route("**/api/booking/properties/*/dashboard/channels**", (route) =>
+    route.fulfill({ json: { channelMix: { channels: [], directSources: [] } } }),
   );
   await page.route("**/api/booking/properties/*/dashboard/sparklines**", (route) =>
     route.fulfill({ json: { sparklines: { points: [] } } }),

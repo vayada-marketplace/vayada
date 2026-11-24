@@ -185,6 +185,7 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
     "legacy guest policy; guest rules and terms replace it",
   ),
   "GET /api/booking/properties/:propertyId/dashboard/bookings-by-source": later(),
+  "GET /api/booking/properties/:propertyId/dashboard/channels": later(),
   "GET /api/booking/properties/:propertyId/dashboard/conversion-funnel": later(),
   "GET /api/booking/properties/:propertyId/dashboard/day-bookings": later(),
   "GET /api/booking/properties/:propertyId/dashboard/page-views": later(),

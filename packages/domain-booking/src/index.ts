@@ -158,6 +158,24 @@ export type BookingDashboardMetricsReadModel = {
   liveSinceDate: BookingDate | null;
 };
 
+/** Bookings made in the period and the period before, for one channel or direct source. */
+export type BookingChannelCount = {
+  /** guest_bookings.booking_channel, or direct_booking_source for direct bookings. */
+  key: string;
+  bookingCount: number;
+  previousBookingCount: number;
+};
+
+/**
+ * Bookings by channel (VAY-2594): every channel's confirmed bookings, by booking date, and the
+ * direct ones by where the guest came from. Only keys with bookings in either period are listed.
+ */
+export type BookingChannelMixReadModel = {
+  propertyId: string;
+  channels: readonly BookingChannelCount[];
+  directSources: readonly BookingChannelCount[];
+};
+
 /** One day of the revenue chart: direct bookings made that day (VAY-2594). */
 export type BookingRevenueDay = {
   /** Property-local calendar date the bookings were made. */
@@ -234,6 +252,7 @@ export type BookingDashboardMetricsReadPort =
       windowStart: BookingDate;
       windowEnd: BookingDate;
     }): Promise<BookingPageViewTimelineReadModel | null>;
+    getChannelMix(input: BookingDashboardMetricsPeriodInput): Promise<BookingChannelMixReadModel>;
     getRevenueDays(input: {
       propertyId: string;
       windowStart: BookingDate;

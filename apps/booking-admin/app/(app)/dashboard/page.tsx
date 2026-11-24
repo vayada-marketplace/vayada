@@ -11,6 +11,7 @@ import {
   DashboardSetupChecklistCard,
   useDashboardSetupChecklist,
 } from "@/components/dashboard/DashboardSetupChecklist";
+import { ChannelsCard } from "@/components/dashboard/ChannelsCard";
 import { ConversionFunnelCard } from "@/components/dashboard/ConversionFunnelCard";
 import { DayBookingsWindow } from "@/components/dashboard/DayBookingsWindow";
 import { RevenueChart } from "@/components/dashboard/RevenueChart";
@@ -22,30 +23,14 @@ import {
   dashboardService,
   rangeQuery,
   TIME_RANGES,
+  type ChannelMix,
   type DashboardStats,
-  type BookingsBySource,
   type ConversionFunnel,
   type RevenueDays,
   type Sparklines,
   type TimeRange,
   type PageViewsTimeline,
 } from "@/services/dashboard";
-
-const SOURCE_COLORS: Record<string, string> = {
-  direct: "#2F52F5",
-  "booking.com": "#003580",
-  airbnb: "#FF5A5F",
-  expedia: "#f59e0b",
-  google: "#10b981",
-};
-
-const SOURCE_LABELS: Record<string, string> = {
-  direct: "Direct (vayada)",
-  "booking.com": "Booking.com",
-  airbnb: "Airbnb",
-  expedia: "Expedia",
-  google: "Google Hotels",
-};
 
 // ISO date strings come from the backend already aligned to the property
 // timezone; `parseIsoDate` builds a Date at local midnight so Intl
@@ -66,7 +51,8 @@ export default function DashboardPage() {
   // Shared with the header strip, which follows it on every page (VAY-2594).
   const timeRange = useDashboardRange();
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [sources, setSources] = useState<BookingsBySource | null>(null);
+  const [channels, setChannels] = useState<ChannelMix | null>(null);
+  const [channelsError, setChannelsError] = useState(false);
   const [funnelError, setFunnelError] = useState(false);
   const [funnel, setFunnel] = useState<ConversionFunnel | null>(null);
   const [sparklines, setSparklines] = useState<Sparklines | null>(null);
@@ -98,23 +84,25 @@ export default function DashboardPage() {
     const sequence = ++fetchSequence.current;
     setLoading(true);
     setStats(null);
-    setSources(null);
+    setChannels(null);
     setFunnel(null);
     setFunnelError(false);
     setSparklines(null);
     setRevenueDays(null);
     setRevenueError(false);
-    const [statsData, sourcesData, funnelData, sparklinesData, revenueData] =
+    setChannelsError(false);
+    const [statsData, channelsData, funnelData, sparklinesData, revenueData] =
       await Promise.allSettled([
         dashboardService.getStats(range, timeZone),
-        dashboardService.getBookingsBySource(range, timeZone),
+        dashboardService.getChannelMix(range, timeZone),
         dashboardService.getConversionFunnel(range, timeZone),
         dashboardService.getSparklines(range, timeZone),
         dashboardService.getRevenueDays(range, timeZone),
       ]);
     if (sequence !== fetchSequence.current) return;
     if (statsData.status === "fulfilled") setStats(statsData.value);
-    if (sourcesData.status === "fulfilled") setSources(sourcesData.value);
+    if (channelsData.status === "fulfilled") setChannels(channelsData.value);
+    else setChannelsError(true);
     if (funnelData.status === "fulfilled") setFunnel(funnelData.value);
     else setFunnelError(true);
     if (sparklinesData.status === "fulfilled") setSparklines(sparklinesData.value);
@@ -128,7 +116,7 @@ export default function DashboardPage() {
     if (!propertyTimeZone) {
       fetchSequence.current += 1;
       setStats(null);
-      setSources(null);
+      setChannels(null);
       setFunnel(null);
       setSparklines(null);
       setRevenueDays(null);
@@ -142,39 +130,14 @@ export default function DashboardPage() {
     if (range === timeRange) return;
     fetchSequence.current += 1;
     setStats(null);
-    setSources(null);
+    setChannels(null);
     setFunnel(null);
     setFunnelError(false);
+    setChannelsError(false);
     setSparklines(null);
     setRevenueDays(null);
     setOpenDay(null);
     setDashboardRange(range);
-  };
-
-  // Build donut chart gradient
-  const donutGradient =
-    sources && sources.sources.length > 0
-      ? (() => {
-          let cumulative = 0;
-          const stops = sources.sources.map((s) => {
-            const color = SOURCE_COLORS[s.source] || "#d1d5db";
-            const start = cumulative;
-            cumulative += s.percentage;
-            return `${color} ${start}% ${cumulative}%`;
-          });
-          return `conic-gradient(${stops.join(", ")})`;
-        })()
-      : "conic-gradient(#e5e7eb 0% 100%)";
-
-  // Tiers retuned for the smaller inner circle introduced when the dashboard
-  // was tightened — long strings like "IDR 1,234,567,890" (17 chars) must
-  // still fit inside the inner circle without overlapping the colored ring.
-  const donutValueFontSize = (text: string): string => {
-    if (text.length <= 6) return "text-xl md:text-2xl";
-    if (text.length <= 9) return "text-base md:text-lg";
-    if (text.length <= 12) return "text-sm md:text-base";
-    if (text.length <= 14) return "text-[11px] md:text-xs";
-    return "text-[9px] md:text-[10px]";
   };
 
   // Named after the property-local window the funnel shows; an unusable zone falls back to a plain name.
@@ -191,7 +154,7 @@ export default function DashboardPage() {
     stats && (stats.unverified_bookings > 0 || stats.unverified_bookings_previous > 0),
   );
   // Amounts are in the property's currency, the one guests pay in (VAY-2390), not Localization's.
-  const currency = stats?.currency ?? sources?.currency ?? "EUR";
+  const currency = stats?.currency ?? "EUR";
   const otherCurrencyAmounts = Boolean(stats && stats.other_currency_bookings > 0);
   const money = (value: number) => formatCurrency(value, currency, locale);
   // Amounts display without decimals, so compare them that way: no "+€0" changes.
@@ -335,88 +298,15 @@ export default function DashboardPage() {
         />
       )}
 
-      {/* Bookings by Source + Conversion Funnel */}
-      <div
-        className={`grid grid-cols-1 lg:grid-cols-2 gap-3 md:gap-4 ${loading ? "opacity-60" : ""}`}
-      >
-        {/* Bookings by Source */}
-        <div className="bg-white border border-gray-200 rounded-xl p-3 md:p-4">
-          <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-3">
-            {t("dashboard.bookingsBySource.title")}
-          </h3>
-
-          {/* Donut Chart */}
-          <div className="flex justify-center mb-3">
-            <div className="relative w-28 h-28 md:w-32 md:h-32">
-              <div className="w-full h-full rounded-full" style={{ background: donutGradient }} />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="w-24 h-24 md:w-28 md:h-28 rounded-full bg-white flex flex-col items-center justify-center px-1 overflow-hidden">
-                  {(() => {
-                    const valueText = sources
-                      ? formatCurrency(sources.total_revenue, currency, locale)
-                      : "--";
-                    return (
-                      <span
-                        className={`${donutValueFontSize(valueText)} font-bold text-gray-900 text-center whitespace-nowrap`}
-                      >
-                        {valueText}
-                      </span>
-                    );
-                  })()}
-                  <span className="text-[11px] text-gray-500 text-center whitespace-nowrap">
-                    {t("dashboard.bookingsBySource.totalRevenue")}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Legend */}
-          <div className="space-y-1.5">
-            {sources && sources.sources.length > 0 ? (
-              sources.sources.map((s) => (
-                <div key={s.source} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="w-3 h-3 rounded-full inline-block"
-                      style={{ backgroundColor: SOURCE_COLORS[s.source] || "#d1d5db" }}
-                    />
-                    <span className="text-[13px] text-gray-700">
-                      {s.source === "direct"
-                        ? t("dashboard.bookingsBySource.direct")
-                        : SOURCE_LABELS[s.source] || s.source}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <span className="text-[13px] font-medium text-gray-900">
-                      {formatNumber(s.percentage, locale)}%
-                    </span>
-                    <span className="text-[13px] text-gray-500">
-                      {formatCurrency(s.revenue, currency, locale)}
-                    </span>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p className="text-[13px] text-gray-500 text-center py-4">
-                {t("dashboard.bookingsBySource.noData")}
-              </p>
-            )}
-          </div>
-
-          {/* Info Banner */}
-          {sources &&
-            sources.sources.length > 0 &&
-            sources.sources[0]?.source === "direct" &&
-            sources.sources[0]?.percentage > 50 && (
-              <div className="mt-3 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
-                <p className="text-[13px] text-blue-700">
-                  {formatNumber(sources.sources[0].percentage, locale)}%{" "}
-                  {t("dashboard.bookingsBySource.directBookingShare")}
-                </p>
-              </div>
-            )}
-        </div>
+      {/* Bookings by channel + Conversion Funnel */}
+      <div className="grid grid-cols-1 gap-3 md:gap-4 lg:grid-cols-2">
+        <ChannelsCard
+          data={channels}
+          loading={loading}
+          error={channelsError}
+          locale={locale}
+          t={t}
+        />
 
         <ConversionFunnelCard
           funnel={funnel}

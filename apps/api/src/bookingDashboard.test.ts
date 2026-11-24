@@ -117,6 +117,38 @@ describe("Booking dashboard routes", () => {
     }
   });
 
+  it("serves bookings by channel for the period and the one before (VAY-2594)", async () => {
+    const reads: unknown[] = [];
+    app = buildDashboardApp({
+      readPort: {
+        ...fakeReadPort(),
+        async getChannelMix(input) {
+          reads.push(input);
+          return {
+            propertyId: input.propertyId,
+            channels: [{ key: "direct", bookingCount: 3, previousBookingCount: 1 }],
+            directSources: [{ key: "booking_engine", bookingCount: 3, previousBookingCount: 1 }],
+          };
+        },
+      },
+    });
+    const url = "/api/booking/properties/prop_alpenrose/dashboard/channels";
+    const headers = { authorization: "Bearer valid-token" };
+    const mix = await injectJson(app, { method: "GET", url, headers, query: dashboardStatsQuery });
+    expect(mix.statusCode).toBe(200);
+    expect(mix.body).toMatchObject({
+      channelMix: { channels: [{ key: "direct", bookingCount: 3, previousBookingCount: 1 }] },
+    });
+    expect(reads).toEqual([{ propertyId: "prop_alpenrose", ...dashboardStatsQuery }]);
+    const refused = await injectJson(app, {
+      method: "GET",
+      url,
+      headers,
+      query: { periodStart: "2026-06-01", periodEnd: "2026-06-30" },
+    });
+    expect(refused.statusCode).toBe(400);
+  });
+
   it("serves the revenue chart's days and one day's bookings (VAY-2594)", async () => {
     const reads: unknown[] = [];
     const money = (amountDecimal: string) => ({ amountDecimal, currency: "EUR" });
@@ -310,6 +342,11 @@ describe("Booking dashboard routes", () => {
           return fakeSparklines(input.propertyId);
         },
         getConversionFunnel: async () => ({ steps: [], paymentMethods: [], biggestDrop: null }),
+        getChannelMix: async (input) => ({
+          propertyId: input.propertyId,
+          channels: [],
+          directSources: [],
+        }),
         getRevenueDays: async () => null,
         getDayBookings: async () => null,
         async getPageViewTimeline(input) {
@@ -456,6 +493,7 @@ describe("Booking dashboard routes", () => {
         getSourceMix: denied,
         getSparklines: denied,
         getConversionFunnel: denied,
+        getChannelMix: denied,
         getRevenueDays: denied,
         getDayBookings: denied,
         getPageViewTimeline: denied,
@@ -499,9 +537,17 @@ describe("Booking dashboard routes", () => {
         headers,
         query: { date: "2026-06-12" },
       }),
+      injectJson(app, {
+        method: "GET",
+        url: "/api/booking/properties/prop_alpenrose/dashboard/channels",
+        headers,
+        query: dashboardStatsQuery,
+      }),
     ]);
 
-    expect(responses.map(({ statusCode }) => statusCode)).toEqual([403, 403, 403, 403, 403, 403]);
+    expect(responses.map(({ statusCode }) => statusCode)).toEqual([
+      403, 403, 403, 403, 403, 403, 403,
+    ]);
   });
 
   it("returns the same denial for unassigned and cross-tenant properties", async () => {
@@ -577,6 +623,11 @@ describe("Booking dashboard routes", () => {
           return fakeSparklines(input.propertyId);
         },
         getConversionFunnel: async () => ({ steps: [], paymentMethods: [], biggestDrop: null }),
+        getChannelMix: async (input) => ({
+          propertyId: input.propertyId,
+          channels: [],
+          directSources: [],
+        }),
         getRevenueDays: async () => null,
         getDayBookings: async () => null,
         async getPageViewTimeline(input) {
@@ -615,6 +666,11 @@ describe("Booking dashboard routes", () => {
           return fakeSparklines(input.propertyId);
         },
         getConversionFunnel: async () => ({ steps: [], paymentMethods: [], biggestDrop: null }),
+        getChannelMix: async (input) => ({
+          propertyId: input.propertyId,
+          channels: [],
+          directSources: [],
+        }),
         getRevenueDays: async () => null,
         getDayBookings: async () => null,
         async getPageViewTimeline(input) {
@@ -1140,6 +1196,11 @@ function fakeReadPort(): BookingDashboardMetricsReadPort {
       return fakeSparklines(input.propertyId);
     },
     getConversionFunnel: async () => ({ steps: [], paymentMethods: [], biggestDrop: null }),
+    getChannelMix: async (input) => ({
+      propertyId: input.propertyId,
+      channels: [],
+      directSources: [],
+    }),
     getRevenueDays: async () => null,
     getDayBookings: async () => null,
     async getPageViewTimeline(input) {

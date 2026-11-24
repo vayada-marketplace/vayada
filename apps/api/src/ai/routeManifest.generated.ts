@@ -71,6 +71,7 @@ export const ROUTE_MANIFEST = [
   "GET /api/booking/properties/:propertyId/booking-guest-policy",
   "GET /api/booking/properties/:propertyId/booking-guest-policy/readiness",
   "GET /api/booking/properties/:propertyId/dashboard/bookings-by-source",
+  "GET /api/booking/properties/:propertyId/dashboard/channels",
   "GET /api/booking/properties/:propertyId/dashboard/conversion-funnel",
   "GET /api/booking/properties/:propertyId/dashboard/day-bookings",
   "GET /api/booking/properties/:propertyId/dashboard/page-views",

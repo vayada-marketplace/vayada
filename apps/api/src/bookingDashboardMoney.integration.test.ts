@@ -159,6 +159,27 @@ describe.skipIf(!url)("dashboard booking money", () => {
         ["booking_com", 1],
       ]);
 
+      // Bookings by channel: every channel, and direct ones by source, now and in the week before.
+      const mix = await port.getChannelMix({ ...period, ...previous });
+      const byKey = (
+        rows: readonly { key: string; bookingCount: number; previousBookingCount: number }[],
+      ) =>
+        Object.fromEntries(
+          rows.map((row) => [row.key, [row.bookingCount, row.previousBookingCount]]),
+        );
+      expect(byKey(mix.channels)).toEqual({ direct: [2, 1], airbnb: [1, 0] });
+      expect(byKey(mix.directSources)).toEqual({ booking_engine: [1, 1], call: [1, 0] });
+      // The Booking.com booking Channex had on Sep 3 counts there.
+      const septemberMix = await port.getChannelMix({
+        ...period,
+        periodStart: "2026-09-01",
+        periodEnd: "2026-09-07",
+        previousPeriodStart: "2026-08-25",
+        previousPeriodEnd: "2026-08-31",
+      });
+      expect(byKey(septemberMix.channels)).toEqual({ booking_com: [1, 0] });
+      expect(septemberMix.directSources).toEqual([]);
+
       const spark = await port.getSparklines({
         propertyId: property,
         windowStart: period.periodStart,

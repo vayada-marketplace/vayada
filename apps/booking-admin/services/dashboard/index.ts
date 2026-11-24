@@ -28,17 +28,17 @@ export interface DashboardStats {
   live_since: string | null;
 }
 
-export interface SourceBreakdown {
-  source: string;
-  revenue: number;
-  percentage: number;
-  count: number;
+/** One channel or direct source: bookings made in the range and in the period before. */
+export interface ChannelCount {
+  key: string;
+  bookings: number;
+  previous: number;
 }
 
-export interface BookingsBySource {
-  currency: string;
-  total_revenue: number;
-  sources: SourceBreakdown[];
+/** Bookings by channel (VAY-2594): every channel, and the direct ones by source. */
+export interface ChannelMix {
+  channels: ChannelCount[];
+  sources: ChannelCount[];
 }
 
 export interface ConversionFunnel {
@@ -174,16 +174,10 @@ type TargetDashboardStatsResponse = {
   };
 };
 
-type TargetSourceMixResponse = {
-  sourceMix: {
-    totalRevenue: Money;
-    items: {
-      source: string;
-      revenue: Money;
-      bookingCount: number;
-      unverifiedBookingCount?: number;
-      revenueSharePercent: number;
-    }[];
+type TargetChannelMixResponse = {
+  channelMix: {
+    channels: { key: string; bookingCount: number; previousBookingCount: number }[];
+    directSources: { key: string; bookingCount: number; previousBookingCount: number }[];
   };
 };
 
@@ -331,21 +325,21 @@ export const dashboardService = {
     };
   },
 
-  getBookingsBySource: async (range: TimeRange, timeZone: string): Promise<BookingsBySource> => {
+  getChannelMix: async (range: TimeRange, timeZone: string): Promise<ChannelMix> => {
     const basePath = requireDashboardBasePath();
     const query = rangeQuery(range, timeZone);
-    const response = await apiClient.get<TargetSourceMixResponse>(
-      `${basePath}/bookings-by-source?periodStart=${query.currentStart}&periodEnd=${query.currentEnd}`,
+    const response = await apiClient.get<TargetChannelMixResponse>(
+      `${basePath}/channels?periodStart=${query.currentStart}&periodEnd=${query.currentEnd}&previousPeriodStart=${query.previousStart}&previousPeriodEnd=${query.previousEnd}`,
     );
+    const counts = (rows: TargetChannelMixResponse["channelMix"]["channels"]) =>
+      rows.map((row) => ({
+        key: row.key,
+        bookings: row.bookingCount,
+        previous: row.previousBookingCount,
+      }));
     return {
-      currency: response.sourceMix.totalRevenue.currency,
-      total_revenue: amount(response.sourceMix.totalRevenue),
-      sources: response.sourceMix.items.map((item) => ({
-        source: item.source,
-        revenue: amount(item.revenue),
-        percentage: item.revenueSharePercent,
-        count: item.bookingCount,
-      })),
+      channels: counts(response.channelMix.channels),
+      sources: counts(response.channelMix.directSources),
     };
   },
 

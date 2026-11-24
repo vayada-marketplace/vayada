@@ -2,6 +2,7 @@ import { buildBookingConversionFunnel, type BookingFunnelEvent } from "@vayada/d
 import type {
   BookingDashboardMetricsPeriodInput,
   BookingDashboardMetricsReadModel,
+  BookingChannelMixReadModel,
   BookingDashboardMetricsReadPort,
   BookingDate,
   BookingDayBookingsReadModel,
@@ -273,6 +274,33 @@ export function createTargetBookingDashboardMetricsReadPort(config: {
         previousTotal: previousBuckets.reduce((sum, bucket) => sum + bucket.count, 0),
       } satisfies BookingPageViewTimelineReadModel;
     },
+    async getChannelMix(input) {
+      const result = await pool.query<{
+        kind: "channel" | "source";
+        key: string | null;
+        bookingCount: string;
+        previousBookingCount: string;
+      }>(channelMixSql(), [
+        input.propertyId,
+        input.periodStart,
+        input.periodEnd,
+        input.previousPeriodStart,
+        input.previousPeriodEnd,
+      ]);
+      const counts = (kind: "channel" | "source") =>
+        result.rows
+          .filter((row) => row.kind === kind)
+          .map((row) => ({
+            key: row.key ?? "unknown",
+            bookingCount: Number(row.bookingCount),
+            previousBookingCount: Number(row.previousBookingCount),
+          }));
+      return {
+        propertyId: input.propertyId,
+        channels: counts("channel"),
+        directSources: counts("source"),
+      } satisfies BookingChannelMixReadModel;
+    },
     async getRevenueDays(input) {
       const result = await pool.query<BookingRevenueDayRow>(revenueDaysSql(), [
         input.propertyId,
@@ -515,6 +543,26 @@ function sparklineSql(): string {
    AND booking.booked_on <= bucket.bucket_end
   GROUP BY bucket.bucket_start, bucket.bucket_end
   ORDER BY bucket.bucket_start`;
+}
+
+// Bookings by channel (VAY-2594): every channel, and direct bookings by source, made in the period
+// and in the period before, by booking date.
+function channelMixSql(): string {
+  const inPeriods = `(booking.booked_on BETWEEN $2::date AND $3::date
+      OR booking.booked_on BETWEEN $4::date AND $5::date)`;
+  const counts = `COUNT(*) FILTER (WHERE booking.booked_on BETWEEN $2::date AND $3::date)::text AS "bookingCount",
+    COUNT(*) FILTER (WHERE booking.booked_on BETWEEN $4::date AND $5::date)::text AS "previousBookingCount"`;
+  return `${bookingScopedPropertyCte()},
+  ${datedBookingsCte()}
+  SELECT 'channel' AS kind, booking.booking_channel AS key, ${counts}
+  FROM dated_bookings booking
+  WHERE ${inPeriods}
+  GROUP BY booking.booking_channel
+  UNION ALL
+  SELECT 'source' AS kind, booking.direct_booking_source AS key, ${counts}
+  FROM dated_bookings booking
+  WHERE booking.booking_channel = 'direct' AND ${inPeriods}
+  GROUP BY booking.direct_booking_source`;
 }
 
 // One row per day of the window: the direct bookings made that day (VAY-2594 revenue chart).

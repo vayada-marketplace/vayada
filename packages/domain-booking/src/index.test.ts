@@ -327,6 +327,11 @@ describe("@vayada/domain-booking dashboard metrics read model contract", () => {
         return fakeSparklines(input.propertyId);
       },
       getConversionFunnel: async () => ({ steps: [], paymentMethods: [], biggestDrop: null }),
+      getChannelMix: async (input) => ({
+        propertyId: input.propertyId,
+        channels: [],
+        directSources: [],
+      }),
       getRevenueDays: async () => null,
       getDayBookings: async () => null,
       async getPageViewTimeline(input) {
@@ -355,6 +360,11 @@ describe("@vayada/domain-booking dashboard metrics read model contract", () => {
         fakeSourceMix(input.propertyId, input.periodStart, input.periodEnd),
       getSparklines: async (input) => fakeSparklines(input.propertyId),
       getConversionFunnel: async () => ({ steps: [], paymentMethods: [], biggestDrop: null }),
+      getChannelMix: async (input) => ({
+        propertyId: input.propertyId,
+        channels: [],
+        directSources: [],
+      }),
       getRevenueDays: async () => null,
       getDayBookings: async () => null,
       getPageViewTimeline: async (input) => fakePageViews(input.propertyId),
@@ -379,6 +389,11 @@ describe("@vayada/domain-booking dashboard metrics read model contract", () => {
         fakeSourceMix(input.propertyId, input.periodStart, input.periodEnd),
       getSparklines: async (input) => fakeSparklines(input.propertyId),
       getConversionFunnel: async () => ({ steps: [], paymentMethods: [], biggestDrop: null }),
+      getChannelMix: async (input) => ({
+        propertyId: input.propertyId,
+        channels: [],
+        directSources: [],
+      }),
       getRevenueDays: async () => null,
       getDayBookings: async () => null,
       getPageViewTimeline: async (input) => fakePageViews(input.propertyId),

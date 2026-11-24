@@ -1,4 +1,5 @@
 import type {
+  BookingChannelMixReadModel,
   BookingDashboardMetricsPeriodInput,
   BookingDashboardMetricsReadModel,
   BookingDashboardMetricsReadPort,
@@ -71,6 +72,12 @@ export type BookingDashboardPageViewsResponse = {
   contractVersion: BookingDashboardContractVersion;
   propertyId: string;
   pageViews: BookingPageViewTimelineReadModel;
+};
+
+export type BookingDashboardChannelsResponse = {
+  contractVersion: BookingDashboardContractVersion;
+  propertyId: string;
+  channelMix: BookingChannelMixReadModel;
 };
 
 export type BookingDashboardRevenueDaysResponse = {
@@ -264,6 +271,29 @@ export async function registerBookingDashboardRoutes(
         } satisfies BookingDashboardPageViewsResponse;
       } catch (error) {
         request.log.error({ err: error }, "Booking dashboard page-view read failed");
+        return sendBookingDashboardError(reply, 500, readModelUnavailableError());
+      }
+    },
+  );
+
+  // VAY-2594: bookings by channel, and direct bookings by source, now and in the period before.
+  app.get<{ Params: BookingDashboardPropertyParams; Querystring: DashboardPeriodQuery }>(
+    "/properties/:propertyId/dashboard/channels",
+    async (request, reply) => {
+      const { propertyId } = request.params;
+      if (!(await enforceBookingDashboardReadPolicy(request, reply, propertyId, options)))
+        return reply;
+      const period = parseDashboardPeriodQuery(request.query);
+      if (!period.ok) return sendBookingDashboardError(reply, 400, period.error);
+      try {
+        const channelMix = await metricsReadPort.getChannelMix({ propertyId, ...period.value });
+        return {
+          contractVersion: BOOKING_DASHBOARD_CONTRACT_VERSION,
+          propertyId,
+          channelMix,
+        } satisfies BookingDashboardChannelsResponse;
+      } catch (error) {
+        request.log.error({ err: error }, "Booking dashboard channel mix read failed");
         return sendBookingDashboardError(reply, 500, readModelUnavailableError());
       }
     },
