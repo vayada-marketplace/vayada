@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import SharedHotelLoginForm from "@vayada/product-onboarding/SharedHotelLoginForm";
-import { AuthStateError, authService } from "@/services/auth";
+import { AuthStateError, authService, isSignInTemporarilyUnavailable } from "@/services/auth";
 import { ApiErrorResponse } from "@/services/api/client";
 import {
   isAuthOrganizationSelectionResponse,
@@ -24,6 +24,12 @@ type LoginContentProps = {
   hotelWorkspaceRequired?: boolean;
   workosReturn?: "complete" | "failed";
 };
+
+// VAY-2604: WorkOS being slow or down gets a clear "try again", not a raw server message.
+function loginErrorMessage(error: unknown, t: ReturnType<typeof useTranslation>["t"]): string {
+  if (isSignInTemporarilyUnavailable(error)) return t("auth.login.signInUnavailable");
+  return error instanceof Error ? error.message : t("auth.login.unexpectedError");
+}
 
 export function LoginContent({
   returnTo = "/dashboard",
@@ -85,7 +91,7 @@ export function LoginContent({
         }
         await redirectAfterLogin();
       } catch (error) {
-        setSubmitError(error instanceof Error ? error.message : t("auth.login.unexpectedError"));
+        setSubmitError(loginErrorMessage(error, t));
       } finally {
         setIsSubmitting(false);
       }
@@ -130,7 +136,7 @@ export function LoginContent({
           setHotelSetupRequired(true);
           return;
         }
-        setSubmitError(error instanceof Error ? error.message : t("auth.login.unexpectedError"));
+        setSubmitError(loginErrorMessage(error, t));
       } finally {
         setIsSubmitting(false);
       }
@@ -154,7 +160,7 @@ export function LoginContent({
       })
       .catch((error) => {
         if (cancelled) return;
-        setSubmitError(error instanceof Error ? error.message : t("auth.login.unexpectedError"));
+        setSubmitError(loginErrorMessage(error, t));
       })
       .finally(() => {
         if (!cancelled) {

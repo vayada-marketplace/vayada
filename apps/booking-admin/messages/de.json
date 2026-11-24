@@ -23,6 +23,7 @@
   "auth.login.errorSuspended": "Ihr Konto wurde gesperrt. Bitte kontaktieren Sie den Support.",
   "auth.login.errorValidation": "Validierungsfehler.",
   "auth.login.errorUnexpected": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es erneut.",
+  "auth.login.signInUnavailable": "Die Anmeldung dauert gerade länger als üblich. Bitte versuchen Sie es gleich noch einmal.",
   "auth.login.errorSessionExpired": "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
   "auth.login.hotelWorkspaceRequired": "Dieses Konto ist noch mit keinem Hotel verbunden. Wenn Sie von einem Hotel eingeladen wurden, öffnen Sie die Einladungs-E-Mail oder bitten Sie um eine neue Einladung.",
   "auth.login.setUpHotel": "Hotel einrichten",

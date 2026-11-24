@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useState, type FormEvent } from "reac
 import { useRouter, useSearchParams } from "next/navigation";
 import SharedHotelLoginForm from "@vayada/product-onboarding/SharedHotelLoginForm";
 import { safeRelativeReturnTo } from "@vayada/product-onboarding/returnTo";
-import { AuthStateError, authService } from "@/services/auth";
+import { AuthStateError, authService, isSignInTemporarilyUnavailable } from "@/services/auth";
 import {
   isAuthOrganizationSelectionResponse,
   type AuthOrganizationSelectionResponse,
@@ -12,6 +12,12 @@ import {
 import { resolveBookingSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import { hasPendingHotelAccountInvite } from "@/services/api/hotelAccountInvites";
 import { useTranslation } from "@/lib/i18n";
+
+// VAY-2604: WorkOS being slow or down gets a clear "try again", not a raw server message.
+function loginErrorMessage(error: unknown, t: ReturnType<typeof useTranslation>["t"]): string {
+  if (isSignInTemporarilyUnavailable(error)) return t("auth.login.signInUnavailable");
+  return error instanceof Error ? error.message : t("auth.login.errorUnexpected");
+}
 
 function LoginContent() {
   const { t } = useTranslation();
@@ -75,7 +81,7 @@ function LoginContent() {
         }
         await redirectAfterLogin();
       } catch (error) {
-        setSubmitError(error instanceof Error ? error.message : t("auth.login.errorUnexpected"));
+        setSubmitError(loginErrorMessage(error, t));
       } finally {
         setIsSubmitting(false);
       }
@@ -110,7 +116,7 @@ function LoginContent() {
           setHotelSetupRequired(true);
           return;
         }
-        setSubmitError(error instanceof Error ? error.message : t("auth.login.errorUnexpected"));
+        setSubmitError(loginErrorMessage(error, t));
       } finally {
         setIsSubmitting(false);
       }
@@ -132,9 +138,13 @@ function LoginContent() {
         }
         await redirectAfterLogin();
       })
-      .catch(() => {
+      .catch((error) => {
         if (cancelled) return;
-        setSubmitError(t("auth.login.errorUnexpected"));
+        setSubmitError(
+          isSignInTemporarilyUnavailable(error)
+            ? t("auth.login.signInUnavailable")
+            : t("auth.login.errorUnexpected"),
+        );
       })
       .finally(() => {
         if (!cancelled) {

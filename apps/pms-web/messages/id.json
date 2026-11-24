@@ -85,6 +85,7 @@
   "auth.login.accountSuspended": "Akun Anda telah ditangguhkan. Silakan hubungi dukungan.",
   "auth.login.validationError": "Kesalahan validasi.",
   "auth.login.unexpectedError": "Terjadi kesalahan yang tidak terduga. Silakan coba lagi.",
+  "auth.login.signInUnavailable": "Proses masuk memakan waktu lebih lama dari biasanya. Silakan coba lagi sebentar lagi.",
   "auth.login.sessionExpiredBanner": "Sesi Anda telah berakhir. Silakan masuk kembali.",
   "auth.login.signOut": "Keluar",
   "auth.login.hotelWorkspaceRequired": "Akun ini belum terhubung ke hotel mana pun. Jika Anda diundang oleh hotel, buka email undangan atau minta hotel mengirimkannya lagi.",

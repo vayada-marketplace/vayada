@@ -86,6 +86,7 @@
   "auth.login.accountSuspended": "Ihr Konto wurde gesperrt. Bitte kontaktieren Sie den Support.",
   "auth.login.validationError": "Validierungsfehler.",
   "auth.login.unexpectedError": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es erneut.",
+  "auth.login.signInUnavailable": "Die Anmeldung dauert gerade länger als üblich. Bitte versuchen Sie es gleich noch einmal.",
   "auth.login.sessionExpiredBanner": "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
   "auth.login.signOut": "Abmelden",
   "auth.login.formTitle": "Bei vayada anmelden",

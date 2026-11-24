@@ -33,7 +33,12 @@ import {
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 
 import type { HotelAccountAgreementsRepository } from "../domains/hotelAccountAgreementsRepository.js";
-import { mapWorkOSAuthError, type VayadaAuthStateResponse } from "../platform/workosAuthState.js";
+import {
+  asAuthProviderUnavailable,
+  isWorkOSUnavailableError,
+  mapWorkOSAuthError,
+  type VayadaAuthStateResponse,
+} from "../platform/workosAuthState.js";
 import type {
   AuthHandoffRoutingHints,
   AuthSessionHandoff,
@@ -476,6 +481,13 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       await recordPasswordLoginFailure(options, request, "pms-web", mapped.state);
       if (mapped.state === "auth_failed") {
         request.log.error({ workos: workosErrorDiagnostics(error) }, "Invitation sign-in failed");
+      }
+      if (mapped.state === "auth_unavailable") {
+        request.log.warn(
+          { workos: workosErrorDiagnostics(error) },
+          "Invitation sign-in unavailable",
+        );
+        reply.header("retry-after", "5");
       }
       // Pending tokens would continue a sign-in without the invitation; send only the state.
       return reply
@@ -953,18 +965,26 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
             parsed.surface,
             selectionFailure.state,
           );
-          if (selectionFailure.state === "auth_failed") {
-            request.log.error({ err: selectionError }, "WorkOS organization selection failed");
-          }
+          notePasswordAuthFailure(
+            request,
+            reply,
+            selectionFailure.state,
+            selectionError,
+            "WorkOS organization selection",
+          );
           return reply
             .code(statusForPasswordAuthFailure(selectionFailure.state))
             .send(selectionFailure);
         }
       } else {
         await recordPasswordLoginFailure(options, request, parsed.surface, mapped.state);
-        if (mapped.state === "auth_failed") {
-          request.log.error({ err: error }, "WorkOS password authentication failed");
-        }
+        notePasswordAuthFailure(
+          request,
+          reply,
+          mapped.state,
+          error,
+          "WorkOS password authentication",
+        );
         return reply.code(statusForPasswordAuthFailure(mapped.state)).send(mapped);
       }
     }
@@ -1114,8 +1134,16 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
           ...(parsed.acceptedAgreements ? { acceptedAgreements: parsed.acceptedAgreements } : {}),
         });
       }
+      if (mapped.state === "auth_unavailable")
+        notePasswordAuthFailure(request, reply, mapped.state, error, "WorkOS signup sign-in");
       return reply
-        .code(mapped.state === "invalid_credentials" && !createdUser ? 401 : 403)
+        .code(
+          mapped.state === "auth_unavailable"
+            ? 503
+            : mapped.state === "invalid_credentials" && !createdUser
+              ? 401
+              : 403,
+        )
         .send(mapped);
     }
 
@@ -1255,7 +1283,12 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         userAgent: request.headers["user-agent"],
       });
     } catch (error) {
-      return reply.code(400).send(toEmailVerificationError(error));
+      const failure = toEmailVerificationError(error);
+      if (failure.state === "auth_unavailable") {
+        notePasswordAuthFailure(request, reply, failure.state, error, "WorkOS email verification");
+        return reply.code(503).send(failure);
+      }
+      return reply.code(400).send(failure);
     }
     if (
       signupVerification &&
@@ -2720,10 +2753,27 @@ function parsePasswordLoginBody(body: unknown):
   }
 }
 
-function statusForPasswordAuthFailure(state: string): 401 | 403 | 502 {
+function statusForPasswordAuthFailure(state: string): 401 | 403 | 502 | 503 {
   if (state === "invalid_credentials") return 401;
   if (state === "auth_failed") return 502;
+  // WorkOS is slow or down (VAY-2604): try again, nothing is wrong with the account.
+  if (state === "auth_unavailable") return 503;
   return 403;
+}
+
+/** Logs why WorkOS refused a sign-in step and adds Retry-After when it was WorkOS being unavailable. */
+function notePasswordAuthFailure(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  state: string,
+  error: unknown,
+  what: string,
+): void {
+  if (state === "auth_failed") request.log.error({ err: error }, `${what} failed`);
+  if (state === "auth_unavailable") {
+    request.log.warn({ workos: workosErrorDiagnostics(error) }, `${what} unavailable`);
+    reply.header("retry-after", "5");
+  }
 }
 
 async function filterPasswordOrganizationChoices(
@@ -4605,6 +4655,9 @@ function activeCookieName(name: string, surfacePolicy: AuthSurfacePolicy): strin
 }
 
 function toAuthError(error: unknown) {
+  // WorkOS slow or down is "try again", never "rejected" (VAY-2604): every 403 catch that builds its
+  // answer here hands the error to the app's error handler instead, which answers 503 and keeps cookies.
+  if (isWorkOSUnavailableError(error)) throw asAuthProviderUnavailable(error);
   return {
     error: "auth_session_rejected",
     message: error instanceof Error ? error.message : "AuthKit session was rejected.",
@@ -4613,7 +4666,8 @@ function toAuthError(error: unknown) {
 
 function toEmailVerificationError(error: unknown) {
   const mapped = mapWorkOSAuthError(error);
-  if (mapped.state === "email_verification_required") {
+  // WorkOS timing out is not a wrong code (VAY-2604).
+  if (mapped.state === "email_verification_required" || mapped.state === "auth_unavailable") {
     return mapped;
   }
   return {

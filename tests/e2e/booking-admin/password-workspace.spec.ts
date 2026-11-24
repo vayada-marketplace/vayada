@@ -42,6 +42,25 @@ test("password login lets a hotel user choose a workspace", async ({ page }) => 
   expect(submissions).toBe(2);
 });
 
+// VAY-2604: WorkOS slow or down, or the sign-in gateway giving up, gets a clear "try again".
+for (const [name, status, json] of [
+  ["WorkOS is slow", 503, { state: "auth_unavailable", message: "SERVER TEXT THAT IS NOT SHOWN" }],
+  ["the sign-in gateway times out", 504, { error: "auth_gateway_upstream_timeout" }],
+] as const) {
+  test(`password login says to try again when ${name}`, async ({ page }) => {
+    await page.route("**/auth/password/login", (route) => route.fulfill({ status, json }));
+
+    await page.goto("/login");
+    await page.getByLabel("Email address", { exact: true }).fill("owner@example.test");
+    await page.getByLabel("Password", { exact: true }).fill("test-password");
+    await page.getByRole("button", { name: "Sign In", exact: true }).click();
+    await expect(
+      page.getByText("Signing in is taking longer than usual. Please try again in a moment."),
+    ).toBeVisible();
+    await expect(page.getByText("SERVER TEXT THAT IS NOT SHOWN")).toHaveCount(0);
+  });
+}
+
 const NO_HOTEL_MESSAGE = "No active hotel_group organization is available for this surface";
 
 // Booking Admin hosts hotel setup itself (VAY-2261): the login page explains the missing
@@ -115,6 +134,7 @@ test("password login returns to a /setup returnTo untouched", async ({ page }) =
 
   await expect(page).toHaveURL(new RegExp(`${setupReturnTo.replace(/[?+]/g, "\\$&")}$`));
   // The login page itself asked the setup API for nothing; only the setup page reads it later.
-  expect(guardReads.filter((path) => path.endsWith("/status") && page.url().includes("/login")))
-    .toEqual([]);
+  expect(
+    guardReads.filter((path) => path.endsWith("/status") && page.url().includes("/login")),
+  ).toEqual([]);
 });

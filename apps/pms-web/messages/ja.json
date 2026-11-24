@@ -84,6 +84,7 @@
   "auth.login.accountSuspended": "アカウントが停止されています。サポートにお問い合わせください。",
   "auth.login.validationError": "入力エラー。",
   "auth.login.unexpectedError": "予期しないエラーが発生しました。もう一度お試しください。",
+  "auth.login.signInUnavailable": "ログインに通常より時間がかかっています。しばらくしてからもう一度お試しください。",
   "auth.login.sessionExpiredBanner": "セッションが期限切れです。再度サインインしてください。",
   "auth.login.signOut": "ログアウト",
   "auth.login.hotelWorkspaceRequired": "このアカウントはまだホテルに接続されていません。ホテルから招待された場合は、招待メールを開くか、再送信を依頼してください。",

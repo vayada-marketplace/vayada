@@ -49,6 +49,7 @@ export type AuthStateResponse = {
     | "sso_required"
     | "hotel_workspace_required"
     | "account_exists"
+    | "auth_unavailable"
     | "auth_failed";
   message: string;
   pendingAuthenticationToken?: string;
@@ -87,15 +88,28 @@ export type PendingEmailVerification = {
 
 const PENDING_EMAIL_VERIFICATION_KEY = "vayada_pending_email_verification";
 
+/** The sign-in request got no answer at all (offline, or the server couldn't be reached). */
+export class AuthNetworkError extends Error {
+  constructor() {
+    super("Sign-in could not be reached. Please try again.");
+    this.name = "AuthNetworkError";
+  }
+}
+
 async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${AUTH_BROWSER_BASE_PATH}${endpoint}`, {
-    ...options,
-    credentials: "include",
-    headers: {
-      ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
-      ...(options.headers as Record<string, string> | undefined),
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${AUTH_BROWSER_BASE_PATH}${endpoint}`, {
+      ...options,
+      credentials: "include",
+      headers: {
+        ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...(options.headers as Record<string, string> | undefined),
+      },
+    });
+  } catch {
+    throw new AuthNetworkError();
+  }
 
   const contentType = response.headers.get("content-type");
   const body =
@@ -113,6 +127,17 @@ async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promis
   }
 
   return body as T;
+}
+
+/**
+ * VAY-2604: sign-in can't be checked right now (WorkOS slow or down, the sign-in gateway timed out,
+ * or the network dropped). Nothing is wrong with the person's sign-in: say "try again", keep it.
+ */
+export function isSignInTemporarilyUnavailable(error: unknown): boolean {
+  if (error instanceof AuthStateError) return error.state === "auth_unavailable";
+  if (error instanceof ApiErrorResponse)
+    return error.status === 502 || error.status === 503 || error.status === 504;
+  return error instanceof AuthNetworkError;
 }
 
 function isAuthStateResponse(value: unknown): value is AuthStateResponse {
@@ -266,8 +291,10 @@ export const authService = {
       const response = await authService.refreshSession();
       if (isAuthOrganizationSelectionResponse(response)) return false;
       return true;
-    } catch {
-      clearAuthData();
+    } catch (error) {
+      // A temporary failure keeps what this browser remembers (the chosen property too), so the
+      // next try picks up where the person was (VAY-2604).
+      if (!isSignInTemporarilyUnavailable(error)) clearAuthData();
       return false;
     }
   },
