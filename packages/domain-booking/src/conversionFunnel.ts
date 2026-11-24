@@ -1,5 +1,8 @@
 export const FUNNEL_STAGES = [
   "page_visit",
+  // VAY-2594: the guest picked dates. Optional: a session that selects a rate without it (the
+  // page's default dates, or sessions from before this event) counts as having searched too.
+  "dates_searched",
   "rate_selected",
   "addons_step_passed",
   "details_completed",
@@ -76,6 +79,7 @@ export const FUNNEL_ERROR_CODES = [
  */
 export type FunnelEventProperties = {
   page_visit: Record<string, never>;
+  dates_searched: Record<string, never>;
   room_viewed: { roomTypeId: string };
   rate_selected: { entry: "room_card" | "rooms_form" };
   step_viewed: { step: FunnelStep };
@@ -103,6 +107,7 @@ const own = (object: object, key: string) => Object.prototype.hasOwnProperty.cal
 const FUNNEL_EVENT_RULES: { [T in FunnelEventType]: Record<keyof FunnelEventProperties[T], Rule> } =
   {
     page_visit: {},
+    dates_searched: {},
     room_viewed: {
       roomTypeId: { valid: (value) => typeof value === "string" && /^[\w-]{1,64}$/.test(value) },
     },
@@ -178,6 +183,9 @@ export type BookingConversionFunnelReadPort = {
   }): Promise<BookingConversionFunnel | null>;
 };
 
+/** Steps a session may skip; a later step counts them as passed. */
+const OPTIONAL_STAGES: ReadonlySet<FunnelStage> = new Set(["dates_searched"]);
+
 /** Events are already property/time/traffic scoped by the target repository. */
 export function buildBookingConversionFunnel(
   events: readonly BookingFunnelEvent[],
@@ -209,9 +217,14 @@ export function buildBookingConversionFunnel(
     if (event.sequence <= session.sequence) continue;
     session.sequence = event.sequence;
     if (session.next < prefix.length) {
-      if (event.stage !== prefix[session.next]) continue;
-      counts.set(event.stage, (counts.get(event.stage) ?? 0) + 1);
-      session.next++;
+      // A step the guest may skip (picking dates) is counted when a later step comes without it.
+      const at = prefix.indexOf(event.stage, session.next);
+      if (at < 0 || prefix.slice(session.next, at).some((stage) => !OPTIONAL_STAGES.has(stage)))
+        continue;
+      for (; session.next <= at; session.next++) {
+        const stage = prefix[session.next]!;
+        counts.set(stage, (counts.get(stage) ?? 0) + 1);
+      }
       continue;
     }
     if (session.completed) continue;

@@ -713,19 +713,83 @@ export async function mockBookingAdminShellRoutes(
           })
         : route.fulfill({ status: 204 }),
   );
-  await page.route("**/api/booking/properties/*/dashboard/bookings-by-source**", (route) =>
+  // The Details window (VAY-2594): nothing yet.
+  await page.route("**/api/booking/properties/*/dashboard/details**", (route) =>
     route.fulfill({
       json: {
-        sourceMix: {
-          totalRevenue: { amountDecimal: "0.00", currency: "EUR" },
-          items: [],
+        details: {
+          pageViewsCountedFrom: null,
+          roomTypes: [],
+          leadTimes: [],
+          canceledBookingCount: 0,
+          topBookings: [],
+          recentBookings: [],
+        },
+        bookingsHidden: false,
+        canOpenInPms: false,
+      },
+    }),
+  );
+  // Page view tracking (VAY-2594): counted, so no amber banner.
+  await page.route("**/api/booking/properties/*/dashboard/tracking**", (route) =>
+    route.fulfill({
+      json: {
+        tracking: {
+          propertyId: "property-1",
+          bookingPageBookingCount: 0,
+          pageViewCount: 0,
+          trackingMissing: false,
         },
       },
     }),
   );
+  // Guest insights (VAY-2594): no guests yet.
+  await page.route("**/api/booking/properties/*/dashboard/guests**", (route) =>
+    route.fulfill({
+      json: {
+        guestInsights: {
+          guestCount: 0,
+          nationalities: [],
+          ages: [],
+          ageKnownCount: 0,
+          stays: [],
+          averageNights: null,
+          averageLeadDays: null,
+        },
+      },
+    }),
+  );
+  // Bookings by channel (VAY-2594): nothing yet.
+  await page.route("**/api/booking/properties/*/dashboard/channels**", (route) =>
+    route.fulfill({ json: { channelMix: { channels: [], directSources: [] } } }),
+  );
   await page.route("**/api/booking/properties/*/dashboard/sparklines**", (route) =>
     route.fulfill({ json: { sparklines: { points: [] } } }),
   );
+  // The revenue chart (VAY-2594): a day with nothing for every day asked for.
+  await page.route("**/api/booking/properties/*/dashboard/revenue-days**", (route) => {
+    const url = new URL(route.request().url());
+    const days: string[] = [];
+    const end = url.searchParams.get("windowEnd") ?? "";
+    for (
+      let day = new Date(`${url.searchParams.get("windowStart")}T00:00:00Z`);
+      day.toISOString().slice(0, 10) <= end && days.length < 90;
+      day.setUTCDate(day.getUTCDate() + 1)
+    )
+      days.push(day.toISOString().slice(0, 10));
+    return route.fulfill({
+      json: {
+        revenueDays: {
+          days: days.map((date) => ({
+            date,
+            revenue: { amountDecimal: "0.00", currency: "EUR" },
+            bookingCount: 0,
+            otherCurrencyBookingCount: 0,
+          })),
+        },
+      },
+    });
+  });
   await page.route("**/api/booking/properties/*/dashboard/page-views**", (route) =>
     route.fulfill({
       json: {

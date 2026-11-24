@@ -158,6 +158,136 @@ export type BookingDashboardMetricsReadModel = {
   liveSinceDate: BookingDate | null;
 };
 
+/** Bookings made in the period and the period before, for one channel or direct source. */
+export type BookingChannelCount = {
+  /** guest_bookings.booking_channel, or direct_booking_source for direct bookings. */
+  key: string;
+  bookingCount: number;
+  previousBookingCount: number;
+};
+
+/**
+ * Bookings by channel (VAY-2594): every channel's confirmed bookings, by booking date, and the
+ * direct ones by where the guest came from. Only keys with bookings in either period are listed.
+ */
+export type BookingChannelMixReadModel = {
+  propertyId: string;
+  channels: readonly BookingChannelCount[];
+  directSources: readonly BookingChannelCount[];
+};
+
+/**
+ * Page view tracking check (VAY-2594): over the last 7 days, bookings made on the booking page
+ * and its page views. Bookings without a single page view mean the views aren't being counted.
+ */
+export type BookingTrackingCheckReadModel = {
+  propertyId: string;
+  /** Booking page bookings guests finished (not drafts or expired ones) in the last 7 days. */
+  bookingPageBookingCount: number;
+  /** Page views of guests in the last 7 days, consented or not. */
+  pageViewCount: number;
+  /** At least two such bookings and not one page view: the views aren't arriving. */
+  trackingMissing: boolean;
+};
+
+/**
+ * Guest insights (VAY-2594): the guests of every channel's bookings made in the period, one per
+ * booking (its primary guest), by nationality, age at arrival and length of stay.
+ */
+export type BookingGuestInsightsReadModel = {
+  propertyId: string;
+  guestCount: number;
+  /** Largest first; a null country when the guest gave none. */
+  nationalities: readonly { countryCode: string | null; guestCount: number }[];
+  /** Ages at arrival, from a date of birth on the guest's profile or check-in. */
+  ages: readonly { bucket: "18-24" | "25-34" | "35-44" | "45-54" | "55+"; guestCount: number }[];
+  /** Guests whose age is known: the base of the ages. */
+  ageKnownCount: number;
+  stays: readonly { bucket: "1-2" | "3-4" | "5-7" | "8+"; guestCount: number }[];
+  averageNights: number | null;
+  /** Days from booking to arrival. */
+  averageLeadDays: number | null;
+};
+
+/** One day of the revenue chart: direct bookings made that day (VAY-2594). */
+export type BookingRevenueDay = {
+  /** Property-local calendar date the bookings were made. */
+  date: BookingDate;
+  revenue: BookingMoney;
+  bookingCount: number;
+  /** Of those, the bookings made on the booking page (the conversion rate's). */
+  bookingPageBookingCount: number;
+  /** Bookings in another currency than the property's: counted, but not in revenue. */
+  otherCurrencyBookingCount: number;
+};
+
+export type BookingRevenueDaysReadModel = {
+  propertyId: string;
+  windowStart: BookingDate;
+  windowEnd: BookingDate;
+  /** One entry per day of the window, days without bookings included. */
+  days: readonly BookingRevenueDay[];
+};
+
+/** A direct booking made on the day the dashboard's day window shows (VAY-2594). */
+export type BookingDayBooking = {
+  /** The booking's id, which PMS opens it by. */
+  id: string;
+  reference: string;
+  checkIn: BookingDate;
+  checkOut: BookingDate;
+  nights: number;
+  roomCount: number;
+  /** The booked room types' names, in room order (empty when unknown). */
+  roomNames: readonly string[];
+  /** The booking's total in its own currency. */
+  total: BookingMoney;
+  /** False for a booking in another currency, which the day's revenue leaves out. */
+  countedInRevenue: boolean;
+};
+
+/** A booking in the Details window's lists, with the day it was made and its state. */
+export type BookingDashboardBooking = BookingDayBooking & {
+  bookedOn: BookingDate;
+  status: "confirmed" | "canceled";
+};
+
+/**
+ * The Details window (VAY-2594): direct bookings made in the period and the period before, by
+ * room type (revenue) and lead time (bookings), with the period's cancellations, its five largest
+ * bookings and its five latest ones (cancelled ones included).
+ */
+export type BookingDashboardDetailsReadModel = {
+  propertyId: string;
+  /** First day every booking page view is counted (VAY-2592), or null before any. */
+  pageViewsCountedFrom: BookingDate | null;
+  /** Revenue by the first room's type; null name when it isn't known. */
+  roomTypes: readonly {
+    name: string | null;
+    revenue: BookingMoney;
+    previousRevenue: BookingMoney;
+  }[];
+  /** Days from booking to arrival: 0–7, 8–30, 31–90 and 90+ days. */
+  leadTimes: readonly {
+    bucket: "0-7" | "8-30" | "31-90" | "90+";
+    bookingCount: number;
+    previousBookingCount: number;
+  }[];
+  canceledBookingCount: number;
+  topBookings: readonly BookingDashboardBooking[];
+  recentBookings: readonly BookingDashboardBooking[];
+};
+
+export type BookingDayBookingsReadModel = {
+  propertyId: string;
+  date: BookingDate;
+  revenue: BookingMoney;
+  bookingCount: number;
+  /** Nights times rooms, over every booking of the day. */
+  roomNights: number;
+  bookings: readonly BookingDayBooking[];
+};
+
 export type BookingDashboardMetricsPeriodInput = {
   propertyId: string;
   periodStart: BookingDate;
@@ -189,6 +319,25 @@ export type BookingDashboardMetricsReadPort =
       windowStart: BookingDate;
       windowEnd: BookingDate;
     }): Promise<BookingPageViewTimelineReadModel | null>;
+    getChannelMix(input: BookingDashboardMetricsPeriodInput): Promise<BookingChannelMixReadModel>;
+    getTrackingCheck(input: { propertyId: string }): Promise<BookingTrackingCheckReadModel>;
+    getGuestInsights(input: {
+      propertyId: string;
+      periodStart: BookingDate;
+      periodEnd: BookingDate;
+    }): Promise<BookingGuestInsightsReadModel>;
+    getDashboardDetails(
+      input: BookingDashboardMetricsPeriodInput,
+    ): Promise<BookingDashboardDetailsReadModel>;
+    getRevenueDays(input: {
+      propertyId: string;
+      windowStart: BookingDate;
+      windowEnd: BookingDate;
+    }): Promise<BookingRevenueDaysReadModel | null>;
+    getDayBookings(input: {
+      propertyId: string;
+      date: BookingDate;
+    }): Promise<BookingDayBookingsReadModel | null>;
   };
 
 // ─── Booking reservations read model ────────────────────────────────────────

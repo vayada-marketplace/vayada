@@ -1,15 +1,25 @@
 import type {
+  BookingChannelMixReadModel,
+  BookingDashboardDetailsReadModel,
   BookingDashboardMetricsPeriodInput,
   BookingDashboardMetricsReadModel,
   BookingDashboardMetricsReadPort,
+  BookingDayBookingsReadModel,
+  BookingGuestInsightsReadModel,
+  BookingTrackingCheckReadModel,
   BookingPageViewTimelineReadModel,
+  BookingRevenueDaysReadModel,
   BookingSourceMixReadModel,
   BookingSparklineReadModel,
 } from "@vayada/domain-booking";
-import { AuthorizationError, type PropertyAccessRepository } from "@vayada/backend-authorization";
+import {
+  AuthorizationError,
+  hasPermission,
+  type PropertyAccessRepository,
+} from "@vayada/backend-authorization";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
-import { enforcePropertyRoutePolicy, enforceRoutePolicy } from "./policy.js";
+import { canUsePms, enforcePropertyRoutePolicy, enforceRoutePolicy } from "./policy.js";
 
 export const BOOKING_DASHBOARD_CONTRACT_VERSION = "booking-dashboard.v1" as const;
 
@@ -39,6 +49,10 @@ type DashboardWindowQuery = {
   windowEnd?: string;
 };
 
+type DashboardDayQuery = {
+  date?: string;
+};
+
 export type BookingDashboardStatsResponse = {
   contractVersion: BookingDashboardContractVersion;
   propertyId: string;
@@ -61,6 +75,51 @@ export type BookingDashboardPageViewsResponse = {
   contractVersion: BookingDashboardContractVersion;
   propertyId: string;
   pageViews: BookingPageViewTimelineReadModel;
+};
+
+export type BookingDashboardTrackingResponse = {
+  contractVersion: BookingDashboardContractVersion;
+  propertyId: string;
+  tracking: BookingTrackingCheckReadModel;
+};
+
+export type BookingDashboardGuestsResponse = {
+  contractVersion: BookingDashboardContractVersion;
+  propertyId: string;
+  guestInsights: BookingGuestInsightsReadModel;
+  /** Ages come from check-in data: only for people who may read reservations. */
+  agesHidden: boolean;
+};
+
+export type BookingDashboardChannelsResponse = {
+  contractVersion: BookingDashboardContractVersion;
+  propertyId: string;
+  channelMix: BookingChannelMixReadModel;
+};
+
+export type BookingDashboardDetailsResponse = {
+  contractVersion: BookingDashboardContractVersion;
+  propertyId: string;
+  /** Its booking lists only for people who may read reservations (bookingsHidden). */
+  details: BookingDashboardDetailsReadModel;
+  bookingsHidden: boolean;
+  canOpenInPms: boolean;
+};
+
+export type BookingDashboardRevenueDaysResponse = {
+  contractVersion: BookingDashboardContractVersion;
+  propertyId: string;
+  revenueDays: BookingRevenueDaysReadModel;
+};
+
+export type BookingDashboardDayBookingsResponse = {
+  contractVersion: BookingDashboardContractVersion;
+  propertyId: string;
+  /** The day's totals; its bookings only for people who may read reservations (bookingsHidden). */
+  dayBookings: BookingDayBookingsReadModel;
+  bookingsHidden: boolean;
+  /** Whether "Open booking" may open the booking in PMS; otherwise it opens Reservations here. */
+  canOpenInPms: boolean;
 };
 
 type BookingDashboardErrorCode =
@@ -242,6 +301,199 @@ export async function registerBookingDashboardRoutes(
       }
     },
   );
+
+  // VAY-2594: whether page views are being counted (the dashboard's amber banner).
+  app.get<{ Params: BookingDashboardPropertyParams }>(
+    "/properties/:propertyId/dashboard/tracking",
+    async (request, reply) => {
+      const { propertyId } = request.params;
+      if (!(await enforceBookingDashboardReadPolicy(request, reply, propertyId, options)))
+        return reply;
+      try {
+        const tracking = await metricsReadPort.getTrackingCheck({ propertyId });
+        return {
+          contractVersion: BOOKING_DASHBOARD_CONTRACT_VERSION,
+          propertyId,
+          tracking,
+        } satisfies BookingDashboardTrackingResponse;
+      } catch (error) {
+        request.log.error({ err: error }, "Booking dashboard tracking check failed");
+        return sendBookingDashboardError(reply, 500, readModelUnavailableError());
+      }
+    },
+  );
+
+  // VAY-2594: guest insights, the guests of the period's bookings in aggregate.
+  app.get<{ Params: BookingDashboardPropertyParams; Querystring: DashboardPeriodQuery }>(
+    "/properties/:propertyId/dashboard/guests",
+    async (request, reply) => {
+      const { propertyId } = request.params;
+      if (!(await enforceBookingDashboardReadPolicy(request, reply, propertyId, options)))
+        return reply;
+      const period = parseSourceMixPeriodQuery(request.query);
+      if (!period.ok) return sendBookingDashboardError(reply, 400, period.error);
+      try {
+        const guestInsights = await metricsReadPort.getGuestInsights({
+          propertyId,
+          ...period.value,
+        });
+        // A short period can narrow an age group to one guest, and the dates of birth come from
+        // check-in: staff with analytics only get no ages, as they get no booking rows.
+        const access = await bookingRowAccess(request, propertyId, options);
+        return {
+          contractVersion: BOOKING_DASHBOARD_CONTRACT_VERSION,
+          propertyId,
+          guestInsights: access.canSeeBookings
+            ? guestInsights
+            : { ...guestInsights, ages: [], ageKnownCount: 0 },
+          agesHidden: !access.canSeeBookings,
+        } satisfies BookingDashboardGuestsResponse;
+      } catch (error) {
+        request.log.error({ err: error }, "Booking dashboard guest insights read failed");
+        return sendBookingDashboardError(reply, 500, readModelUnavailableError());
+      }
+    },
+  );
+
+  // VAY-2594: bookings by channel, and direct bookings by source, now and in the period before.
+  app.get<{ Params: BookingDashboardPropertyParams; Querystring: DashboardPeriodQuery }>(
+    "/properties/:propertyId/dashboard/channels",
+    async (request, reply) => {
+      const { propertyId } = request.params;
+      if (!(await enforceBookingDashboardReadPolicy(request, reply, propertyId, options)))
+        return reply;
+      const period = parseDashboardPeriodQuery(request.query);
+      if (!period.ok) return sendBookingDashboardError(reply, 400, period.error);
+      try {
+        const channelMix = await metricsReadPort.getChannelMix({ propertyId, ...period.value });
+        return {
+          contractVersion: BOOKING_DASHBOARD_CONTRACT_VERSION,
+          propertyId,
+          channelMix,
+        } satisfies BookingDashboardChannelsResponse;
+      } catch (error) {
+        request.log.error({ err: error }, "Booking dashboard channel mix read failed");
+        return sendBookingDashboardError(reply, 500, readModelUnavailableError());
+      }
+    },
+  );
+
+  // VAY-2594: the Details window's breakdowns and booking lists.
+  app.get<{ Params: BookingDashboardPropertyParams; Querystring: DashboardPeriodQuery }>(
+    "/properties/:propertyId/dashboard/details",
+    async (request, reply) => {
+      const { propertyId } = request.params;
+      if (!(await enforceBookingDashboardReadPolicy(request, reply, propertyId, options)))
+        return reply;
+      const period = parseDashboardPeriodQuery(request.query);
+      if (!period.ok) return sendBookingDashboardError(reply, 400, period.error);
+      try {
+        const details = await metricsReadPort.getDashboardDetails({ propertyId, ...period.value });
+        const access = await bookingRowAccess(request, propertyId, options);
+        return {
+          contractVersion: BOOKING_DASHBOARD_CONTRACT_VERSION,
+          propertyId,
+          details: access.canSeeBookings
+            ? details
+            : { ...details, topBookings: [], recentBookings: [] },
+          bookingsHidden: !access.canSeeBookings,
+          canOpenInPms: access.canOpenInPms,
+        } satisfies BookingDashboardDetailsResponse;
+      } catch (error) {
+        request.log.error({ err: error }, "Booking dashboard details read failed");
+        return sendBookingDashboardError(reply, 500, readModelUnavailableError());
+      }
+    },
+  );
+
+  // VAY-2594: the revenue chart, one bar per day of direct bookings made that day.
+  app.get<{ Params: BookingDashboardPropertyParams; Querystring: DashboardWindowQuery }>(
+    "/properties/:propertyId/dashboard/revenue-days",
+    async (request, reply) => {
+      const { propertyId } = request.params;
+      if (!(await enforceBookingDashboardReadPolicy(request, reply, propertyId, options)))
+        return reply;
+      const window = parsePageViewWindowQuery(request.query);
+      if (!window.ok) return sendBookingDashboardError(reply, 400, window.error);
+      try {
+        const revenueDays = await metricsReadPort.getRevenueDays({ propertyId, ...window.value });
+        if (!revenueDays) {
+          return sendBookingDashboardError(reply, 404, {
+            code: "read_model_not_found",
+            category: "not_found",
+            message: "Booking dashboard revenue was not found for this property.",
+          });
+        }
+        return {
+          contractVersion: BOOKING_DASHBOARD_CONTRACT_VERSION,
+          propertyId,
+          revenueDays,
+        } satisfies BookingDashboardRevenueDaysResponse;
+      } catch (error) {
+        request.log.error({ err: error }, "Booking dashboard revenue days read failed");
+        return sendBookingDashboardError(reply, 500, readModelUnavailableError());
+      }
+    },
+  );
+
+  // VAY-2594: the day window, the direct bookings made on one day of the chart.
+  app.get<{ Params: BookingDashboardPropertyParams; Querystring: DashboardDayQuery }>(
+    "/properties/:propertyId/dashboard/day-bookings",
+    async (request, reply) => {
+      const { propertyId } = request.params;
+      if (!(await enforceBookingDashboardReadPolicy(request, reply, propertyId, options)))
+        return reply;
+      const { date } = request.query;
+      if (!isIsoDate(date)) {
+        return sendBookingDashboardError(reply, 400, {
+          code: "invalid_query",
+          category: "validation",
+          message: "date is a required YYYY-MM-DD value.",
+        });
+      }
+      try {
+        const dayBookings = await metricsReadPort.getDayBookings({ propertyId, date });
+        if (!dayBookings) {
+          return sendBookingDashboardError(reply, 404, {
+            code: "read_model_not_found",
+            category: "not_found",
+            message: "Booking dashboard bookings were not found for this property.",
+          });
+        }
+        const access = await bookingRowAccess(request, propertyId, options);
+        return {
+          contractVersion: BOOKING_DASHBOARD_CONTRACT_VERSION,
+          propertyId,
+          dayBookings: access.canSeeBookings ? dayBookings : { ...dayBookings, bookings: [] },
+          bookingsHidden: !access.canSeeBookings,
+          canOpenInPms: access.canOpenInPms,
+        } satisfies BookingDashboardDayBookingsResponse;
+      } catch (error) {
+        request.log.error({ err: error }, "Booking dashboard day bookings read failed");
+        return sendBookingDashboardError(reply, 500, readModelUnavailableError());
+      }
+    },
+  );
+}
+
+/**
+ * Who may see single bookings on the dashboard: people who can read reservations here or in PMS,
+ * not everyone with the dashboard (staff with analytics only). PMS access is checked on the
+ * canonical property, as PMS keys its access by it.
+ */
+async function bookingRowAccess(
+  request: FastifyRequest,
+  propertyId: string,
+  options: BookingDashboardRoutesOptions,
+): Promise<{ canSeeBookings: boolean; canOpenInPms: boolean }> {
+  const canonicalPropertyId =
+    (await options.metricsReadPort.resolveCanonicalPropertyId(propertyId))?.toLowerCase() ??
+    propertyId;
+  const canOpenInPms = canUsePms(request, canonicalPropertyId, "pms.reservation.read");
+  const canReadReservations = Boolean(
+    request.authContext && hasPermission(request.authContext, "booking.reservation.read"),
+  );
+  return { canSeeBookings: canOpenInPms || canReadReservations, canOpenInPms };
 }
 
 async function enforceBookingDashboardReadPolicy(
@@ -355,7 +607,7 @@ function parsePageViewWindowQuery(
       error: {
         code: "invalid_query",
         category: "validation",
-        message: `Page-view and funnel windows can be up to ${MAX_WINDOW_DAYS} days.`,
+        message: `Page-view, funnel and revenue windows can be up to ${MAX_WINDOW_DAYS} days.`,
       },
     };
   }

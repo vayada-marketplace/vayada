@@ -327,7 +327,22 @@ describe("@vayada/domain-booking dashboard metrics read model contract", () => {
         return fakeSparklines(input.propertyId);
       },
       getConversionFunnel: async () => ({ steps: [], paymentMethods: [], biggestDrop: null }),
-        async getPageViewTimeline(input) {
+      getChannelMix: async (input) => ({
+        propertyId: input.propertyId,
+        channels: [],
+        directSources: [],
+      }),
+      getDashboardDetails: async (input) => emptyDetails(input.propertyId),
+      getGuestInsights: async (input) => emptyGuests(input.propertyId),
+      getTrackingCheck: async (input) => ({
+        propertyId: input.propertyId,
+        bookingPageBookingCount: 0,
+        pageViewCount: 0,
+        trackingMissing: false,
+      }),
+      getRevenueDays: async () => null,
+      getDayBookings: async () => null,
+      async getPageViewTimeline(input) {
         return fakePageViews(input.propertyId);
       },
     };
@@ -353,6 +368,21 @@ describe("@vayada/domain-booking dashboard metrics read model contract", () => {
         fakeSourceMix(input.propertyId, input.periodStart, input.periodEnd),
       getSparklines: async (input) => fakeSparklines(input.propertyId),
       getConversionFunnel: async () => ({ steps: [], paymentMethods: [], biggestDrop: null }),
+      getChannelMix: async (input) => ({
+        propertyId: input.propertyId,
+        channels: [],
+        directSources: [],
+      }),
+      getDashboardDetails: async (input) => emptyDetails(input.propertyId),
+      getGuestInsights: async (input) => emptyGuests(input.propertyId),
+      getTrackingCheck: async (input) => ({
+        propertyId: input.propertyId,
+        bookingPageBookingCount: 0,
+        pageViewCount: 0,
+        trackingMissing: false,
+      }),
+      getRevenueDays: async () => null,
+      getDayBookings: async () => null,
       getPageViewTimeline: async (input) => fakePageViews(input.propertyId),
     };
 
@@ -375,6 +405,21 @@ describe("@vayada/domain-booking dashboard metrics read model contract", () => {
         fakeSourceMix(input.propertyId, input.periodStart, input.periodEnd),
       getSparklines: async (input) => fakeSparklines(input.propertyId),
       getConversionFunnel: async () => ({ steps: [], paymentMethods: [], biggestDrop: null }),
+      getChannelMix: async (input) => ({
+        propertyId: input.propertyId,
+        channels: [],
+        directSources: [],
+      }),
+      getDashboardDetails: async (input) => emptyDetails(input.propertyId),
+      getGuestInsights: async (input) => emptyGuests(input.propertyId),
+      getTrackingCheck: async (input) => ({
+        propertyId: input.propertyId,
+        bookingPageBookingCount: 0,
+        pageViewCount: 0,
+        trackingMissing: false,
+      }),
+      getRevenueDays: async () => null,
+      getDayBookings: async () => null,
       getPageViewTimeline: async (input) => fakePageViews(input.propertyId),
     };
 
@@ -591,5 +636,30 @@ function fakePageViews(propertyId: string) {
     previousBuckets,
     total: buckets.reduce((sum, bucket) => sum + bucket.count, 0),
     previousTotal: previousBuckets.reduce((sum, bucket) => sum + bucket.count, 0),
+  };
+}
+
+function emptyDetails(propertyId: string) {
+  return {
+    propertyId,
+    pageViewsCountedFrom: null,
+    roomTypes: [],
+    leadTimes: [],
+    canceledBookingCount: 0,
+    topBookings: [],
+    recentBookings: [],
+  };
+}
+
+function emptyGuests(propertyId: string) {
+  return {
+    propertyId,
+    guestCount: 0,
+    nationalities: [],
+    ages: [],
+    ageKnownCount: 0,
+    stays: [],
+    averageNights: null,
+    averageLeadDays: null,
   };
 }

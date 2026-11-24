@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import StayHero from "@/components/booking/StayHero";
@@ -64,6 +64,7 @@ function HomePageContent() {
     return ensureMinOneNight(ciQ || defaultCheckIn, coQ || defaultCheckOut);
   })();
   const [checkIn, setCheckIn] = useState(initialDates.checkIn);
+  const datesSearchedSent = useRef(false);
   const [checkOut, setCheckOut] = useState(initialDates.checkOut);
   const [adults, setAdults] = useState(() => parseInt(searchParams.get("adults") || "2"));
   const [children, setChildren] = useState(() => parseInt(searchParams.get("children") || "0"));
@@ -173,6 +174,12 @@ function HomePageContent() {
         checkOut={checkOut}
         nights={nights}
         onDates={(ci, co) => {
+          // VAY-2594: the funnel's "Searched dates" step, once per page load: only the first
+          // counts, and each send uses up the session's event limit.
+          if (!datesSearchedSent.current && (ci !== checkIn || co !== checkOut)) {
+            datesSearchedSent.current = true;
+            trackEvent(slug, "dates_searched", {});
+          }
           setCheckIn(ci);
           setCheckOut(co);
         }}
