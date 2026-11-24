@@ -156,6 +156,175 @@ describe("transcriptOf", () => {
     expect(items[6]).toMatchObject({ turnId: "t3", status: "failed", reason: "allowance_used_up" });
   });
 
+  it("shows a change the AI asked for as vayada's card, in place of its progress line", () => {
+    const pendingActionId = "8f3c2a10-1b2c-4d5e-8f90-123456789abc";
+    const items = transcriptOf(
+      view(
+        [{ status: "waiting_for_answer" }],
+        [
+          { turnId: "t1", message: { role: "user", content: "Block room 12 from the 12th" } },
+          {
+            turnId: "t1",
+            message: {
+              role: "assistant",
+              content: [
+                { type: "text", text: "Room 12 is free, so I can block it." },
+                { type: "tool-call", toolCallId: "a", toolName: "calendar_days", input: {} },
+                { type: "tool-call", toolCallId: "b", toolName: "room_block_create", input: {} },
+              ],
+            },
+          },
+          {
+            turnId: "t1",
+            message: {
+              role: "tool",
+              content: [
+                {
+                  type: "tool-result",
+                  toolCallId: "a",
+                  toolName: "calendar_days",
+                  output: { type: "json", value: {} },
+                },
+                {
+                  type: "tool-result",
+                  toolCallId: "b",
+                  toolName: "room_block_create",
+                  output: { type: "json", value: { ok: true, pendingActionId, status: "pending" } },
+                },
+              ],
+            },
+          },
+        ],
+      ),
+    );
+    expect(items).toEqual([
+      { kind: "question", key: "q-1", text: "Block room 12 from the 12th" },
+      { kind: "progress", key: "t-a", tool: "calendar_days", status: "ok" },
+      { kind: "answer", key: "a-2", text: "Room 12 is free, so I can block it.", at: AT },
+      { kind: "change", key: `c-t1-${pendingActionId}`, pendingActionId },
+    ]);
+  });
+
+  it("puts a turn's card after its text, also when the text was stored after the result", () => {
+    const pendingActionId = "8f3c2a10-1b2c-4d5e-8f90-123456789abc";
+    const items = transcriptOf(
+      view(
+        [{ status: "waiting_for_answer" }, { status: "done" }],
+        [
+          { turnId: "t1", message: { role: "user", content: "Block room 12" } },
+          {
+            turnId: "t1",
+            message: {
+              role: "assistant",
+              content: [
+                { type: "tool-call", toolCallId: "b", toolName: "room_block_create", input: {} },
+              ],
+            },
+          },
+          {
+            turnId: "t1",
+            message: {
+              role: "tool",
+              content: [
+                {
+                  type: "tool-result",
+                  toolCallId: "b",
+                  toolName: "room_block_create",
+                  output: { type: "json", value: { pendingActionId } },
+                },
+              ],
+            },
+          },
+          { turnId: "t1", message: { role: "assistant", content: "Tap Yes if it's right." } },
+          { turnId: "t2", message: { role: "user", content: "And room 14?" } },
+        ],
+      ),
+    );
+    expect(items.map((item) => item.kind)).toEqual(["question", "answer", "change", "question"]);
+  });
+
+  it("shows a change asked again in a later turn there too, once per turn", () => {
+    const pendingActionId = "8f3c2a10-1b2c-4d5e-8f90-123456789abc";
+    const asked = (turnId: string, seq: number) => [
+      { turnId, message: { role: "user" as const, content: `Block room 12 (${seq})` } },
+      {
+        turnId,
+        message: {
+          role: "assistant" as const,
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: `${turnId}-a`,
+              toolName: "room_block_create",
+              input: {},
+            },
+            {
+              type: "tool-call",
+              toolCallId: `${turnId}-b`,
+              toolName: "room_block_create",
+              input: {},
+            },
+          ],
+        },
+      },
+      {
+        turnId,
+        message: {
+          role: "tool" as const,
+          content: [`${turnId}-a`, `${turnId}-b`].map((toolCallId) => ({
+            type: "tool-result",
+            toolCallId,
+            toolName: "room_block_create",
+            output: { type: "json", value: { pendingActionId } },
+          })),
+        },
+      },
+    ];
+    const items = transcriptOf(
+      view(
+        [{ status: "waiting_for_answer" }, { status: "waiting_for_answer" }],
+        [...asked("t1", 1), ...asked("t2", 2)],
+      ),
+    );
+    expect(items.filter((item) => item.kind === "change").map((item) => item.key)).toEqual([
+      `c-t1-${pendingActionId}`,
+      `c-t2-${pendingActionId}`,
+    ]);
+  });
+
+  it("makes no card of a result that only looks like one", () => {
+    const items = transcriptOf(
+      view(
+        [{}],
+        [
+          { turnId: "t1", message: { role: "user", content: "Rooms?" } },
+          {
+            turnId: "t1",
+            message: {
+              role: "assistant",
+              content: [{ type: "tool-call", toolCallId: "a", toolName: "rooms_list", input: {} }],
+            },
+          },
+          {
+            turnId: "t1",
+            message: {
+              role: "tool",
+              content: [
+                {
+                  type: "tool-result",
+                  toolCallId: "a",
+                  toolName: "rooms_list",
+                  output: { type: "json", value: { pendingActionId: "not-an-id" } },
+                },
+              ],
+            },
+          },
+        ],
+      ),
+    );
+    expect(items.map((item) => item.kind)).toEqual(["question", "progress"]);
+  });
+
   it("finds the turn that is still running", () => {
     const chat = view([{ status: "done" }, { status: "running", endedAt: null }], []);
     expect(runningTurn(chat)?.id).toBe("t2");

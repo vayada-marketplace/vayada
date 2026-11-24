@@ -100,6 +100,55 @@ async function unlessUnmounted<T>(call: Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * An AI change waiting for the person's Yes or No, and what became of it (VAY-2524, apps/api
+ * ai/changes/pendingActions.ts). vayada writes the card from the stored change, never the model.
+ */
+export type PendingActionState =
+  | "needs_answer"
+  | "running"
+  | "done"
+  | "declined"
+  | "expired"
+  | "changed"
+  | "not_allowed"
+  | "stopped"
+  | "failed"
+  | "unsure";
+
+export type ChangeCard = {
+  question: string;
+  doneTitle: string;
+  yesLabel: string;
+  details: readonly { label: string; value: string }[];
+  effects: readonly string[];
+};
+
+export type PendingActionView = {
+  id: string;
+  state: PendingActionState;
+  /** While it waits: the answer is due by then. */
+  answerBy: string | null;
+  answeredAt: string | null;
+  finishedAt: string | null;
+  /** Null when vayada can't write it now (a record it names is gone or hidden). */
+  card: ChangeCard | null;
+  /** Sent back with the Yes: it binds the Yes to this card. Only while it waits. */
+  cardSha256: string | null;
+};
+
+/**
+ * The change as it is now, from a refused answer: 409 (answered elsewhere, expired, changed since)
+ * or 403 (not allowed). A 503 may carry one too, but then nothing is known about the answer.
+ */
+const refusedWith = (error: unknown): PendingActionView | undefined => {
+  const status = statusOf(error);
+  if (status !== 409 && status !== 403) return undefined;
+  const data = (error as { data?: { pendingAction?: unknown } } | null)?.data;
+  const view = data?.pendingAction as PendingActionView | undefined;
+  return view && typeof view.id === "string" && typeof view.state === "string" ? view : undefined;
+};
+
 const scopeQuery = (scope: AssistantScope) =>
   `propertyId=${encodeURIComponent(scope.propertyId)}&app=${encodeURIComponent(scope.app)}`;
 
@@ -128,6 +177,42 @@ export function createAssistantApi(http: AssistantHttp) {
         );
       } catch (error) {
         if (statusOf(error) === 404) return undefined;
+        throw error;
+      }
+    },
+
+    /** The Yes/No card of an AI change; undefined when there is none (or changes are off). */
+    async pendingAction(id: string): Promise<PendingActionView | undefined> {
+      try {
+        return await http.get<PendingActionView>(
+          `/api/ai/pending-actions/${encodeURIComponent(id)}`,
+        );
+      } catch (error) {
+        if (statusOf(error) === 404) return undefined;
+        throw error;
+      }
+    },
+
+    /**
+     * The person's Yes (bound to the card they saw) or No; resolves with the change as it is
+     * after it. A refusal that names the change as it is now (answered in another tab, expired,
+     * changed since, not allowed) resolves with that; anything else throws, and nobody knows yet
+     * whether the answer arrived.
+     */
+    async answer(
+      view: Pick<PendingActionView, "id" | "cardSha256">,
+      given: "yes" | "no",
+    ): Promise<PendingActionView> {
+      try {
+        const body =
+          given === "yes" ? { answer: "yes", cardSha256: view.cardSha256 } : { answer: "no" };
+        return await http.post<PendingActionView>(
+          `/api/ai/pending-actions/${encodeURIComponent(view.id)}/answer`,
+          body,
+        );
+      } catch (error) {
+        const current = refusedWith(error);
+        if (current) return current;
         throw error;
       }
     },

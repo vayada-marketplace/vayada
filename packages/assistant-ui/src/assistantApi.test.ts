@@ -189,4 +189,51 @@ describe("createAssistantApi", () => {
     );
     await expect(api.read(scope, "c1")).resolves.toBeUndefined();
   });
+
+  it("reads a change's card, and nothing when there is none or changes are off (404)", async () => {
+    const view = { id: "p1", state: "needs_answer", cardSha256: "a".repeat(64) };
+    const get = vi.fn(async (path: string) => {
+      if (path.endsWith("/p1")) return view as never;
+      throw httpError(404);
+    });
+    const api = createAssistantApi(fakeHttp({ get }));
+    await expect(api.pendingAction("p1")).resolves.toEqual(view);
+    expect(get).toHaveBeenCalledWith("/api/ai/pending-actions/p1");
+    await expect(api.pendingAction("p2")).resolves.toBeUndefined();
+  });
+
+  it("sends a Yes bound to the card shown, a No without it", async () => {
+    const post = vi.fn(async () => ({ id: "p1", state: "done" }) as never);
+    const api = createAssistantApi(fakeHttp({ post }));
+    const card = { id: "p1", cardSha256: "b".repeat(64) };
+    await expect(api.answer(card, "yes")).resolves.toEqual({ id: "p1", state: "done" });
+    expect(post).toHaveBeenLastCalledWith("/api/ai/pending-actions/p1/answer", {
+      answer: "yes",
+      cardSha256: "b".repeat(64),
+    });
+    await api.answer(card, "no");
+    expect(post).toHaveBeenLastCalledWith("/api/ai/pending-actions/p1/answer", { answer: "no" });
+  });
+
+  it("hands back the change as it is now when the answer is refused (409, 403)", async () => {
+    const current = { id: "p1", state: "changed" };
+    const refused = Object.assign(httpError(409), {
+      data: { code: "changed", pendingAction: current },
+    });
+    // A 503 may carry the change too, but then nobody knows whether the answer arrived.
+    const unavailable = Object.assign(httpError(503), {
+      data: { code: "unavailable", pendingAction: { id: "p1", state: "needs_answer" } },
+    });
+    const api = createAssistantApi(
+      fakeHttp({
+        post: vi
+          .fn()
+          .mockRejectedValueOnce(refused)
+          .mockRejectedValueOnce(unavailable) as AssistantHttp["post"],
+      }),
+    );
+    const card = { id: "p1", cardSha256: "c".repeat(64) };
+    await expect(api.answer(card, "yes")).resolves.toEqual(current);
+    await expect(api.answer(card, "yes")).rejects.toMatchObject({ status: 503 });
+  });
 });

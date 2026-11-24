@@ -4,7 +4,8 @@ import type { ConversationView, TurnStatus } from "./assistantApi";
  * What the panel shows of a stored chat (VAY-2519). Everything comes from what the API stored:
  * the person's questions (without vayada's note), the AI's text, one progress line per tool call
  * with its result, and how each turn ended when it didn't simply finish. Thinking, tool inputs and
- * tool answers are never shown as text.
+ * tool answers are never shown as text. A change the AI asked for (a tool result naming its
+ * `pendingActionId`, VAY-2524) becomes vayada's Yes/No card in place of its progress line.
  */
 export type ToolLineStatus = "running" | "ok" | "failed" | "skipped";
 
@@ -12,11 +13,12 @@ export type TranscriptItem =
   | { kind: "question"; key: string; text: string }
   | { kind: "progress"; key: string; tool: string; status: ToolLineStatus }
   | { kind: "answer"; key: string; text: string; at: string }
+  | { kind: "change"; key: string; pendingActionId: string }
   | {
       kind: "ended";
       key: string;
       turnId: string;
-      status: Exclude<TurnStatus, "running" | "done">;
+      status: Exclude<TurnStatus, "running" | "done" | "waiting_for_answer">;
       reason: string | null;
     };
 
@@ -61,10 +63,18 @@ export function transcriptOf(view: ConversationView): TranscriptItem[] {
   const lineOf = new Map<string, Extract<TranscriptItem, { kind: "progress" }>>();
   const turns = new Map(view.turns.map((turn) => [turn.id, turn]));
   let currentTurn: string | undefined;
+  // A turn's change cards come after its text, as on the boards, whatever order it was stored in;
+  // each once per turn. A later turn that asks again for a change still waiting (it joins the
+  // same pending action) shows its card again there.
+  let cards: Extract<TranscriptItem, { kind: "change" }>[] = [];
 
   const closeTurn = (turnId: string | undefined) => {
+    items.push(...cards);
+    cards = [];
     const turn = turnId ? turns.get(turnId) : undefined;
+    // Running, done or waiting for an answer (its card says so): nothing more to say.
     if (!turn || turn.status === "running" || turn.status === "done") return;
+    if (turn.status === "waiting_for_answer") return;
     items.push({
       kind: "ended",
       key: `ended-${turn.id}`,
@@ -105,13 +115,35 @@ export function transcriptOf(view: ConversationView): TranscriptItem[] {
       if (text) items.push({ kind: "answer", key: `a-${row.seq}`, text, at: row.createdAt });
     } else {
       for (const part of partsOf(content)) {
+        if (part["type"] !== "tool-result") continue;
         const line = lineOf.get(String(part["toolCallId"]));
-        if (line && part["type"] === "tool-result") line.status = resultStatus(part["output"]);
+        const pendingActionId = pendingActionOf(part["output"]);
+        if (pendingActionId) {
+          // The card says what the change is; a "Looked something up" line would not.
+          const at = line ? items.indexOf(line) : -1;
+          if (at !== -1) items.splice(at, 1);
+          if (!cards.some((card) => card.pendingActionId === pendingActionId))
+            cards.push({
+              kind: "change",
+              key: `c-${row.turnId}-${pendingActionId}`,
+              pendingActionId,
+            });
+        } else if (line) line.status = resultStatus(part["output"]);
       }
     }
   }
   closeTurn(currentTurn);
   return items;
+}
+
+const PENDING_ACTION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A proposed change's id, from the tool result the API stored for it (VAY-2524 proposeChange). */
+function pendingActionOf(output: unknown): string | undefined {
+  if (!isRecord(output) || output["type"] !== "json" || !isRecord(output["value"]))
+    return undefined;
+  const id = output["value"]["pendingActionId"];
+  return typeof id === "string" && PENDING_ACTION_ID.test(id) ? id : undefined;
 }
 
 /** The turn still running, if any (after a reload mid-answer the panel follows it). */

@@ -56,6 +56,42 @@ export type AssistantMessages = {
   failedBody: string;
   notFound: string;
   loadFailed: string;
+  /** vayada's Yes/No card for a change the AI asked for (VAY-2524), boards 03, 04 and 07. */
+  change: ChangeMessages;
+};
+
+export type ChangeMessages = {
+  needsAnswer: string;
+  answerBy: string;
+  whatElse: string;
+  no: string;
+  footnote: string;
+  running: string;
+  done: string;
+  doneBody: string;
+  declined: string;
+  declinedBody: string;
+  expired: string;
+  expiredBody: string;
+  changed: string;
+  changedBody: string;
+  notAllowed: string;
+  notAllowedBody: string;
+  stopped: string;
+  stoppedBody: string;
+  failed: string;
+  failedBody: string;
+  unsure: string;
+  unsureBody: string;
+  askAgain: string;
+  loading: string;
+  unavailable: string;
+  gone: string;
+  answerFailed: string;
+  answerUnknown: string;
+  waiting: string;
+  until: string;
+  show: string;
 };
 
 export const assistantEnglish: AssistantMessages = {
@@ -128,6 +164,45 @@ export const assistantEnglish: AssistantMessages = {
   failedBody: "The AI couldn't answer this time. Nothing was changed. Try again in a moment.",
   notFound: "That chat is gone: chats are deleted 30 days after their last message.",
   loadFailed: "The chat couldn't be loaded. Try again in a moment.",
+  change: {
+    needsAnswer: "Needs your answer",
+    answerBy: "Answer by {time}",
+    whatElse: "What else happens",
+    no: "No",
+    footnote:
+      'Written by vayada from the stored change. Only this button makes it; typing "yes" in the chat does nothing.',
+    running: "Making the change...",
+    done: "Done",
+    doneBody: "You said yes at {time}.",
+    declined: "Not done",
+    declinedBody: "You said no at {time}. Nothing changed.",
+    expired: "Expired",
+    expiredBody:
+      "Nothing changed. If you still want it, ask again and you get a new card with fresh details.",
+    changed: "This changed since",
+    changedBody: "Nothing changed. Ask me again to see what's possible now.",
+    notAllowed: "Not allowed anymore",
+    notAllowedBody: "Your role no longer allows this change, so vayada didn't make it.",
+    stopped: "Stopped",
+    stoppedBody:
+      "AI was switched off for this account, or the chat that asked for it is gone, so vayada didn't make this change.",
+    failed: "Couldn't finish",
+    failedBody:
+      "vayada couldn't make this change. Nothing changed. Try again, or make it yourself in vayada.",
+    unsure: "Not sure it happened",
+    unsureBody:
+      "vayada tried several times and can't tell whether this change happened. Check it in vayada before you ask again.",
+    askAgain: "Ask again",
+    loading: "Loading the change...",
+    unavailable: "This change can't be shown right now.",
+    gone: "Something this change names is gone or hidden from you now, so it can't be answered here.",
+    answerFailed: "Your answer didn't get through. Nothing changed. Try again.",
+    answerUnknown:
+      "We couldn't tell whether your answer got through. Look at this card again in a moment before you answer again.",
+    waiting: "Waiting for your answer:",
+    until: "until {time}",
+    show: "Show",
+  },
 };
 
 export const assistantGerman: AssistantMessages = {
@@ -201,6 +276,48 @@ export const assistantGerman: AssistantMessages = {
     "Die KI konnte diesmal nicht antworten. Es wurde nichts geändert. Versuchen Sie es gleich nochmal.",
   notFound: "Dieser Chat ist weg: Chats werden 30 Tage nach der letzten Nachricht gelöscht.",
   loadFailed: "Der Chat konnte nicht geladen werden. Versuchen Sie es gleich nochmal.",
+  change: {
+    needsAnswer: "Braucht Ihre Antwort",
+    answerBy: "Antwort bis {time}",
+    whatElse: "Was sonst passiert",
+    no: "Nein",
+    footnote:
+      'Von vayada aus der gespeicherten Änderung geschrieben. Nur dieser Knopf führt sie aus; "ja" im Chat zu schreiben bewirkt nichts.',
+    running: "Die Änderung wird ausgeführt...",
+    done: "Erledigt",
+    doneBody: "Sie haben um {time} Ja gesagt.",
+    declined: "Nicht ausgeführt",
+    declinedBody: "Sie haben um {time} Nein gesagt. Es wurde nichts geändert.",
+    expired: "Abgelaufen",
+    expiredBody:
+      "Es wurde nichts geändert. Wenn Sie es noch möchten, fragen Sie nochmal und Sie bekommen eine neue Karte mit aktuellen Angaben.",
+    changed: "Hat sich inzwischen geändert",
+    changedBody:
+      "Es wurde nichts geändert. Fragen Sie mich nochmal, um zu sehen, was jetzt möglich ist.",
+    notAllowed: "Nicht mehr erlaubt",
+    notAllowedBody:
+      "Ihre Rolle erlaubt diese Änderung nicht mehr, daher hat vayada sie nicht ausgeführt.",
+    stopped: "Gestoppt",
+    stoppedBody:
+      "KI wurde für dieses Konto ausgeschaltet oder der Chat, der darum bat, ist weg, daher hat vayada diese Änderung nicht ausgeführt.",
+    failed: "Konnte nicht abgeschlossen werden",
+    failedBody:
+      "vayada konnte diese Änderung nicht ausführen. Es wurde nichts geändert. Versuchen Sie es nochmal oder ändern Sie es selbst in vayada.",
+    unsure: "Unklar, ob es geklappt hat",
+    unsureBody:
+      "vayada hat es mehrmals versucht und kann nicht sagen, ob die Änderung ausgeführt wurde. Prüfen Sie es in vayada, bevor Sie nochmal fragen.",
+    askAgain: "Nochmal fragen",
+    loading: "Die Änderung wird geladen...",
+    unavailable: "Diese Änderung kann gerade nicht angezeigt werden.",
+    gone: "Etwas, das diese Änderung nennt, ist weg oder für Sie nicht mehr sichtbar, daher kann sie hier nicht beantwortet werden.",
+    answerFailed:
+      "Ihre Antwort ist nicht angekommen. Es wurde nichts geändert. Versuchen Sie es nochmal.",
+    answerUnknown:
+      "Wir konnten nicht feststellen, ob Ihre Antwort angekommen ist. Schauen Sie gleich nochmal auf diese Karte, bevor Sie erneut antworten.",
+    waiting: "Wartet auf Ihre Antwort:",
+    until: "bis {time}",
+    show: "Anzeigen",
+  },
 };
 
 /** German for "de", English for everything else (until more languages are translated). */

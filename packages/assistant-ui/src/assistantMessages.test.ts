@@ -21,6 +21,16 @@ describe("assistant messages", () => {
     expect(Object.keys(assistantGerman.tools).sort()).toEqual(
       Object.keys(assistantEnglish.tools).sort(),
     );
+    // The Yes/No card's words too (VAY-2524 changes).
+    expect(Object.keys(assistantGerman.change).sort()).toEqual(
+      Object.keys(assistantEnglish.change).sort(),
+    );
+    for (const key of Object.keys(
+      assistantEnglish.change,
+    ) as (keyof typeof assistantEnglish.change)[])
+      expect(placeholders(assistantGerman.change[key]), key).toEqual(
+        placeholders(assistantEnglish.change[key]),
+      );
   });
 
   it("names every tool the assistant has today (properties, rooms, calendar)", () => {

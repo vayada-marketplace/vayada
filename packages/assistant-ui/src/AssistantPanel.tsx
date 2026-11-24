@@ -48,6 +48,7 @@ import {
   type AssistantMessages,
 } from "./assistantMessages";
 import { useAssistantChat, type AssistantChat, type LiveTurn } from "./useAssistantChat";
+import { ChangeCard, WaitingBar, type CardStatus } from "./ChangeCard";
 import type { ToolLineStatus, TranscriptItem } from "./transcript";
 
 /**
@@ -246,6 +247,21 @@ function OpenDrawer({
   const refocus = useRef(false);
   const phone = usePhone();
   const paused = chat.blocker?.kind === "off" || chat.blocker?.kind === "allowance";
+  // How each change card in the chat stands (VAY-2524): the first one waiting gets the bar.
+  const [cards, setCards] = useState<Record<string, CardStatus>>({});
+  const onCardView = useCallback((id: string, status: CardStatus) => {
+    setCards((current) => {
+      if (current[id] === status) return current;
+      const next = { ...current };
+      if (status === undefined) delete next[id];
+      else next[id] = status;
+      return next;
+    });
+  }, []);
+  // The first card in the chat that still waits gets the bar.
+  const waiting = chat.items
+    .map((item) => (item.kind === "change" ? cards[item.pendingActionId] : undefined))
+    .find((card) => card?.state === "needs_answer");
 
   // Stop disappears when the answer ends: the question box takes the focus it had.
   useEffect(() => {
@@ -357,10 +373,12 @@ function OpenDrawer({
       ) : (
         <Transcript
           chat={chat}
+          api={panel.api}
           messages={m}
           locale={panel.locale}
           onRetry={send}
           onNewChat={chat.newChat}
+          onCardView={onCardView}
         />
       )}
 
@@ -371,6 +389,9 @@ function OpenDrawer({
           send(draft);
         }}
       >
+        {waiting && view === "chat" && (
+          <WaitingBar view={waiting} m={m.change} locale={panel.locale} />
+        )}
         <div className="flex items-end gap-2 rounded-xl border border-gray-300 bg-white py-2 pl-3.5 pr-2 focus-within:border-primary-500 focus-within:ring-1 focus-within:ring-primary-500">
           <textarea
             ref={input}
@@ -806,16 +827,20 @@ function grouped(items: TranscriptItem[]) {
 
 function Transcript({
   chat,
+  api,
   messages: m,
   locale,
   onRetry,
   onNewChat,
+  onCardView,
 }: {
   chat: AssistantChat;
+  api: AssistantApi;
   messages: AssistantMessages;
   locale: string;
   onRetry: (question: string) => void;
   onNewChat: () => void;
+  onCardView: (id: string, status: CardStatus) => void;
 }) {
   const end = useRef<HTMLDivElement>(null);
   const lastItem = chat.items[chat.items.length - 1];
@@ -825,6 +850,8 @@ function Transcript({
 
   let question = "";
   const canRetry = !chat.answering && !chat.blocker && !chat.notice;
+  // Only the chat's latest card offers "Ask again" (an older one would ask an old question).
+  const lastCard = [...chat.items].reverse().find((item) => item.kind === "change");
   return (
     <div className="flex-1 overflow-y-auto px-5 py-4">
       <div
@@ -850,6 +877,22 @@ function Transcript({
             return (
               <Answer key={row.key} m={m} text={row.text} at={new Date(row.at)} locale={locale} />
             );
+          if (row.kind === "change") {
+            const asked = question;
+            return (
+              <ChangeCard
+                key={row.key}
+                api={api}
+                id={row.pendingActionId}
+                m={m.change}
+                locale={locale}
+                onView={onCardView}
+                onAskAgain={
+                  row === lastCard && canRetry && asked ? () => onRetry(asked) : undefined
+                }
+              />
+            );
+          }
           if (row.kind === "ended") {
             const asked = question;
             return (
