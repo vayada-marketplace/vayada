@@ -14,9 +14,11 @@ const CHECKED_OUT_STATUSES = new Set<Booking["status"]>(["checked_out"]);
 
 export type DashboardInventoryDay = {
   stayDate: string;
+  status: string;
   totalCount: number;
   blockedCount: number;
   occupiedCount: number;
+  blocks?: { kind: string; blockedCount: number }[];
 };
 
 export function getPropertyToday(timezone?: string | null, date = new Date()) {
@@ -122,18 +124,29 @@ export function isResolvedDeparture(booking: Booking) {
 }
 
 /** One night's occupancy over every room of the property, as the Calendar lists them: occupied
- * rooms ÷ all rooms. Blocked and closed rooms still count as rooms, never as occupied (VAY-2563). */
+ * rooms ÷ all rooms. Blocked rooms still count as rooms, never as occupied (VAY-2563). */
 export function getDashboardOccupancy(days: DashboardInventoryDay[], date: string) {
-  const matchingDays = days.filter((day) => day.stayDate === date);
-  const sum = (count: (day: DashboardInventoryDay) => number) =>
-    matchingDays.reduce((total, day) => total + count(day), 0);
-  const occupiedUnits = sum((day) => day.occupiedCount);
-  const totalUnits = sum((day) => day.totalCount);
-
+  const occupancy = { occupiedUnits: 0, totalUnits: 0, blockedUnits: 0 };
+  for (const day of days) {
+    if (day.stayDate !== date) continue;
+    // A deleted room type's nights are closed (VAY-2132): its rooms are gone, so only a stay still
+    // in one of them counts.
+    if (day.status === "closed") {
+      occupancy.occupiedUnits += day.occupiedCount;
+      occupancy.totalUnits += day.occupiedCount;
+      continue;
+    }
+    // A booking of a linked room type takes this room too; the hotel never blocked it.
+    const linkedBooked = (day.blocks ?? [])
+      .filter((block) => block.kind === "linked_booking")
+      .reduce((total, block) => total + block.blockedCount, 0);
+    occupancy.occupiedUnits += day.occupiedCount + linkedBooked;
+    occupancy.blockedUnits += Math.max(0, day.blockedCount - linkedBooked);
+    occupancy.totalUnits += day.totalCount;
+  }
+  const { occupiedUnits, totalUnits } = occupancy;
   return {
-    occupiedUnits,
-    totalUnits,
-    blockedUnits: sum((day) => day.blockedCount),
+    ...occupancy,
     percentage: totalUnits > 0 ? Math.round((occupiedUnits / totalUnits) * 100) : null,
   };
 }

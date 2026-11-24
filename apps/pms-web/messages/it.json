@@ -169,6 +169,8 @@
   "dashboard.occupancyTonight": "Occupazione stasera",
   "dashboard.occupancySub": "{occupied} di {total} camere occupate",
   "dashboard.occupancySubBlocked": "{occupied} di {total} camere occupate · {blocked} bloccate",
+  "dashboard.amountPending": "{amount} in sospeso",
+  "dashboard.amountUnverifiedPart": "{amount} non verificati",
   "dashboard.arrivalsToday": "Arrivi oggi",
   "dashboard.nextArrival": "Prossimo arrivo: 15:00 - {guestName}",
   "dashboard.noArrivals": "Nessun arrivo oggi",

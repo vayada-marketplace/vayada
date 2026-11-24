@@ -137,8 +137,10 @@ test.describe("pms-web dashboard", () => {
     await expect(todayBar).toBeVisible();
     await todayBar.hover();
     await expect(todayBar).toContainText("Occupancy: 40%");
-    // A closed night still has its rooms; nobody is in them.
-    await expect(page.getByRole("img", { name: "2026-06-26: 0% occupancy" })).toBeVisible();
+    // A deleted room type's closed night has no rooms left to count.
+    await expect(
+      page.getByRole("img", { name: "2026-06-26: occupancy unavailable" }),
+    ).toBeVisible();
     expect(requestedCalendarRanges).toContain("?from=2026-06-25&to=2026-07-08");
 
     await page.getByRole("button", { name: "Next week" }).click();
@@ -150,7 +152,7 @@ test.describe("pms-web dashboard", () => {
     await page.clock.fastForward("22:27:00");
     await expect(page.getByText("Friday, June 26, 2026", { exact: true })).toBeVisible();
     await expect(page.getByText("Jun 26 – Jul 9", { exact: true })).toBeVisible();
-    await expect(occupancyCard).toContainText("0 of 2 rooms occupied");
+    await expect(occupancyCard).toContainText("Unavailable");
     expect(requestedCalendarRanges).toContain("?from=2026-06-26&to=2026-07-09");
   });
 

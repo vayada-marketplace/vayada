@@ -101,6 +101,7 @@ describe("dashboard occupancy", () => {
   const date = "2026-08-21";
   const inventoryDay = (totalCount: number, occupiedCount: number, blockedCount = 0) => ({
     stayDate: date,
+    status: "limited",
     totalCount,
     occupiedCount,
     blockedCount,
@@ -139,9 +140,48 @@ describe("dashboard occupancy", () => {
     });
   });
 
-  it("keeps a closed night's rooms in the count", () => {
-    expect(getDashboardOccupancy([inventoryDay(2, 0)], date).percentage).toBe(0);
-    expect(getDashboardOccupancy([inventoryDay(2, 2)], date).percentage).toBe(100);
+  it("leaves a deleted room type's rooms out, unless a stay is still in one", () => {
+    const deleted = (occupiedCount: number) => ({
+      ...inventoryDay(2, occupiedCount),
+      status: "closed",
+    });
+    expect(getDashboardOccupancy([inventoryDay(3, 1), deleted(0)], date)).toMatchObject({
+      occupiedUnits: 1,
+      totalUnits: 3,
+      percentage: 33,
+    });
+    expect(getDashboardOccupancy([inventoryDay(3, 1), deleted(1)], date)).toMatchObject({
+      occupiedUnits: 2,
+      totalUnits: 4,
+      percentage: 50,
+    });
+    expect(getDashboardOccupancy([deleted(0)], date).percentage).toBeNull();
+  });
+
+  it("counts a room a linked room type's booking takes as occupied, not blocked", () => {
+    // The whole villa is booked; its three bedrooms carry the villa booking's linked block.
+    const bedrooms = {
+      ...inventoryDay(3, 0, 3),
+      blocks: [{ kind: "linked_booking", blockedCount: 3 }],
+    };
+    expect(getDashboardOccupancy([inventoryDay(1, 1), bedrooms], date)).toEqual({
+      occupiedUnits: 4,
+      totalUnits: 4,
+      blockedUnits: 0,
+      percentage: 100,
+    });
+    // A manual block, mirrored onto a linked type, stays blocked.
+    const mirrored = {
+      ...inventoryDay(1, 0, 2),
+      blocks: [
+        { kind: "manual", blockedCount: 1 },
+        { kind: "linked_manual_block", blockedCount: 1 },
+      ],
+    };
+    expect(getDashboardOccupancy([mirrored], date)).toMatchObject({
+      occupiedUnits: 0,
+      blockedUnits: 2,
+    });
   });
 
   it("renders a night without rooms as unavailable", () => {

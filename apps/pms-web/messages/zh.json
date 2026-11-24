@@ -169,6 +169,8 @@
   "dashboard.occupancyTonight": "今晚入住率",
   "dashboard.occupancySub": "{total}间房中已入住{occupied}间",
   "dashboard.occupancySubBlocked": "{total}间房中已入住{occupied}间 · 锁定{blocked}间",
+  "dashboard.amountPending": "{amount} 待付",
+  "dashboard.amountUnverifiedPart": "{amount} 未核实",
   "dashboard.arrivalsToday": "今日到达",
   "dashboard.nextArrival": "下一位到达：15:00 - {guestName}",
   "dashboard.noArrivals": "今日无到达",
