@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "../../app.js";
 import { memoryAiActionLog } from "../actionLog/memoryActionLog.fixtures.js";
@@ -28,18 +28,24 @@ describe("the assistant's proposer in buildApp", () => {
         ...(propose ? { propose } : {}),
       },
     });
-  const lastOptions = () => vi.mocked(delegatedAssistantTools).mock.lastCall![1];
+  const optionsGiven = () => {
+    expect(delegatedAssistantTools).toHaveBeenCalledOnce();
+    return vi.mocked(delegatedAssistantTools).mock.calls[0]![1];
+  };
+  beforeEach(() => {
+    vi.mocked(delegatedAssistantTools).mockClear();
+  });
 
   it("passes the proposer on to the assistant's tools", async () => {
     const propose = vi.fn<AssistantChangeProposer>();
     const app = appWith(propose);
-    expect(lastOptions().propose).toBe(propose);
+    expect(optionsGiven().propose).toBe(propose);
     await app.close();
   });
 
   it("passes none without one", async () => {
     const app = appWith();
-    expect(lastOptions()).not.toHaveProperty("propose");
+    expect(optionsGiven()).not.toHaveProperty("propose");
     await app.close();
   });
 });

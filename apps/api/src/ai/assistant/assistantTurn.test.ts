@@ -9,6 +9,8 @@ import type {
 import type { ModelRoute } from "../provider/catalog.js";
 import {
   runAssistantTurn,
+  STOPPED,
+  unlessStopped,
   type AssistantEvent,
   type AssistantTool,
   type AssistantTurnInput,
@@ -533,5 +535,38 @@ describe("assistant turn (VAY-2518)", () => {
     );
     expect(end).toEqual({ type: "end", status: "interrupted", reason: "closed_elsewhere" });
     expect(memory.ends).toEqual([]);
+  });
+});
+
+describe("a tool's work and the turn's Stop (unlessStopped)", () => {
+  it("doesn't start the work when the turn is already stopped", async () => {
+    const stop = new AbortController();
+    stop.abort();
+    const work = vi.fn(async (): Promise<ToolOutcome> => ({ ok: true, data: null }));
+    expect(await unlessStopped(stop.signal, work)).toBe(STOPPED);
+    expect(work).not.toHaveBeenCalled();
+  });
+
+  it("answers STOPPED at once on Stop, without waiting for the work", async () => {
+    const stop = new AbortController();
+    const outcome = unlessStopped(stop.signal, () => new Promise<ToolOutcome>(() => {}));
+    stop.abort();
+    expect(await outcome).toBe(STOPPED);
+  });
+
+  it("hands back the work's answer, or its failure, and lets go of the signal", async () => {
+    const { signal } = new AbortController();
+    const removed = vi.spyOn(signal, "removeEventListener");
+    expect(await unlessStopped(signal, async () => ({ ok: true, data: 1 }))).toEqual({
+      ok: true,
+      data: 1,
+    });
+    await expect(
+      unlessStopped(signal, async () => {
+        throw new Error("route failed");
+      }),
+    ).rejects.toThrow("route failed");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(removed).toHaveBeenCalledTimes(2);
   });
 });

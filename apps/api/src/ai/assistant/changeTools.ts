@@ -8,7 +8,7 @@ import { z } from "zod";
 
 import type { ChangeAction } from "../actions/defineChangeAction.js";
 import { CHANGE_ACTIONS, surfaceOf } from "../actions/registry.js";
-import { whenStopped, type AssistantTool, type ToolOutcome } from "./assistantTurn.js";
+import { STOPPED, unlessStopped, type AssistantTool, type ToolOutcome } from "./assistantTurn.js";
 
 /** What the in-app assistant sends the proposer (VAY-2524's ProposeChangeRequest). */
 export type InAppChangeRequest = {
@@ -79,10 +79,10 @@ export function changeTools(options: {
       // Not sent to the model (only the description and input are); the proposer's result.
       outputSchema: { type: "object" },
     },
-    // Stop ends the call as it does a read's. A change already asked for by then gets no card:
-    // nobody can say Yes to it, and it expires.
-    run: (input, call) =>
-      Promise.race([ask(action, input, call), whenStopped(call.signal)]),
+    // Stop ends the call as it does a read's. A change the proposer records after Stop gets no
+    // card in this turn; asking for the same change again in this chat brings back that card
+    // until it expires.
+    run: (input, call) => unlessStopped(call.signal, () => ask(action, input, call)),
   }));
 
   async function ask(
@@ -92,7 +92,7 @@ export function changeTools(options: {
   ): Promise<ToolOutcome> {
     const context = await options.contextFor(call.toolCallId);
     // Stopped while the context was read: nothing is asked.
-    if (call.signal.aborted) return whenStopped(call.signal);
+    if (call.signal.aborted) return STOPPED;
     const result = await options.propose(context, {
       action: action.key,
       arguments: input,
