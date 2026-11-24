@@ -196,7 +196,8 @@ export function GuestInsights({ data, loading, error, range, locale, t }: Props)
                 ))}
               </ul>
             )}
-            {tab === "age" && !data.ages_hidden && (
+            {/* Only with ages to base it on: otherwise "No guest has a date of birth yet" says it. */}
+            {tab === "age" && !data.ages_hidden && data.age_known > 0 && (
               <p className="text-xs text-gray-500">
                 {t("dashboard.guests.ageNote", {
                   known: formatNumber(data.age_known, locale),

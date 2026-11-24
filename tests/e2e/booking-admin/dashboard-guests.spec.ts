@@ -7,7 +7,7 @@ import {
 /** As the mockup: 47 guests, 22 with a date of birth. */
 async function mockGuests(
   page: Page,
-  { agesHidden = false, averageNights = 3.4, averageLeadDays = 24.3 } = {},
+  { agesHidden = false, noAges = false, averageNights = 3.4, averageLeadDays = 24.3 } = {},
 ) {
   const reads: URL[] = [];
   await page.route("**/api/booking/properties/*/dashboard/guests**", (route) => {
@@ -26,13 +26,13 @@ async function mockGuests(
             { countryCode: null, guestCount: 6 },
           ],
           ages: [
-            { bucket: "18-24", guestCount: 2 },
-            { bucket: "25-34", guestCount: 9 },
-            { bucket: "35-44", guestCount: 6 },
-            { bucket: "45-54", guestCount: 3 },
-            { bucket: "55+", guestCount: 2 },
+            { bucket: "18-24", guestCount: noAges ? 0 : 2 },
+            { bucket: "25-34", guestCount: noAges ? 0 : 9 },
+            { bucket: "35-44", guestCount: noAges ? 0 : 6 },
+            { bucket: "45-54", guestCount: noAges ? 0 : 3 },
+            { bucket: "55+", guestCount: noAges ? 0 : 2 },
           ],
-          ageKnownCount: 22,
+          ageKnownCount: noAges ? 0 : 22,
           stays: [
             { bucket: "1-2", guestCount: 12 },
             { bucket: "3-4", guestCount: 21 },
@@ -141,6 +141,18 @@ test("ages only for people who may read reservations; one night is singular", as
   ).toBeVisible();
   await expect(section.getByRole("listitem")).toHaveCount(0);
   await expect(section.getByText(/^Based on/)).toHaveCount(0);
+});
+
+test("without any date of birth, the Age tab says so in one sentence (VAY-2594)", async ({
+  page,
+}) => {
+  await mockGuests(page, { noAges: true });
+  await page.goto("/dashboard");
+  const section = card(page);
+  await section.getByRole("button", { name: "Age" }).click();
+  await expect(section.getByText("No guest has a date of birth yet.")).toHaveCount(1);
+  await expect(section.getByText(/^Based on/)).toHaveCount(0);
+  await expect(section.getByRole("listitem")).toHaveCount(0);
 });
 
 test("on a small phone the bars go under their rows, without scrolling sideways", async ({
