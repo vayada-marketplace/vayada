@@ -165,6 +165,40 @@ describe.skipIf(!url)("AI budgets set by vayada staff and the spend alert (VAY-2
     ]);
   });
 
+  it("leaves archived accounts out of the list but still reads one by id (VAY-2602)", async () => {
+    const june = new Date("2031-06-15T10:00:00Z");
+    const open = await newOrganization("hotel_group", "Open hotel");
+    const paused = await newOrganization("hotel_group", "Paused hotel");
+    const closed = await newOrganization("hotel_group", "Closed hotel");
+    await admin.query(
+      "UPDATE identity.organizations SET status = 'suspended' WHERE id = $1::uuid",
+      [paused],
+    );
+    await admin.query("UPDATE identity.organizations SET status = 'archived' WHERE id = $1::uuid", [
+      closed,
+    ]);
+    // The open hotel spends, so it sorts before the closed one: reading the closed one by id must
+    // not fall back to the top of the list.
+    await spend(open, june, 1_000);
+    const budgetAdmin = createPgAiBudgetAdmin({
+      pool,
+      defaultMonthlyLimitMicroUsd: 5_000_000,
+      now: () => june,
+    });
+
+    const listed = (await budgetAdmin.overview()).accounts.map((account) => account.organizationId);
+
+    expect(listed).toEqual(expect.arrayContaining([open, paused]));
+    expect(listed).not.toContain(closed);
+    const changed = await budgetAdmin.setBudget({
+      organizationId: closed,
+      monthlyLimitMicroUsd: 0,
+      reason: "Closed account",
+      audit: audit(),
+    });
+    expect(changed).toMatchObject({ organizationId: closed, status: "archived" });
+  });
+
   it("closes the account's AI changes waiting for an answer when AI is switched off (VAY-2524)", async () => {
     const hotel = await newOrganization();
     const other = await newOrganization();

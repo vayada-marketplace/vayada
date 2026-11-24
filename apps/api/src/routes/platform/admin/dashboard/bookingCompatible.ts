@@ -652,5 +652,35 @@ LEFT JOIN LATERAL (
   ORDER BY property_slug.created_at DESC, property_slug.id
   LIMIT 1
 ) slug ON TRUE
+LEFT JOIN (
+  -- VAY-2602: the hotel accounts that own or operate each hotel, read once for the whole list.
+  SELECT holder_link.resource_id,
+         bool_or(holder.status = 'archived') AS any_archived,
+         bool_or(holder.status <> 'archived') AS any_open
+  FROM identity.organization_resource_links holder_link
+  JOIN identity.organizations holder
+    ON holder.id = holder_link.organization_id AND holder.kind = 'hotel_group'
+  WHERE holder_link.status = 'active'
+    AND holder_link.relationship IN ('owner', 'operator')
+    AND (holder_link.product, holder_link.resource_type)
+      IN (('hotel_catalog', 'property'), ('pms', 'pms_property'))
+  GROUP BY holder_link.resource_id
+) holders ON holders.resource_id = property.id::text
 WHERE ($1::boolean = false OR property.profile_status <> 'disabled')
+  -- VAY-2602: a hotel whose accounts are all archived (closed sign-ups and smoke runs) is left out,
+  -- unless it still sells: a published booking page or a connected channel keeps it in the list, so
+  -- staff can retire it. A hotel no account holds yet still shows, so staff can provision it.
+  AND NOT (
+    COALESCE(holders.any_archived, FALSE)
+    AND NOT COALESCE(holders.any_open, FALSE)
+    AND NOT EXISTS (
+      SELECT 1 FROM distribution.active_public_booking_revision live
+      WHERE live.property_id = property.id
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM pms.channel_connections channel
+      WHERE channel.property_id = property.id
+        AND channel.connection_status IN ('connected', 'degraded')
+    )
+  )
 ORDER BY property.display_name, property.id`;
