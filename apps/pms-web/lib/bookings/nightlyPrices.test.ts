@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { nightlyPriceSummary, priceDigits } from "./nightlyPrices";
 
 const nights = (...amounts: number[]) =>
-  amounts.map((amount, index) => ({ date: `2026-11-${String(27 + index).padStart(2, "0")}`, amount }));
+  amounts.map((amount, index) => ({
+    date: `2026-12-${String(1 + index).padStart(2, "0")}`,
+    amount,
+  }));
 
 describe("nightlyPriceSummary (VAY-2576)", () => {
   it("averages the booked nights, which add up to the booking value", () => {
@@ -21,14 +24,19 @@ describe("nightlyPriceSummary (VAY-2576)", () => {
     expect(summary).toMatchObject({ average: 825, feesAndExtras: 62.5, total: 1712.5 });
   });
 
-  it("puts the rounding on the last night, so the rows add up exactly", () => {
-    const summary = nightlyPriceSummary(
-      { amount: 100, currency: "EUR" },
-      3,
-      nights(33.3333, 33.3333, 33.3334),
-    );
-    expect(summary?.nights?.map((night) => night.amount)).toEqual([33.33, 33.33, 33.34]);
-    expect(summary?.feesAndExtras).toBeNull();
+  it("puts the per-night amounts' rounding on the last night, so the rows add up exactly", () => {
+    const rows = (...amounts: number[]) =>
+      nightlyPriceSummary({ amount: 100, currency: "EUR" }, 3, nights(...amounts));
+    expect(rows(33.3333, 33.3333, 33.3334)).toMatchObject({
+      nights: [{ amount: 33.33 }, { amount: 33.33 }, { amount: 33.34 }],
+      feesAndExtras: null,
+    });
+    // A cent over the booking value is rounding too, not a reason to hide the nights.
+    expect(rows(33.34, 33.33, 33.34)).toMatchObject({
+      nights: [{ amount: 33.34 }, { amount: 33.33 }, { amount: 33.33 }],
+      feesAndExtras: null,
+    });
+    expect(rows(33.33, 33.33, 33.33)?.average).toBeCloseTo(33.3333, 4);
   });
 
   it("shows rupiah whole, with the average rounded like the design's IDR 1.167.958", () => {

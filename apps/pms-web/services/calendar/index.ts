@@ -85,8 +85,8 @@ export interface CalendarBooking {
   bookingValue?: PmsOperationsMoney | null;
   /** Nights of the whole reservation, which the booking value covers (a moved stay's bar shows fewer). */
   stayNights?: number;
-  /** VAY-2576: each night's booked room price, all rooms added up, in the booking value's currency; null when
-   * any night of any room has none. */
+  /** VAY-2576: each night's booked room price, all rooms added up (the booking's currency); null when any night
+   * of any booked room has none. */
   bookedNights?: BookedNight[] | null;
 }
 
@@ -532,7 +532,7 @@ function calendarBookingsForReservation(
       ? reservation.pricing.totalAmount
       : null;
   const stayNights = daysBetweenDateOnly(reservation.stay.checkIn, reservation.stay.checkOut);
-  const bookedNights = bookingValue ? bookedNightsOf(reservation, bookingValue.currency) : null;
+  const bookedNights = bookingValue ? bookedNightsOf(reservation, stayNights) : null;
   return assignments
     .map((assignment, index): CalendarBooking | null => {
       const stay = assignment?.stay ?? (numberOfRooms === 1 || awaiting ? reservation.stay : null);
@@ -573,40 +573,36 @@ function calendarBookingsForReservation(
     );
 }
 
-/** VAY-2576: the reservation's booked room price for each night, all its rooms added up; null unless every night
- * of every room has one in `currency`. Rooms an OTA change removed sit above the room count and don't count. A room
- * moved mid-stay has one stay per room, each with its own nights; prices are kept per room position and night. */
+/** VAY-2576: the reservation's booked room price for each night, all its rooms added up; null unless every booked
+ * room has a price for every night of its stay and those stays cover the reservation's nights. Rooms an OTA change
+ * removed sit above the room count and don't count. */
 function bookedNightsOf(
   reservation: PmsOperationalReservation,
-  currency: string,
+  stayNights: number,
 ): BookedNight[] | null {
   const rooms = reservation.assignments.filter(
     (assignment) => reservation.roomCount == null || assignment.position <= reservation.roomCount,
   );
-  if (!rooms.length) return null;
-  const prices = new Map<string, number>();
-  for (const { position, nightly } of rooms)
-    for (const { serviceDate, applied } of nightly ?? []) {
-      const amount = Number(applied?.amountDecimal);
-      if (applied?.currency === currency && Number.isFinite(amount))
-        prices.set(`${position}:${serviceDate}`, amount);
-    }
+  if (!rooms.length || rooms.length !== (reservation.roomCount ?? rooms.length)) return null;
   const byDate = new Map<string, number>();
-  const counted = new Set<string>();
   for (const room of rooms) {
     const stay = room.stay ?? reservation.stay;
     const nights = daysBetweenDateOnly(stay.checkIn, stay.checkOut);
     if (!(nights > 0)) return null;
+    const prices = new Map(
+      (room.nightly ?? []).map((night) => [
+        night.serviceDate,
+        Number(night.applied?.amountDecimal),
+      ]),
+    );
     for (let night = 0; night < nights; night++) {
       const date = addDaysDateOnly(stay.checkIn, night);
-      const key = `${room.position}:${date}`;
-      const amount = prices.get(key);
-      if (amount === undefined) return null;
-      if (counted.has(key)) continue;
-      counted.add(key);
+      const amount = prices.get(date);
+      if (amount === undefined || !Number.isFinite(amount)) return null;
       byDate.set(date, (byDate.get(date) ?? 0) + amount);
     }
   }
+  if (byDate.size !== stayNights) return null;
   return Array.from(byDate, ([date, amount]) => ({ date, amount })).sort((a, b) =>
     a.date.localeCompare(b.date),
   );

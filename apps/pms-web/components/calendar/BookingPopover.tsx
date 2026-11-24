@@ -35,7 +35,7 @@ function useStayText() {
       to: day(to),
       nights: nightCount(differenceInDays(parseISO(to), parseISO(from))),
     });
-  return { day, nightCount, stay, t };
+  return { day, locale, nightCount, stay, t };
 }
 
 function Detail({ label, children }: { label: string; children: React.ReactNode }) {
@@ -64,7 +64,7 @@ export default function BookingPopover({
   onChangeRoom: () => void;
   onClose: () => void;
 }) {
-  const { day, nightCount, stay, t } = useStayText();
+  const { day, locale, nightCount, stay, t } = useStayText();
   const [showNights, setShowNights] = useState(false);
   const nightsId = useId();
   // The check-in time guests see; staff who can't read it see the arrival day alone.
@@ -79,16 +79,15 @@ export default function BookingPopover({
     booking.bookedNights,
   );
   const nights = prices?.nights ?? null;
-  const listDigits = prices
-    ? priceDigits(
-        prices.currency,
-        prices.total,
-        prices.feesAndExtras ?? 0,
-        ...(nights ?? []).map((night) => night.amount),
-      )
-    : 0;
-  const listPrice = (price: number) =>
-    prices ? formatCurrency(price, prices.currency, listDigits) : "";
+  // Grouped in the PMS language (Ø IDR 1.167.958 in German). The value and the list's total show alike.
+  const money = (price: number, digits: number) =>
+    formatCurrency(price, value?.currency ?? "", digits, locale);
+  const valueDigits = value && amount !== null ? priceDigits(value.currency, amount) : 0;
+  const nightDigits = priceDigits(
+    value?.currency ?? "",
+    prices?.feesAndExtras ?? 0,
+    ...(nights ?? []).map((night) => night.amount),
+  );
   // "{amount} avg" / "Ø {amount}": the amount in bold, the word around it in grey.
   const [averageBefore = "", averageAfter = ""] = t("calendar.popover.averagePrice", {
     amount: "{amount}",
@@ -120,7 +119,7 @@ export default function BookingPopover({
           <Detail label={t("calendar.popover.value")}>
             <span className="font-semibold">
               {value && amount !== null && Number.isFinite(amount)
-                ? formatCurrency(amount, value.currency, Number.isInteger(amount) ? 0 : 2)
+                ? money(amount, valueDigits)
                 : "—"}
             </span>
             {value && forRooms}
@@ -131,11 +130,7 @@ export default function BookingPopover({
                 {averageBefore && (
                   <span className="font-normal text-gray-500">{averageBefore}</span>
                 )}
-                {formatCurrency(
-                  prices.average,
-                  prices.currency,
-                  priceDigits(prices.currency, prices.average),
-                )}
+                {money(prices.average, priceDigits(prices.currency, prices.average))}
                 {averageAfter && <span className="font-normal text-gray-500">{averageAfter}</span>}
               </span>
             ) : (
@@ -149,12 +144,14 @@ export default function BookingPopover({
             <button
               type="button"
               aria-expanded={showNights}
-              aria-controls={nightsId}
+              aria-controls={showNights ? nightsId : undefined}
               onClick={() => setShowNights((shown) => !shown)}
               className="inline-flex min-h-[28px] items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700"
             >
               {t(
-                showNights ? "calendar.popover.hideNightlyRates" : "calendar.popover.showNightlyRates",
+                showNights
+                  ? "calendar.popover.hideNightlyRates"
+                  : "calendar.popover.showNightlyRates",
               )}
               <svg
                 aria-hidden="true"
@@ -176,12 +173,18 @@ export default function BookingPopover({
             id={nightsId}
             className="mt-1 mb-2 rounded-lg border border-gray-200 bg-slate-50 px-3 py-1.5 text-[13px] tabular-nums"
           >
-            {/* Fourteen nights fit; a longer stay scrolls its nights, and the total stays in view. */}
-            <ul className="max-h-[308px] overflow-y-auto">
+            {/* Fourteen nights fit; a longer stay scrolls its nights (by keyboard too), and the total stays. */}
+            <ul
+              aria-label={t("calendar.popover.pricePerNight")}
+              tabIndex={nights.length > 14 ? 0 : undefined}
+              className="max-h-[19.25rem] overflow-y-auto"
+            >
               {nights.map((night) => (
                 <li key={night.date} className="flex justify-between gap-3 py-px">
                   <span className="text-gray-700">{day(night.date, true)}</span>
-                  <span className="font-medium text-gray-900">{listPrice(night.amount)}</span>
+                  <span className="font-medium text-gray-900">
+                    {money(night.amount, nightDigits)}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -189,13 +192,13 @@ export default function BookingPopover({
               <div className="flex justify-between gap-3 py-px">
                 <span className="text-gray-700">{t("calendar.popover.feesAndExtras")}</span>
                 <span className="font-medium text-gray-900">
-                  {listPrice(prices.feesAndExtras)}
+                  {money(prices.feesAndExtras, nightDigits)}
                 </span>
               </div>
             )}
             <div className="mt-1 flex justify-between gap-3 border-t border-gray-200 pt-2 pb-0.5 font-semibold text-gray-900">
               <span>{`${t("calendar.popover.total")} · ${nightCount(nights.length)}`}</span>
-              <span>{listPrice(prices.total)}</span>
+              <span>{money(prices.total, valueDigits)}</span>
             </div>
           </div>
         )}

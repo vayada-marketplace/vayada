@@ -1,6 +1,6 @@
 import { createElement, type ReactNode } from "react";
-import { act, create, type ReactTestRenderer } from "react-test-renderer";
-import { describe, expect, it, vi } from "vitest";
+import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CalendarBooking } from "@/services/calendar";
 
 // The card's frame needs a browser; its content is what this test reads.
@@ -13,11 +13,36 @@ vi.mock("next/link", () => ({
     createElement("a", { href }, children),
 }));
 vi.mock("@/lib/settings/useGuestStayTimes", () => ({ useGuestStayTimes: () => null }));
+// English by default; a test can switch to German copy and number grouping.
+const i18n = vi.hoisted(() => ({ messages: null as Record<string, string> | null }));
+vi.mock("@/lib/i18n", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/i18n")>();
+  return {
+    ...actual,
+    useTranslation: () => {
+      const english = actual.useTranslation();
+      const messages = i18n.messages;
+      if (!messages) return english;
+      return {
+        ...english,
+        locale: "de",
+        t: (key: string, params: Record<string, string | number> = {}) =>
+          Object.entries(params).reduce(
+            (text, [name, param]) => text.split(`{${name}}`).join(String(param)),
+            messages[key] ?? english.t(key),
+          ),
+      };
+    },
+  };
+});
 
+import deMessages from "../../messages/de.json";
 import BookingPopover from "./BookingPopover";
 
 const nights = [250, 300, 250, 250, 250, 300].map((amount, index) => ({
-  date: ["2026-11-27", "2026-11-28", "2026-11-29", "2026-11-30", "2026-12-01", "2026-12-02"][index]!,
+  date: ["2026-11-27", "2026-11-28", "2026-11-29", "2026-11-30", "2026-12-01", "2026-12-02"][
+    index
+  ]!,
   amount,
 }));
 
@@ -58,19 +83,22 @@ function render(value: CalendarBooking) {
   return view;
 }
 
-const text = (view: ReactTestRenderer) =>
-  view.root
-    .findAll(() => true)
-    .flatMap((node) => node.children.filter((child) => typeof child === "string"))
-    .join("|");
+/** The popover's text pieces in reading order. */
+const textOf = (node: ReactTestInstance | string): string[] =>
+  typeof node === "string" ? [node] : node.children.flatMap(textOf);
+const text = (view: ReactTestRenderer) => textOf(view.root).join("|");
 const toggle = (view: ReactTestRenderer) =>
   view.root.findAllByType("button").find((button) => button.props["aria-expanded"] !== undefined);
 
 describe("BookingPopover price per night (VAY-2576)", () => {
+  afterEach(() => {
+    i18n.messages = null;
+  });
+
   it("shows the average, then each booked night and a total that is the booking value", () => {
     const view = render(booking());
     expect(text(view)).toContain("Price per night|$266.67| avg");
-    expect(text(view)).not.toContain("Fri, Nov 27");
+    expect(view.root.findAllByType("li")).toHaveLength(0);
     expect(toggle(view)?.props["aria-expanded"]).toBe(false);
     expect(text(view)).toContain("Show nightly rates");
 
@@ -114,5 +142,27 @@ describe("BookingPopover price per night (VAY-2576)", () => {
       }),
     );
     expect(text(view)).toContain("Price per night|$533.33| avg|for 2 rooms");
+  });
+
+  it("speaks German with German grouping, as the design's client view", () => {
+    i18n.messages = deMessages;
+    const amounts = [1_150_000, 1_150_000, 1_150_000, 1_150_000, 1_203_873, 1_203_873];
+    const view = render(
+      booking({
+        checkIn: "2026-11-23",
+        checkOut: "2026-11-29",
+        bookingValue: { amountDecimal: "7007746.00", currency: "IDR" },
+        bookedNights: amounts.map((amount, index) => ({
+          date: `2026-11-${23 + index}`,
+          amount,
+        })),
+      }),
+    );
+    expect(text(view)).toContain("Buchungswert|IDR 7.007.746|Preis pro Nacht|Ø |IDR 1.167.958");
+    expect(text(view)).toContain("Preise pro Nacht anzeigen");
+    act(() => toggle(view)!.props.onClick());
+    expect(text(view)).toContain("Preise pro Nacht ausblenden");
+    expect(text(view)).toContain("Mo., 23. Nov.|IDR 1.150.000");
+    expect(text(view)).toContain("Sa., 28. Nov.|IDR 1.203.873|Gesamt · 6 Nächte|IDR 7.007.746");
   });
 });

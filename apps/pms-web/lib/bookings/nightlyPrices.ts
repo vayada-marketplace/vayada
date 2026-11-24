@@ -30,10 +30,11 @@ export function priceDigits(currency: string, ...amounts: number[]): number {
 }
 
 /**
- * The popover's "Price per night" (VAY-2576). With a booked price for every night, the average comes from those
- * nights, each shown at the currency's precision with the rounding left on the last night, and whatever else the
- * booking value holds becomes "Fees and extras", so the rows add up to the booking value. Without them, or when
- * the nights come to more than the booking value, only the booking value's average over its nights is shown.
+ * The popover's "Price per night" (VAY-2576). With a booked price for every night, each night shows at the currency's
+ * precision and whatever else the booking value holds (OTA fees or taxes, extras) becomes "Fees and extras", so the
+ * rows add up to the booking value; the average is the nights'. A difference of up to one cent a night is the
+ * per-night amounts' rounding, so the last night takes it. Without a price for every night, or when the nights come
+ * to more than the booking value, only the booking value's average over its nights is shown.
  */
 export function nightlyPriceSummary(
   value: { amount: number; currency: string } | null,
@@ -43,7 +44,6 @@ export function nightlyPriceSummary(
   if (!value || !Number.isFinite(value.amount) || stayNights < 1) return null;
   const { amount: total, currency } = value;
   const unit = 10 ** displayScale(currency);
-  const units = (amount: number) => Math.round(amount * unit);
   const averageOnly: NightlyPriceSummary = {
     currency,
     average: total / stayNights,
@@ -53,16 +53,18 @@ export function nightlyPriceSummary(
   };
   if (!booked?.length || booked.some((night) => !Number.isFinite(night.amount))) return averageOnly;
 
-  const nightsSum = booked.reduce((sum, night) => sum + night.amount, 0);
-  const nightsUnits = units(nightsSum);
-  const feesUnits = units(total) - nightsUnits;
+  const rows = booked.map((night) => Math.round(night.amount * unit));
+  const sum = () => rows.reduce((units, row) => units + row, 0);
+  let feesUnits = Math.round(total * unit) - sum();
+  if (Math.abs(feesUnits) <= rows.length) {
+    const last = rows.length - 1;
+    rows[last] = (rows[last] ?? 0) + feesUnits;
+    feesUnits = 0;
+  }
   if (feesUnits < 0) return averageOnly;
-  const rows = booked.map((night) => units(night.amount));
-  const last = rows.length - 1;
-  rows[last] = (rows[last] ?? 0) + nightsUnits - rows.reduce((sum, row) => sum + row, 0);
   return {
     currency,
-    average: nightsSum / booked.length,
+    average: sum() / unit / rows.length,
     nights: booked.map((night, index) => ({ date: night.date, amount: (rows[index] ?? 0) / unit })),
     feesAndExtras: feesUnits > 0 ? feesUnits / unit : null,
     total,

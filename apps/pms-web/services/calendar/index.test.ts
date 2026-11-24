@@ -371,9 +371,9 @@ describe("calendarService manual-booking rates", () => {
   // VAY-2576: the popover lists the booked price of each night, for the whole booking like its value.
   it("keeps each night's booked price, all rooms added up, only when every night has one", async () => {
     const base = mocks.get.getMockImplementation()!;
-    const night = (serviceDate: string, amountDecimal: string | null, currency = "EUR") => ({
+    const night = (serviceDate: string, amountDecimal: string | null) => ({
       serviceDate,
-      applied: amountDecimal === null ? null : { amountDecimal, currency },
+      applied: amountDecimal === null ? null : { amountDecimal, currency: "EUR" },
       evidenceQuality: amountDecimal === null ? "missing" : "exact",
     });
     const room = (position: number, nightly: unknown[], extra: object = {}) => ({
@@ -386,7 +386,12 @@ describe("calendarService manual-booking rates", () => {
       nightly,
       ...extra,
     });
-    const reservation = (id: string, total: string, assignments: unknown[], extra: object = {}) => ({
+    const reservation = (
+      id: string,
+      total: string,
+      assignments: unknown[],
+      extra: object = {},
+    ) => ({
       guestBookingId: id,
       bookingReference: id.toUpperCase(),
       status: "confirmed",
@@ -407,9 +412,6 @@ describe("calendarService manual-booking rates", () => {
               reservation("missing-night", "250.00", [
                 room(1, [night("2026-08-20", "100.0000"), night("2026-08-21", null)]),
               ]),
-              reservation("other-currency", "250.00", [
-                room(1, [night("2026-08-20", "100", "USD"), night("2026-08-21", "120.5", "USD")]),
-              ]),
               // A room an OTA change removed sits above the room count, without prices.
               reservation(
                 "two-rooms",
@@ -417,14 +419,15 @@ describe("calendarService manual-booking rates", () => {
                 [room(1, priced, { stay }), room(2, priced, { stay }), room(3, [], { stay })],
                 { roomCount: 2 },
               ),
-              // Moved after the first night: each stay reads the room position's nights.
+              // Two rooms booked, one assigned: its nights aren't the whole booking's.
+              reservation("one-of-two-rooms", "500.00", [room(1, priced, { stay })], {
+                roomCount: 2,
+              }),
+              // The room's stay covers one of the reservation's two nights.
               reservation(
-                "moved",
+                "short-room-stay",
                 "250.00",
-                [
-                  room(1, priced, { stay: { checkIn: "2026-08-20", checkOut: "2026-08-21" } }),
-                  room(1, priced, { stay: { checkIn: "2026-08-21", checkOut: "2026-08-22" } }),
-                ],
+                [room(1, priced, { stay: { checkIn: "2026-08-20", checkOut: "2026-08-21" } })],
                 { roomCount: 1 },
               ),
               reservation("no-rooms-yet", "250.00", []),
@@ -446,7 +449,6 @@ describe("calendarService manual-booking rates", () => {
     ];
     expect(nightsOf("one-room")).toEqual([{ stayNights: 2, bookedNights: both }]);
     expect(nightsOf("missing-night")).toEqual([{ stayNights: 2, bookedNights: null }]);
-    expect(nightsOf("other-currency")).toEqual([{ stayNights: 2, bookedNights: null }]);
     expect(nightsOf("two-rooms")[0]).toEqual({
       stayNights: 2,
       bookedNights: [
@@ -454,10 +456,8 @@ describe("calendarService manual-booking rates", () => {
         { date: "2026-08-21", amount: 241 },
       ],
     });
-    expect(nightsOf("moved")).toEqual([
-      { stayNights: 2, bookedNights: both },
-      { stayNights: 2, bookedNights: both },
-    ]);
+    expect(nightsOf("one-of-two-rooms")).toEqual([{ stayNights: 2, bookedNights: null }]);
+    expect(nightsOf("short-room-stay")).toEqual([{ stayNights: 2, bookedNights: null }]);
     expect(nightsOf("no-rooms-yet")).toEqual([{ stayNights: 2, bookedNights: null }]);
   });
 
