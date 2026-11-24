@@ -7,6 +7,8 @@ import type {
   BookingDashboardDetailsReadModel,
   BookingDashboardMetricsReadPort,
   BookingDate,
+  BookingGuestInsightsReadModel,
+  BookingTrackingCheckReadModel,
   BookingDayBookingsReadModel,
   BookingMoney,
   BookingPageViewTimelineReadModel,
@@ -313,6 +315,29 @@ export function createTargetBookingDashboardMetricsReadPort(config: {
         previousTotal: previousBuckets.reduce((sum, bucket) => sum + bucket.count, 0),
       } satisfies BookingPageViewTimelineReadModel;
     },
+    async getTrackingCheck(input) {
+      const result = await pool.query<{ bookingPageBookingCount: string; pageViewCount: string }>(
+        trackingCheckSql(),
+        [input.propertyId, PAGE_VIEWS_COUNTED_SINCE],
+      );
+      const bookings = Number(result.rows[0]?.bookingPageBookingCount ?? 0);
+      const views = Number(result.rows[0]?.pageViewCount ?? 0);
+      return {
+        propertyId: input.propertyId,
+        bookingPageBookingCount: bookings,
+        pageViewCount: views,
+        trackingMissing: bookings >= TRACKING_MISSING_MIN_BOOKINGS && views === 0,
+      } satisfies BookingTrackingCheckReadModel;
+    },
+    async getGuestInsights(input) {
+      const result = await pool.query<{
+        country: string | null;
+        nights: number;
+        leadDays: number;
+        age: number | null;
+      }>(guestInsightsSql(), [input.propertyId, input.periodStart, input.periodEnd]);
+      return toGuestInsights(input.propertyId, result.rows);
+    },
     async getChannelMix(input) {
       const result = await pool.query<{
         kind: "channel" | "source";
@@ -603,6 +628,132 @@ function sparklineSql(): string {
    AND booking.booked_on <= bucket.bucket_end
   GROUP BY bucket.bucket_start, bucket.bucket_end
   ORDER BY bucket.bucket_start`;
+}
+
+/**
+ * Every page view counts (consented or not) since VAY-2592 went live; before, only consented
+ * visits did, so a week reaching back past it would look untracked.
+ */
+const PAGE_VIEWS_COUNTED_SINCE = "2026-11-23T07:44:00Z";
+/** Bookings a guest finished: drafts, expired and declined ones may have no page view. */
+const FINISHED_BOOKING_STATES =
+  "('pending_payment', 'confirmed', 'completed', 'canceled', 'no_show')";
+/** One lost view (a blocker, a bot match) shouldn't raise the banner for a week. */
+const TRACKING_MISSING_MIN_BOOKINGS = 2;
+
+// Page view tracking check (VAY-2594): the last 7 days' finished booking page bookings and page
+// views of guests, consented or not.
+function trackingCheckSql(): string {
+  return `${bookingScopedPropertyCte()}
+  SELECT
+    (
+      SELECT COUNT(*) FROM booking.guest_bookings booking
+      JOIN scoped_property scoped ON scoped.property_id = booking.property_id
+      WHERE booking.direct_booking_source = 'booking_engine'
+        AND booking.lifecycle_status IN ${FINISHED_BOOKING_STATES}
+        AND booking.created_at >= GREATEST(now() - INTERVAL '7 days', $2::timestamptz)
+    )::text AS "bookingPageBookingCount",
+    (
+      SELECT COUNT(*) FROM distribution.booking_web_events event
+      JOIN scoped_property scoped ON scoped.property_id = event.property_id
+      WHERE event.event_type IN ('page_view', 'page_visit')
+        AND event.traffic_class = 'human'
+        AND event.occurred_at >= now() - INTERVAL '7 days'
+    )::text AS "pageViewCount"`;
+}
+
+// Guest insights (VAY-2594): one row per booking of every channel made in the period, with its
+// guest's nationality and age at arrival, its nights and its lead time. The guest is chosen once
+// (the booker first, as PMS does), and the age is that guest's own: from their profile, else from
+// their check-in registration, never a companion's.
+function guestInsightsSql(): string {
+  return `${bookingScopedPropertyCte()},
+  ${datedBookingsCte()},
+  stays AS (
+    SELECT booking.check_in, booking.check_out, booking.booked_on,
+      main_guest.country_code::text AS country,
+      COALESCE(profile.date_of_birth, registration.date_of_birth) AS birth_date
+    FROM dated_bookings booking
+    LEFT JOIN LATERAL (
+      SELECT guest.id, guest.country_code, guest.guest_profile_id
+      FROM booking.booking_guests guest
+      WHERE guest.guest_booking_id = booking.id
+      ORDER BY CASE guest.guest_role WHEN 'booker' THEN 0 WHEN 'primary_guest' THEN 1 ELSE 2 END,
+        guest.created_at, guest.id
+      LIMIT 1
+    ) main_guest ON true
+    LEFT JOIN booking.guest_profiles profile ON profile.id = main_guest.guest_profile_id
+    LEFT JOIN pms.guest_registrations registration
+      ON registration.booking_guest_id = main_guest.id
+      AND registration.property_id = booking.property_id
+    WHERE booking.booked_on BETWEEN $2::date AND $3::date
+  )
+  SELECT country,
+    (check_out - check_in) AS nights,
+    GREATEST(check_in - booked_on, 0) AS "leadDays",
+    CASE WHEN birth_date IS NULL THEN NULL
+      ELSE date_part('year', age(check_in, birth_date))::int END AS age
+  FROM stays`;
+}
+
+const AGE_BUCKETS = [
+  ["18-24", 18, 24],
+  ["25-34", 25, 34],
+  ["35-44", 35, 44],
+  ["45-54", 45, 54],
+  ["55+", 55, 130],
+] as const;
+const STAY_BUCKETS = [
+  ["1-2", 1, 2],
+  ["3-4", 3, 4],
+  ["5-7", 5, 7],
+  ["8+", 8, 100000],
+] as const;
+
+/** Buckets the bookings' guests; an age under 18 (a date typed wrong) counts as not given. */
+export function toGuestInsights(
+  propertyId: string,
+  rows: readonly { country: string | null; nights: number; leadDays: number; age: number | null }[],
+): BookingGuestInsightsReadModel {
+  const byCountry = new Map<string | null, number>();
+  for (const row of rows) {
+    const country = row.country?.trim().toUpperCase() || null;
+    byCountry.set(country, (byCountry.get(country) ?? 0) + 1);
+  }
+  const ages = rows.map((row) => Number(row.age)).filter((age) => isAdultAge(age));
+  const nights = rows.map((row) => Math.max(Number(row.nights), 1));
+  const leads = rows.map((row) => Math.max(Number(row.leadDays), 0));
+  const average = (values: number[]) =>
+    values.length > 0
+      ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10
+      : null;
+  return {
+    propertyId,
+    guestCount: rows.length,
+    nationalities: [...byCountry]
+      .map(([countryCode, guestCount]) => ({ countryCode, guestCount }))
+      .sort(
+        (a, b) =>
+          b.guestCount - a.guestCount ||
+          Number(a.countryCode === null) - Number(b.countryCode === null) ||
+          String(a.countryCode).localeCompare(String(b.countryCode)),
+      ),
+    ages: AGE_BUCKETS.map(([bucket, low, high]) => ({
+      bucket,
+      guestCount: ages.filter((age) => age >= low && age <= high).length,
+    })),
+    ageKnownCount: ages.length,
+    stays: STAY_BUCKETS.map(([bucket, low, high]) => ({
+      bucket,
+      guestCount: nights.filter((night) => night >= low && night <= high).length,
+    })),
+    averageNights: average(nights),
+    averageLeadDays: average(leads),
+  };
+}
+
+function isAdultAge(age: number): boolean {
+  return Number.isFinite(age) && age >= 18 && age <= 130;
 }
 
 // Bookings by channel (VAY-2594): every channel, and direct bookings by source, made in the period
@@ -956,7 +1107,7 @@ function conversionFunnelSql(): string {
     FROM distribution.booking_web_events event
     WHERE property.profile_status = 'complete'
       AND event.property_id = scoped.property_id
-      AND event.event_type IN ('page_visit', 'rate_selected', 'addons_step_passed',
+      AND event.event_type IN ('page_visit', 'dates_searched', 'rate_selected', 'addons_step_passed',
         'details_completed', 'complete_booking_clicked', 'payment_authorized', 'booking_completed')
       AND event.metadata -> 'funnelVersion' = '1'::jsonb
       AND event.traffic_class = 'human'

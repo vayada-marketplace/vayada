@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { formatNumber } from "@/lib/utils";
-import { funnelCsv, funnelRows } from "@/lib/utils/dashboardFunnel";
+import { funnelCsv, funnelDisplay, funnelRows } from "@/lib/utils/dashboardFunnel";
 import { TIME_RANGES, type ConversionFunnel, type TimeRange } from "@/services/dashboard";
 
 type Props = {
@@ -10,19 +10,13 @@ type Props = {
   loading: boolean;
   error: boolean;
   locale: string;
-  t: (key: string) => string;
+  t: (key: string, params?: Record<string, string | number>) => string;
   exportFileName: string;
   /** The page's selected range; the page tabs and this menu share it. */
   timeRange: TimeRange;
   onTimeRangeChange: (range: TimeRange) => void;
   /** Opens the Details window on conversion (VAY-2594). */
   onDetails?: () => void;
-};
-
-// Branch rows compare with their own eligible cohort rather than the row above.
-const DROP_BASE: Record<string, string> = {
-  payment_authorized: "dashboard.funnel.ofCardClicks",
-  booking_completed: "dashboard.funnel.ofEligibleSubmissions",
 };
 
 export function ConversionFunnelCard({
@@ -41,7 +35,8 @@ export function ConversionFunnelCard({
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
-  const rows = funnel?.steps.some((step) => step.count > 0) ? funnelRows(funnel) : null;
+  // The six steps of the card (VAY-2594); the CSV keeps every stage.
+  const display = funnel?.steps.some((step) => step.count > 0) ? funnelDisplay(funnel) : null;
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -93,9 +88,6 @@ export function ConversionFunnelCard({
     // Safari can fail a download whose object URL is revoked right after the click.
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
   };
-
-  const percent = (value: number | null) =>
-    value === null ? "—" : `${formatNumber(value, locale)}%`;
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
@@ -218,55 +210,53 @@ export function ConversionFunnelCard({
         </div>
       </div>
 
-      {rows ? (
-        <ol className="space-y-3.5" aria-busy={loading}>
-          {rows.map(({ stage, count, percentOfVisits, drop, dropPercent }) => (
-            <li
-              key={stage}
-              className={stage === "payment_authorized" ? "pl-3 border-l-2 border-gray-200" : ""}
-            >
-              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 mb-1.5">
-                <span className="text-[13px] text-gray-900">
-                  {t(`dashboard.funnel.${stage}`)}{" "}
-                  <span className="text-gray-500">&middot; {formatNumber(count, locale)}</span>
+      {display ? (
+        <div className="flex flex-col gap-3" aria-busy={loading}>
+          <ol className="flex flex-col gap-2.5">
+            {display.rows.map((row) => (
+              <li
+                key={row.stage}
+                className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap"
+              >
+                <span className="w-full shrink-0 text-[13px] text-gray-700 sm:w-[150px]">
+                  {t(`dashboard.funnelSteps.${row.key}`)}
                 </span>
-                <span className="flex items-baseline gap-2 text-[13px]">
-                  <span className="text-gray-900">{percent(percentOfVisits)}</span>
-                  {drop !== null && (
-                    <span
-                      className={`text-xs ${drop > 0 ? "text-red-600" : "text-gray-400"}`}
-                      title={DROP_BASE[stage] ? t(DROP_BASE[stage]) : undefined}
+                <div className="h-7 min-w-0 flex-1 overflow-hidden rounded-md bg-[#F6F7F9]">
+                  {row.count > 0 ? (
+                    <div
+                      className="flex h-full min-w-[44px] items-center rounded-md bg-[#2B4BF2]"
+                      style={{ width: `${row.width}%` }}
                     >
-                      {drop > 0 ? "\u2212" : ""}
-                      {formatNumber(drop, locale)} ({percent(dropPercent)})
-                      {DROP_BASE[stage] && <span className="sr-only"> {t(DROP_BASE[stage])}</span>}
+                      <span className="pl-2 text-xs font-semibold text-white">
+                        {formatNumber(row.count, locale)}
+                      </span>
+                    </div>
+                  ) : (
+                    // Nobody reached this step: no bar, a grey 0 on the empty track.
+                    <span className="flex h-full items-center pl-2 text-xs font-semibold text-gray-400">
+                      {formatNumber(0, locale)}
                     </span>
                   )}
-                </span>
-              </div>
-              <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-100">
-                <div
-                  className={`h-full rounded-full bg-gradient-to-r ${stage === "booking_completed" ? "from-green-400 to-green-700" : "from-primary-300 to-primary-600"}`}
-                  style={{ width: `${Math.min(Math.max(percentOfVisits ?? 0, 0), 100)}%` }}
-                />
-              </div>
-              {stage === "complete_booking_clicked" && funnel && (
-                <div className="flex flex-wrap gap-x-3 text-xs text-gray-500 mt-1.5">
-                  {funnel.paymentMethods.map(({ method, count: methodCount }) => (
-                    <span key={method}>
-                      {t(`dashboard.funnel.method.${method}`)}: {formatNumber(methodCount, locale)}{" "}
-                      (
-                      {count
-                        ? formatNumber(Math.round((methodCount / count) * 1000) / 10, locale)
-                        : 0}
-                      %)
-                    </span>
-                  ))}
                 </div>
-              )}
-            </li>
-          ))}
-        </ol>
+                <span className="w-[54px] shrink-0 text-right text-xs text-gray-500">
+                  {row.continued === null ? "" : `${formatNumber(row.continued, locale)}%`}
+                </span>
+              </li>
+            ))}
+          </ol>
+          <div className="flex justify-between gap-3 border-t border-[#F0F2F5] pt-3 text-[13px]">
+            <span className="text-gray-500">{t("dashboard.funnelSteps.overallLabel")}</span>
+            <span className="font-semibold text-gray-900">
+              {display.overall === null
+                ? "—"
+                : t("dashboard.funnelSteps.overall", {
+                    percent: formatNumber(display.overall, locale, {
+                      maximumFractionDigits: display.overall < 10 ? 2 : 1,
+                    }),
+                  })}
+            </span>
+          </div>
+        </div>
       ) : (
         <p className="text-[13px] text-gray-500 text-center py-8" aria-busy={loading}>
           {loading

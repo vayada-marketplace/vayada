@@ -11,6 +11,8 @@ import {
   useDashboardSetupChecklist,
 } from "@/components/dashboard/DashboardSetupChecklist";
 import { ChannelsCard } from "@/components/dashboard/ChannelsCard";
+import { GuestInsights } from "@/components/dashboard/GuestInsights";
+import { TrackingBanner } from "@/components/dashboard/TrackingBanner";
 import { ConversionFunnelCard } from "@/components/dashboard/ConversionFunnelCard";
 import { DayBookingsWindow } from "@/components/dashboard/DayBookingsWindow";
 import { DetailsWindow, type DetailsMetric } from "@/components/dashboard/DetailsWindow";
@@ -24,6 +26,7 @@ import {
   rangeQuery,
   TIME_RANGES,
   type ChannelMix,
+  type GuestInsights as GuestInsightsData,
   type DashboardStats,
   type ConversionFunnel,
   type RevenueDays,
@@ -38,6 +41,10 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [channels, setChannels] = useState<ChannelMix | null>(null);
   const [channelsError, setChannelsError] = useState(false);
+  const [guests, setGuests] = useState<GuestInsightsData | null>(null);
+  const [guestsError, setGuestsError] = useState(false);
+  // Page views not counted though guests book on the page (VAY-2594): the amber banner.
+  const [trackingMissing, setTrackingMissing] = useState(false);
   const [funnelError, setFunnelError] = useState(false);
   const [funnel, setFunnel] = useState<ConversionFunnel | null>(null);
   const [sparklines, setSparklines] = useState<Sparklines | null>(null);
@@ -54,6 +61,13 @@ export default function DashboardPage() {
   // The Details window's metric while it is open (VAY-2594).
   const [detailsMetric, setDetailsMetric] = useState<DetailsMetric | null>(null);
   const fetchSequence = useRef(0);
+
+  useEffect(() => {
+    dashboardService
+      .getTrackingMissing()
+      .then(setTrackingMissing)
+      .catch(() => setTrackingMissing(false));
+  }, []);
 
   useEffect(() => {
     settingsService
@@ -77,13 +91,16 @@ export default function DashboardPage() {
     setRevenueDays(null);
     setRevenueError(false);
     setChannelsError(false);
-    const [statsData, channelsData, funnelData, sparklinesData, revenueData] =
+    setGuests(null);
+    setGuestsError(false);
+    const [statsData, channelsData, funnelData, sparklinesData, revenueData, guestsData] =
       await Promise.allSettled([
         dashboardService.getStats(range, timeZone),
         dashboardService.getChannelMix(range, timeZone),
         dashboardService.getConversionFunnel(range, timeZone),
         dashboardService.getSparklines(range, timeZone),
         dashboardService.getRevenueDays(range, timeZone),
+        dashboardService.getGuestInsights(range, timeZone),
       ]);
     if (sequence !== fetchSequence.current) return;
     if (statsData.status === "fulfilled") setStats(statsData.value);
@@ -94,6 +111,8 @@ export default function DashboardPage() {
     if (sparklinesData.status === "fulfilled") setSparklines(sparklinesData.value);
     if (revenueData.status === "fulfilled") setRevenueDays(revenueData.value);
     else setRevenueError(true);
+    if (guestsData.status === "fulfilled") setGuests(guestsData.value);
+    else setGuestsError(true);
     setLoading(false);
   }, []);
 
@@ -120,6 +139,8 @@ export default function DashboardPage() {
     setFunnel(null);
     setFunnelError(false);
     setChannelsError(false);
+    setGuests(null);
+    setGuestsError(false);
     setSparklines(null);
     setRevenueDays(null);
     setOpenDay(null);
@@ -197,6 +218,7 @@ export default function DashboardPage() {
 
       {/* Shows only when the booking page needs attention; the header's pill says Live (VAY-2594). */}
       <BookingPageStatusCard />
+      {trackingMissing && <TrackingBanner t={t} />}
 
       <DashboardSetupChecklistCard setup={setupChecklist} hotelName={hotelName} />
 
@@ -324,6 +346,15 @@ export default function DashboardPage() {
           onDetails={openDetails("conversion")}
         />
       </div>
+
+      <GuestInsights
+        data={guests}
+        loading={loading}
+        error={guestsError}
+        range={timeRange}
+        locale={locale}
+        t={t}
+      />
     </PageLayout>
   );
 }
