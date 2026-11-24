@@ -425,6 +425,8 @@
   "bookings.detail.ratePlan": "Rate plan",
   "bookings.detail.channelManaged": "Channel-managed",
   "bookings.detail.notProvidedByChannel": "Not provided by {channel}",
+  "bookings.detail.phoneNotProvidedByBookingCom": "Not provided by Booking.com – see the Booking.com extranet",
+  "bookings.detail.phoneNotProvidedByAirbnb": "Not provided by Airbnb – see the Airbnb app",
   "bookings.detail.grossAmount": "Gross amount",
   "bookings.detail.stripeFee": "Stripe fee",
   "bookings.detail.vayadaCommission": "vayada commission",

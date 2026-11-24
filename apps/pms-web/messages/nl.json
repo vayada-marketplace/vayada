@@ -1354,5 +1354,7 @@
   "notifications.sync.synced": "Channel manager gesynchroniseerd",
   "notifications.toast.syncDetail": "Beschikbaarheid en boekingen op je andere kanalen zijn mogelijk niet actueel.",
   "notifications.toast.dismiss": "Melding sluiten",
-  "bookings.detail.notProvidedByChannel": "Niet doorgegeven door {channel}"
+  "bookings.detail.notProvidedByChannel": "Niet doorgegeven door {channel}",
+  "bookings.detail.phoneNotProvidedByBookingCom": "Niet doorgegeven door Booking.com – zie het Booking.com-extranet",
+  "bookings.detail.phoneNotProvidedByAirbnb": "Niet doorgegeven door Airbnb – zie de Airbnb-app"
 }

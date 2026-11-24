@@ -5,6 +5,7 @@ import type { CheckinSettings } from "@/services/settings";
 import { forAdditionalGuests } from "@/lib/settings/checkinSettings";
 import type { RegistrationGuest } from "@/lib/checkin/registration";
 import type { CheckinRoom, RoomOption } from "@/lib/checkin/rooms";
+import type { ContactNotProvided } from "@/lib/bookings/channelLabel";
 import { countLabel, guestDisplayName, stayRangeLabel } from "@/lib/checkin/labels";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { useTranslation } from "@/lib/i18n";
@@ -41,7 +42,7 @@ export function RoomsGuestsStep({
   formInitial: (guest: RegistrationGuest) => GuestFormValues;
   lockedFields: (guest: RegistrationGuest) => ReadonlySet<GuestLockableField>;
   /** "Not provided by Airbnb" for a guest whose channel sent no email or phone (VAY-2577). */
-  notProvided?: (guest: RegistrationGuest) => string | null;
+  notProvided?: (guest: RegistrationGuest) => ContactNotProvided | null;
   /** Saves what changed since `saved`; `listed` gets a new guest's id as soon as it is listed. */
   onSaveGuest: (
     guest: RegistrationGuest,

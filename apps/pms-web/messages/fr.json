@@ -1354,5 +1354,7 @@
   "notifications.sync.synced": "Channel manager synchronisé",
   "notifications.toast.syncDetail": "Les disponibilités et les réservations de vos autres canaux ne sont peut-être plus à jour.",
   "notifications.toast.dismiss": "Fermer la notification",
-  "bookings.detail.notProvidedByChannel": "Non fourni par {channel}"
+  "bookings.detail.notProvidedByChannel": "Non fourni par {channel}",
+  "bookings.detail.phoneNotProvidedByBookingCom": "Non fourni par Booking.com – voir l’extranet Booking.com",
+  "bookings.detail.phoneNotProvidedByAirbnb": "Non fourni par Airbnb – voir l’app Airbnb"
 }

@@ -1354,5 +1354,7 @@
   "notifications.sync.synced": "チャネルマネージャーと同期しました",
   "notifications.toast.syncDetail": "他のチャネルの空室状況と予約が最新でない可能性があります。",
   "notifications.toast.dismiss": "通知を閉じる",
-  "bookings.detail.notProvidedByChannel": "{channel}から提供されていません"
+  "bookings.detail.notProvidedByChannel": "{channel}から提供されていません",
+  "bookings.detail.phoneNotProvidedByBookingCom": "Booking.comから提供されていません – Booking.comの管理画面（エクストラネット）をご確認ください",
+  "bookings.detail.phoneNotProvidedByAirbnb": "Airbnbから提供されていません – Airbnbアプリをご確認ください"
 }

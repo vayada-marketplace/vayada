@@ -1358,5 +1358,7 @@
   "notifications.sync.synced": "Channel manager tersinkron",
   "notifications.toast.syncDetail": "Ketersediaan dan pemesanan di saluran Anda yang lain mungkin tidak terbaru.",
   "notifications.toast.dismiss": "Tutup notifikasi",
-  "bookings.detail.notProvidedByChannel": "Tidak diberikan oleh {channel}"
+  "bookings.detail.notProvidedByChannel": "Tidak diberikan oleh {channel}",
+  "bookings.detail.phoneNotProvidedByBookingCom": "Tidak diberikan oleh Booking.com – lihat extranet Booking.com",
+  "bookings.detail.phoneNotProvidedByAirbnb": "Tidak diberikan oleh Airbnb – lihat aplikasi Airbnb"
 }
