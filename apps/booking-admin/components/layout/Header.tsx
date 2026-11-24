@@ -1,6 +1,7 @@
 "use client";
 
 import { isSupportAvailable, SupportDialog, type SupportDialogHandle } from "@vayada/settings-ui";
+import { AssistantLauncher } from "@vayada/assistant-ui";
 import { apiClient } from "@/services/api/client";
 
 import { useState, useRef, useEffect } from "react";
@@ -229,6 +230,15 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
           hotelId={selectedHotel?.id}
           propertyId={selectedHotel?.propertyId}
           slug={selectedHotel?.slug}
+        />
+
+        {/* VAY-2519: shows only while the API has the assistant switched on. */}
+        <AssistantLauncher
+          property={
+            propertyId && selectedHotel ? { id: propertyId, name: selectedHotel.name } : null
+          }
+          userName={userName}
+          onContact={isSupportAvailable() ? () => supportDialog.current?.open() : undefined}
         />
 
         {/* Notifications bell and panel (VAY-2349) */}

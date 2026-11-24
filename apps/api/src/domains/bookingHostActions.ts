@@ -5,6 +5,7 @@ import {
   retainHostRoomPolicies,
   type HostPolicyImpact,
 } from "./bookingHostPolicyImpact.js";
+import { AuthorizationError } from "@vayada/backend-authorization";
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
 import { targetBookingHostActionPrimitives as bookingOwner } from "../routes/bookingWebPublic.js";
@@ -80,13 +81,21 @@ export type HostActionPreview = {
   impact: HostActionImpact;
 };
 export type HostActionResult = { bookingId: string; lifecycleStatus: string };
+/** VAY-2099: staff without `pms.reservation.cancel` (who can still accept a request) may reject only
+ * a "hotel confirms" request, never a bank transfer or PayPal booking waiting for its payment. */
+export type HostActionPermissions = { requestsOnly?: boolean };
 export type BookingHostActions = {
-  preview(scope: HostActionScope, request: HostActionRequest): Promise<HostActionPreview>;
+  preview(
+    scope: HostActionScope,
+    request: HostActionRequest,
+    permissions?: HostActionPermissions,
+  ): Promise<HostActionPreview>;
   findAction(scope: HostActionScope, previewId: string): Promise<HostBookingAction | null>;
   apply(
     scope: HostActionScope,
     previewId: string,
     idempotencyKey: string,
+    permissions?: HostActionPermissions,
   ): Promise<HostActionResult>;
   /** Asks Stripe again for a cancelled stay's failed card refund, same amount (VAY-2205). */
   retryCardRefund(
@@ -156,6 +165,7 @@ export function createBookingHostActions(config: {
     at: Date,
     /** Apply moves the holds for real, so it skips the preview's trial move. */
     applying = false,
+    permissions: HostActionPermissions = {},
   ) => {
     // NO KEY UPDATE: a v2 stay's PMS adoption (inventory lock, then a FOR KEY SHARE reference to
     // this row) can finish instead of deadlocking against a host action (VAY-2100).
@@ -185,6 +195,14 @@ export function createBookingHostActions(config: {
         Array.isArray(offer["addonPurchases"]) && offer["addonPurchases"].length > 0,
     });
     if (conflict) throw new HostActionError(conflict.code, conflict.message);
+    if (
+      request.action === "reject" &&
+      permissions.requestsOnly &&
+      (metadata["acceptanceMode"] !== "request" ||
+        metadata["paymentMethod"] === "bank_transfer" ||
+        metadata["paymentMethod"] === "paypal")
+    )
+      throw new AuthorizationError("Missing required permission: pms.reservation.cancel");
     const payment = await config.guards.payment(client, {
       ...scope,
       action: request.action,
@@ -387,10 +405,10 @@ export function createBookingHostActions(config: {
       const status = await executePricingCardRefundSoon(config.pool, provider, staged.commandId);
       return { status };
     },
-    async preview(scope, request) {
+    async preview(scope, request, permissions) {
       const at = now();
       return bookingOwner.transaction(config.pool, async (client) => {
-        const state = await inspect(client, scope, request, at);
+        const state = await inspect(client, scope, request, at, false, permissions);
         const previewId = randomUUID();
         const expiresAt = new Date(at.getTime() + 600_000).toISOString();
         await client.query(
@@ -413,7 +431,7 @@ export function createBookingHostActions(config: {
         return { previewId, expiresAt, impact: state.impact };
       });
     },
-    async apply(scope, previewId, idempotencyKey) {
+    async apply(scope, previewId, idempotencyKey, permissions) {
       const at = now();
       const context = {
         operation: "booking.host-action",
@@ -446,7 +464,7 @@ export function createBookingHostActions(config: {
             "stale_preview",
             "Preview expired or unavailable. Preview this action again.",
           );
-        const state = await inspect(client, scope, preview.request, at, true);
+        const state = await inspect(client, scope, preview.request, at, true, permissions);
         if (state.revision !== preview.revision || hash(state.impact) !== hash(preview.impact))
           throw new HostActionError(
             "stale_preview",
