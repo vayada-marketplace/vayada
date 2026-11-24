@@ -6,6 +6,7 @@ import type {
   BookingDashboardMetricsReadPort,
   BookingDayBookingsReadModel,
   BookingGuestInsightsReadModel,
+  BookingTrackingCheckReadModel,
   BookingPageViewTimelineReadModel,
   BookingRevenueDaysReadModel,
   BookingSourceMixReadModel,
@@ -74,6 +75,12 @@ export type BookingDashboardPageViewsResponse = {
   contractVersion: BookingDashboardContractVersion;
   propertyId: string;
   pageViews: BookingPageViewTimelineReadModel;
+};
+
+export type BookingDashboardTrackingResponse = {
+  contractVersion: BookingDashboardContractVersion;
+  propertyId: string;
+  tracking: BookingTrackingCheckReadModel;
 };
 
 export type BookingDashboardGuestsResponse = {
@@ -290,6 +297,27 @@ export async function registerBookingDashboardRoutes(
         } satisfies BookingDashboardPageViewsResponse;
       } catch (error) {
         request.log.error({ err: error }, "Booking dashboard page-view read failed");
+        return sendBookingDashboardError(reply, 500, readModelUnavailableError());
+      }
+    },
+  );
+
+  // VAY-2594: whether page views are being counted (the dashboard's amber banner).
+  app.get<{ Params: BookingDashboardPropertyParams }>(
+    "/properties/:propertyId/dashboard/tracking",
+    async (request, reply) => {
+      const { propertyId } = request.params;
+      if (!(await enforceBookingDashboardReadPolicy(request, reply, propertyId, options)))
+        return reply;
+      try {
+        const tracking = await metricsReadPort.getTrackingCheck({ propertyId });
+        return {
+          contractVersion: BOOKING_DASHBOARD_CONTRACT_VERSION,
+          propertyId,
+          tracking,
+        } satisfies BookingDashboardTrackingResponse;
+      } catch (error) {
+        request.log.error({ err: error }, "Booking dashboard tracking check failed");
         return sendBookingDashboardError(reply, 500, readModelUnavailableError());
       }
     },

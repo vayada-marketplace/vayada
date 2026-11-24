@@ -528,6 +528,8 @@
   "dashboard.bookingPage.offlineBanner.title": "您的预订页面未上线。",
   "dashboard.bookingPage.offlineBanner.detail": "客人目前无法预订。",
   "dashboard.bookingPage.offlineBanner.fixNow": "立即修复",
+  "dashboard.tracking.title": "未检测到页面浏览量统计。",
+  "dashboard.tracking.detail": "预订已记录，但访客和转化数据可能不完整。",
   "dashboard.bookingPage.publishing.detail": "我们正在将您的预订页面上线，只需几秒钟。您可以离开此页面。",
   "dashboard.bookingPage.publishing.stalled": "所需时间比平时长。您可以离开此页面，稍后再检查。",
   "dashboard.bookingPage.ready.detail": "一切就绪。发布后客人即可预订。",

@@ -334,6 +334,12 @@ describe("@vayada/domain-booking dashboard metrics read model contract", () => {
       }),
       getDashboardDetails: async (input) => emptyDetails(input.propertyId),
       getGuestInsights: async (input) => emptyGuests(input.propertyId),
+      getTrackingCheck: async (input) => ({
+        propertyId: input.propertyId,
+        bookingPageBookingCount: 0,
+        pageViewCount: 0,
+        trackingMissing: false,
+      }),
       getRevenueDays: async () => null,
       getDayBookings: async () => null,
       async getPageViewTimeline(input) {
@@ -369,6 +375,12 @@ describe("@vayada/domain-booking dashboard metrics read model contract", () => {
       }),
       getDashboardDetails: async (input) => emptyDetails(input.propertyId),
       getGuestInsights: async (input) => emptyGuests(input.propertyId),
+      getTrackingCheck: async (input) => ({
+        propertyId: input.propertyId,
+        bookingPageBookingCount: 0,
+        pageViewCount: 0,
+        trackingMissing: false,
+      }),
       getRevenueDays: async () => null,
       getDayBookings: async () => null,
       getPageViewTimeline: async (input) => fakePageViews(input.propertyId),
@@ -400,6 +412,12 @@ describe("@vayada/domain-booking dashboard metrics read model contract", () => {
       }),
       getDashboardDetails: async (input) => emptyDetails(input.propertyId),
       getGuestInsights: async (input) => emptyGuests(input.propertyId),
+      getTrackingCheck: async (input) => ({
+        propertyId: input.propertyId,
+        bookingPageBookingCount: 0,
+        pageViewCount: 0,
+        trackingMissing: false,
+      }),
       getRevenueDays: async () => null,
       getDayBookings: async () => null,
       getPageViewTimeline: async (input) => fakePageViews(input.propertyId),

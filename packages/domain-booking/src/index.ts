@@ -177,6 +177,20 @@ export type BookingChannelMixReadModel = {
 };
 
 /**
+ * Page view tracking check (VAY-2594): over the last 7 days, bookings made on the booking page
+ * and its page views. Bookings without a single page view mean the views aren't being counted.
+ */
+export type BookingTrackingCheckReadModel = {
+  propertyId: string;
+  /** Booking page bookings guests finished (not drafts or expired ones) in the last 7 days. */
+  bookingPageBookingCount: number;
+  /** Page views of guests in the last 7 days, consented or not. */
+  pageViewCount: number;
+  /** At least two such bookings and not one page view: the views aren't arriving. */
+  trackingMissing: boolean;
+};
+
+/**
  * Guest insights (VAY-2594): the guests of every channel's bookings made in the period, one per
  * booking (its primary guest), by nationality, age at arrival and length of stay.
  */
@@ -306,6 +320,7 @@ export type BookingDashboardMetricsReadPort =
       windowEnd: BookingDate;
     }): Promise<BookingPageViewTimelineReadModel | null>;
     getChannelMix(input: BookingDashboardMetricsPeriodInput): Promise<BookingChannelMixReadModel>;
+    getTrackingCheck(input: { propertyId: string }): Promise<BookingTrackingCheckReadModel>;
     getGuestInsights(input: {
       propertyId: string;
       periodStart: BookingDate;

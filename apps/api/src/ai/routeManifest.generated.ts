@@ -80,6 +80,7 @@ export const ROUTE_MANIFEST = [
   "GET /api/booking/properties/:propertyId/dashboard/revenue-days",
   "GET /api/booking/properties/:propertyId/dashboard/sparklines",
   "GET /api/booking/properties/:propertyId/dashboard/stats",
+  "GET /api/booking/properties/:propertyId/dashboard/tracking",
   "GET /api/booking/properties/:propertyId/guest-rules",
   "GET /api/booking/properties/:propertyId/guest-terms",
   "GET /api/booking/properties/:propertyId/location-map",

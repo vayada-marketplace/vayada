@@ -183,6 +183,27 @@ describe("Booking dashboard routes", () => {
     });
   });
 
+  it("says whether page views are being counted (VAY-2594)", async () => {
+    app = buildDashboardApp({
+      readPort: {
+        ...fakeReadPort(),
+        getTrackingCheck: async (input) => ({
+          propertyId: input.propertyId,
+          bookingPageBookingCount: 2,
+          pageViewCount: 0,
+          trackingMissing: true,
+        }),
+      },
+    });
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/properties/prop_alpenrose/dashboard/tracking",
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({ tracking: { trackingMissing: true } });
+  });
+
   it("serves guest insights for the period, ages only to people who may read reservations (VAY-2594)", async () => {
     const readPort = {
       ...fakeReadPort(),
@@ -475,6 +496,12 @@ describe("Booking dashboard routes", () => {
         }),
         getDashboardDetails: async (input) => emptyDetails(input.propertyId),
         getGuestInsights: async (input) => emptyGuests(input.propertyId),
+        getTrackingCheck: async (input) => ({
+          propertyId: input.propertyId,
+          bookingPageBookingCount: 0,
+          pageViewCount: 0,
+          trackingMissing: false,
+        }),
         getRevenueDays: async () => null,
         getDayBookings: async () => null,
         async getPageViewTimeline(input) {
@@ -622,6 +649,7 @@ describe("Booking dashboard routes", () => {
         getSparklines: denied,
         getConversionFunnel: denied,
         getChannelMix: denied,
+        getTrackingCheck: denied,
         getGuestInsights: denied,
         getDashboardDetails: denied,
         getRevenueDays: denied,
@@ -685,10 +713,15 @@ describe("Booking dashboard routes", () => {
         headers,
         query: { periodStart: "2026-06-01", periodEnd: "2026-06-30" },
       }),
+      injectJson(app, {
+        method: "GET",
+        url: "/api/booking/properties/prop_alpenrose/dashboard/tracking",
+        headers,
+      }),
     ]);
 
     expect(responses.map(({ statusCode }) => statusCode)).toEqual([
-      403, 403, 403, 403, 403, 403, 403, 403, 403,
+      403, 403, 403, 403, 403, 403, 403, 403, 403, 403,
     ]);
   });
 
@@ -772,6 +805,12 @@ describe("Booking dashboard routes", () => {
         }),
         getDashboardDetails: async (input) => emptyDetails(input.propertyId),
         getGuestInsights: async (input) => emptyGuests(input.propertyId),
+        getTrackingCheck: async (input) => ({
+          propertyId: input.propertyId,
+          bookingPageBookingCount: 0,
+          pageViewCount: 0,
+          trackingMissing: false,
+        }),
         getRevenueDays: async () => null,
         getDayBookings: async () => null,
         async getPageViewTimeline(input) {
@@ -817,6 +856,12 @@ describe("Booking dashboard routes", () => {
         }),
         getDashboardDetails: async (input) => emptyDetails(input.propertyId),
         getGuestInsights: async (input) => emptyGuests(input.propertyId),
+        getTrackingCheck: async (input) => ({
+          propertyId: input.propertyId,
+          bookingPageBookingCount: 0,
+          pageViewCount: 0,
+          trackingMissing: false,
+        }),
         getRevenueDays: async () => null,
         getDayBookings: async () => null,
         async getPageViewTimeline(input) {
@@ -1349,6 +1394,12 @@ function fakeReadPort(): BookingDashboardMetricsReadPort {
     }),
     getDashboardDetails: async (input) => emptyDetails(input.propertyId),
     getGuestInsights: async (input) => emptyGuests(input.propertyId),
+    getTrackingCheck: async (input) => ({
+      propertyId: input.propertyId,
+      bookingPageBookingCount: 0,
+      pageViewCount: 0,
+      trackingMissing: false,
+    }),
     getRevenueDays: async () => null,
     getDayBookings: async () => null,
     async getPageViewTimeline(input) {

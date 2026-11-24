@@ -528,6 +528,8 @@
   "dashboard.bookingPage.offlineBanner.title": "Ihre Buchungsseite ist offline.",
   "dashboard.bookingPage.offlineBanner.detail": "Gäste können gerade nicht buchen.",
   "dashboard.bookingPage.offlineBanner.fixNow": "Jetzt beheben",
+  "dashboard.tracking.title": "Seitenaufrufe werden nicht erfasst.",
+  "dashboard.tracking.detail": "Buchungen werden gespeichert, aber Besucher und Conversion sind womöglich unvollständig.",
   "dashboard.bookingPage.publishing.detail": "Wir stellen Ihre Buchungsseite online. Das dauert ein paar Sekunden. Sie können diese Seite verlassen.",
   "dashboard.bookingPage.publishing.stalled": "Das dauert länger als üblich. Sie können diese Seite verlassen und später erneut prüfen.",
   "dashboard.bookingPage.ready.detail": "Alles ist bereit. Veröffentlichen Sie sie, damit Gäste buchen können.",

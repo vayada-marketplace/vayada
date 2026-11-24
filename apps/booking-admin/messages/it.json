@@ -528,6 +528,8 @@
   "dashboard.bookingPage.offlineBanner.title": "La tua pagina di prenotazione è offline.",
   "dashboard.bookingPage.offlineBanner.detail": "Gli ospiti non possono prenotare in questo momento.",
   "dashboard.bookingPage.offlineBanner.fixNow": "Risolvi ora",
+  "dashboard.tracking.title": "Monitoraggio delle visualizzazioni non rilevato.",
+  "dashboard.tracking.detail": "Le prenotazioni sono registrate, ma visitatori e conversione potrebbero essere incompleti.",
   "dashboard.bookingPage.publishing.detail": "Stiamo mettendo online la tua pagina di prenotazione. Ci vogliono pochi secondi. Puoi lasciare questa pagina.",
   "dashboard.bookingPage.publishing.stalled": "Ci vuole più del solito. Puoi lasciare questa pagina e controllare più tardi.",
   "dashboard.bookingPage.ready.detail": "È tutto pronto. Pubblicala perché gli ospiti possano prenotare.",
