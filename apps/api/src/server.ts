@@ -529,6 +529,9 @@ const assistant =
           );
           return rows[0]?.timezone;
         },
+        // With AI_CHANGES_ENABLED too, the assistant may ask for changes (VAY-2524): the person's
+        // Yes on vayada's card makes them. No change action is offered in the app yet.
+        ...(aiChanges ? { propose: aiChanges.proposeChange } : {}),
       }
     : undefined;
 
