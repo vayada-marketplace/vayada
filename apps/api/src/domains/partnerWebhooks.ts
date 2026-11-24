@@ -36,6 +36,28 @@ export function deriveWebhookSigningSecret(
   return `vyp_ws_${mac}`;
 }
 
+/**
+ * The pool for one partner job (the booking sweep or the webhook delivery): one connection of its
+ * own, never next-api's shared pool, so the jobs can't take connections from requests. Under the
+ * production pool runtime (postgresRuntime.ts) a pool with session settings gets exactly one
+ * connection, and its application_name keys it apart from every other pool. A statement that runs
+ * 30 s or waits 5 s for a lock gives up (the job tries again on its next tick), and a transaction
+ * left open ends after a minute.
+ */
+export function partnerJobPoolConfig(
+  connectionString: string,
+  job: "sweep" | "delivery",
+): pg.PoolConfig {
+  return {
+    connectionString,
+    max: 1,
+    application_name: `vayada-partner-${job}`,
+    statement_timeout: 30_000,
+    lock_timeout: 5_000,
+    idle_in_transaction_session_timeout: 60_000,
+  };
+}
+
 /** `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">`. */
 export function webhookSignature(secret: string, rawBody: string, unixSeconds: number): string {
   const v1 = createHmac("sha256", secret).update(`${unixSeconds}.${rawBody}`).digest("hex");

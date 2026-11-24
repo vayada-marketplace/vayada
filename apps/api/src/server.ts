@@ -372,7 +372,7 @@ import { createPgBookingRoomSortingRepository } from "./domains/bookingRoomSorti
 import { createPgPartnerConnectionsRepository } from "./domains/partnerConnections.js";
 import { createPgPartnerPromoCodesRepository } from "./domains/partnerPromoCodes.js";
 import { runPartnerBookingSweep } from "./domains/partnerBookingUpdates.js";
-import { deliverPartnerWebhooks } from "./domains/partnerWebhooks.js";
+import { deliverPartnerWebhooks, partnerJobPoolConfig } from "./domains/partnerWebhooks.js";
 import { createPgAccountBookingPagesRepository } from "./domains/accountBookingPages.js";
 import { createPgBookingHostNotificationsRepository } from "./domains/bookingHostNotifications.js";
 import { createPgGuestReviewCommands } from "./domains/pmsGuestReviews.js";
@@ -3974,17 +3974,22 @@ if (bookingEmailDelivery) runBookingEmailDelivery();
 
 // VAY-2438: booking updates for connected partner apps. Every minute the sweep compares each booking
 // that used a partner's code with what the app was last sent and queues the next version; the
-// delivery POSTs due events, signed. Both stay off until PARTNER_WEBHOOK_SIGNING_KEY is set.
+// delivery POSTs due events, signed. Both stay off until PARTNER_WEBHOOK_SIGNING_KEY is set. Each
+// job has one connection of its own with statement and lock timeouts, never the shared pool, and a
+// run is skipped while the job's previous run is still going.
 const partnerWebhookSigningKey = config.partnerWebhookSigningKey;
-const partnerUpdatesPool =
-  partnerWebhookSigningKey && targetDatabaseUrl
-    ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2 })
-    : undefined;
+const partnerJobsDatabaseUrl = partnerWebhookSigningKey ? targetDatabaseUrl : undefined;
+const partnerSweepPool = partnerJobsDatabaseUrl
+  ? new pg.Pool(partnerJobPoolConfig(partnerJobsDatabaseUrl, "sweep"))
+  : undefined;
+const partnerDeliveryPool = partnerJobsDatabaseUrl
+  ? new pg.Pool(partnerJobPoolConfig(partnerJobsDatabaseUrl, "delivery"))
+  : undefined;
 let activePartnerSweep: Promise<void> | undefined;
 let activePartnerDelivery: Promise<void> | undefined;
 const runPartnerSweep = () => {
-  if (!config.backgroundWorkersEnabled || !partnerUpdatesPool || activePartnerSweep) return;
-  activePartnerSweep = runPartnerBookingSweep({ pool: partnerUpdatesPool })
+  if (!config.backgroundWorkersEnabled || !partnerSweepPool || activePartnerSweep) return;
+  activePartnerSweep = runPartnerBookingSweep({ pool: partnerSweepPool })
     .then((result) => {
       if (result.queued > 0)
         app.log.info({ queued: result.queued }, "Partner booking updates queued");
@@ -3997,10 +4002,10 @@ const runPartnerSweep = () => {
     });
 };
 const runPartnerDelivery = () => {
-  if (!config.backgroundWorkersEnabled || !partnerUpdatesPool || !partnerWebhookSigningKey) return;
+  if (!config.backgroundWorkersEnabled || !partnerDeliveryPool || !partnerWebhookSigningKey) return;
   if (activePartnerDelivery) return;
   activePartnerDelivery = deliverPartnerWebhooks({
-    pool: partnerUpdatesPool,
+    pool: partnerDeliveryPool,
     signingKey: partnerWebhookSigningKey,
     log: app.log,
   })
@@ -4016,9 +4021,9 @@ const runPartnerDelivery = () => {
       activePartnerDelivery = undefined;
     });
 };
-const partnerSweepTimer = partnerUpdatesPool ? setInterval(runPartnerSweep, 60_000) : undefined;
+const partnerSweepTimer = partnerSweepPool ? setInterval(runPartnerSweep, 60_000) : undefined;
 partnerSweepTimer?.unref();
-const partnerDeliveryTimer = partnerUpdatesPool
+const partnerDeliveryTimer = partnerDeliveryPool
   ? setInterval(runPartnerDelivery, 15_000)
   : undefined;
 partnerDeliveryTimer?.unref();
@@ -4037,7 +4042,8 @@ app.addHook("onClose", async () => {
   if (partnerDeliveryTimer) clearInterval(partnerDeliveryTimer);
   await activePartnerSweep;
   await activePartnerDelivery;
-  await partnerUpdatesPool?.end();
+  await partnerSweepPool?.end();
+  await partnerDeliveryPool?.end();
   await activeBookingLifecycleRun;
   await activeBankTransferReminderRun;
   await activePricingCardRefundRun;
