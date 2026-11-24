@@ -1,8 +1,11 @@
 // How an AI asks for a change (VAY-2524): the in-app assistant's and the MCP server's tool layers
 // call this with the tool call's own delegated (read) context. It never runs anything: it checks
 // the change against the action and the person's rights now, and records it as one pending
-// operation, which waits for the person's Yes on a vayada card (pendingActions.ts). A retried or
-// regenerated call with the same arguments gets the same operation back (operationStore.ts).
+// operation, which waits for the person's Yes on a vayada card (pendingActions.ts). A change to a
+// record that exists also keeps the record's current version, which vayada reads now as the person
+// (currentState.ts), never the AI. A retried or regenerated call with the same arguments gets the
+// same operation back, also after it ran; a waiting one whose record moved on is asked anew
+// (operationStore.ts).
 //
 // Every call writes one AI action log row, whatever its outcome, as reads do (runRouteAction.ts).
 import {
@@ -15,8 +18,14 @@ import { isLoggableUuid, type AiActionLog, type AiActionOutcome } from "../actio
 import { argumentKindsOf } from "../actionLog/argumentKinds.js";
 import type { ChangeAction } from "../actions/defineChangeAction.js";
 import { findChangeAction, surfaceOf } from "../actions/registry.js";
-import type { AiOperationStatus, AiOperationStore } from "../executor/operationStore.js";
+import type {
+  AiOperation,
+  AiOperationStatus,
+  AiOperationStore,
+  ProposedChange,
+} from "../executor/operationStore.js";
 import { changeArgumentProblem } from "./changeCard.js";
+import type { CurrentStateReader } from "./currentState.js";
 import { mayMakeChange } from "./pendingActions.js";
 
 export type ProposeChangeRequest = {
@@ -38,7 +47,14 @@ export type ProposeChangeRequest = {
   expiresInMs?: number;
 };
 
-export type ProposeChangeError = "unknown_action" | "invalid_input" | "not_allowed";
+export type ProposeChangeError =
+  | "unknown_action"
+  | "invalid_input"
+  | "not_allowed"
+  /** The record the change names is not there (any more). */
+  | "not_found"
+  /** vayada could not read the record's current version now: try again. */
+  | "unavailable";
 
 export type ProposeChangeResult =
   | {
@@ -56,13 +72,17 @@ const OUTCOME: Record<ProposeChangeError, AiActionOutcome> = {
   unknown_action: "invalid",
   invalid_input: "invalid",
   not_allowed: "denied",
+  not_found: "invalid",
+  unavailable: "failed",
 };
 
 export function createAiChangeProposer(deps: {
-  store: Pick<AiOperationStore, "propose">;
+  store: Pick<AiOperationStore, "propose" | "findRun">;
   log: AiActionLog;
   /** Hands back a log row that could not be written: the proposal itself stands. */
   onLogFailure: (error: unknown) => void;
+  /** Reads the preconditions of a change to a record that exists (currentState.ts). */
+  readCurrentState: CurrentStateReader;
   findAction?: (key: string) => ChangeAction | undefined;
   now?: () => Date;
 }) {
@@ -146,39 +166,78 @@ export function createAiChangeProposer(deps: {
       return refuse("not_allowed", "You can't make this change on this property.");
     }
 
-    let proposed: Awaited<ReturnType<typeof deps.store.propose>>;
-    try {
-      proposed = await deps.store.propose(
-        {
-          organizationId: context.selectedOrganization.organizationId,
-          propertyId,
-          userId: context.actor.internalUserId,
-          surface,
-          connectionId: context.delegation.connectionId,
-          conversationId: context.delegation.conversationId,
-          requestScope: request.requestScope,
-          client: request.client,
-          action,
-          arguments: data!,
-          previewSha256: request.previewSha256,
-          expiresInMs: request.expiresInMs,
-        },
-        now(),
-      );
-    } catch (error) {
-      // Its row too: the ask failed, and nothing was stored.
-      await log("failed", "store_failed", null);
-      throw error;
-    }
-    const { operation, created } = proposed;
-    await log("ok", null, operation.id);
-    return {
-      ok: true,
-      pendingActionId: operation.id,
-      status: operation.status,
-      expiresAt: operation.expiresAt,
-      created,
+    const asked: ProposedChange = {
+      organizationId: context.selectedOrganization.organizationId,
+      propertyId,
+      userId: context.actor.internalUserId,
+      surface,
+      connectionId: context.delegation.connectionId,
+      conversationId: context.delegation.conversationId,
+      requestScope: request.requestScope,
+      client: request.client,
+      action,
+      arguments: data!,
+      previewSha256: request.previewSha256,
+      expiresInMs: request.expiresInMs,
     };
+    /** A store call; when it fails, its row too: the ask failed, and nothing was stored. */
+    const stored = async <T>(call: () => Promise<T>): Promise<T> => {
+      try {
+        return await call();
+      } catch (error) {
+        await log("failed", "store_failed", null);
+        throw error;
+      }
+    };
+    const answer = async (operation: AiOperation, created: boolean) => {
+      await log("ok", null, operation.id);
+      return {
+        ok: true as const,
+        pendingActionId: operation.id,
+        status: operation.status,
+        expiresAt: operation.expiresAt,
+        created,
+      };
+    };
+
+    // The record's current version, read now as the person: the change keeps it, and the route
+    // and the card compare it, so a record changed before the Yes is refused, not overwritten.
+    if (action.preconditions.length > 0) {
+      let current: Awaited<ReturnType<CurrentStateReader>>;
+      try {
+        current = await deps.readCurrentState(context, action, data!);
+      } catch (error) {
+        await log("failed", "read_failed", null);
+        throw error;
+      }
+      const unavailable = () =>
+        refuse("unavailable", "vayada can't check this change right now. Try again.");
+      if (!current.ok) {
+        if (current.reason === "missing") {
+          // A retry of an ask that already ended (maybe the run made it go, as a released block)
+          // gets that outcome, as any retry does; otherwise there is nothing to change.
+          const ran = await stored(() => deps.store.findRun(asked, now()));
+          if (ran) return answer(ran, false);
+          return refuse("not_found", "What this change is for is not there any more.");
+        }
+        if (current.reason === "not_allowed") {
+          return refuse("not_allowed", "You can't make this change on this property.");
+        }
+        return unavailable();
+      }
+      // Every precondition and nothing else, each of its declared shape.
+      const read = Object.keys(current.values).sort().join();
+      if (
+        read !== [...action.preconditions].sort().join() ||
+        !action.requestInput.safeParse({ ...data!, ...current.values }).success
+      ) {
+        return unavailable();
+      }
+      asked.versions = current.values;
+    }
+
+    const { operation, created } = await stored(() => deps.store.propose(asked, now()));
+    return answer(operation, created);
   };
 }
 

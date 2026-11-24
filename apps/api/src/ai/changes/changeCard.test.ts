@@ -31,8 +31,21 @@ function reader(overrides: Partial<CardReader> = {}): CardReader {
   return {
     async rooms() {
       return [
-        { roomId: R12, roomTypeId: DELUXE, roomNumber: "12", status: "available" },
-        { roomId: R14, roomTypeId: DELUXE, roomNumber: "14", status: "maintenance" },
+        // One room type, one rooms revision.
+        {
+          roomId: R12,
+          roomTypeId: DELUXE,
+          roomNumber: "12",
+          status: "available",
+          roomUnitsRevision: 7,
+        },
+        {
+          roomId: R14,
+          roomTypeId: DELUXE,
+          roomNumber: "14",
+          status: "maintenance",
+          roomUnitsRevision: 7,
+        },
       ];
     },
     async roomTypeNames() {
@@ -43,6 +56,7 @@ function reader(overrides: Partial<CardReader> = {}): CardReader {
     },
     async roomBlock(): Promise<CardRoomBlock | null> {
       return {
+        version: "3",
         roomTypeId: DELUXE,
         roomId: R12,
         startsOn: "2026-12-12",
@@ -56,6 +70,7 @@ function reader(overrides: Partial<CardReader> = {}): CardReader {
     },
     async thread() {
       return {
+        version: 4,
         guestName: "Anna Keller",
         channel: "ota" as const,
         providerChannel: "Airbnb",
@@ -207,6 +222,7 @@ describe("the Yes/No card (VAY-2524)", () => {
       ],
     });
     const typeBlock: CardRoomBlock = {
+      version: "3",
       roomTypeId: SUITE,
       roomId: null,
       startsOn: "2026-12-12",
@@ -301,6 +317,7 @@ describe("the Yes/No card (VAY-2524)", () => {
     });
     const unnamed = reader({
       thread: async () => ({
+        version: 4,
         guestName: null,
         channel: "email",
         providerChannel: null,
@@ -317,6 +334,62 @@ describe("the Yes/No card (VAY-2524)", () => {
     await expect(
       write("thread_mark_done@1", args, reader({ thread: async () => null })),
     ).rejects.toThrow(CardTargetMissingError);
+  });
+
+  it("refuses a change whose record moved past the version vayada read when the AI asked", async () => {
+    // Each change keeps the version read when the AI asked (proposeChange); while it waits, a
+    // record a person changed since is no longer the one asked about. After the answer the card
+    // still reads, since the change itself moves the record on.
+    const cases = [
+      [
+        "room_block_release@1",
+        { propertyId: P, blockId: BLOCK, expectedVersion: "3" },
+        reader({
+          roomBlock: async () => ({ ...(await reader().roomBlock(P, BLOCK))!, version: "4" }),
+        }),
+      ],
+      [
+        "room_status_set@1",
+        {
+          propertyId: P,
+          roomTypeId: DELUXE,
+          roomUnitId: R14,
+          expectedRevision: 7,
+          changes: { status: "available" },
+        },
+        reader({
+          rooms: async () =>
+            (await reader().rooms(P)).map((room) => ({ ...room, roomUnitsRevision: 8 })),
+        }),
+      ],
+      [
+        "room_status_set@1",
+        {
+          propertyId: P,
+          roomTypeId: DELUXE,
+          roomUnitId: R14,
+          expectedRevision: 7,
+          changes: { status: "available" },
+        },
+        // A rooms list without the revision: nothing to compare, never a Yes on a guess.
+        reader({
+          rooms: async () =>
+            (await reader().rooms(P)).map((room) => ({ ...room, roomUnitsRevision: null })),
+        }),
+      ],
+      [
+        "thread_mark_done@1",
+        { propertyId: P, threadId: THREAD, expectedThreadVersion: 4 },
+        reader({ thread: async () => ({ ...(await reader().thread(P, THREAD))!, version: 5 }) }),
+      ],
+    ] as const;
+    for (const [action, args, moved] of cases) {
+      expect(await write(action, args), action).toMatchObject({ question: expect.any(String) });
+      await expect(write(action, args, moved), action).rejects.toThrow(CardTargetMissingError);
+      expect(await write(action, args, moved, false), action).toMatchObject({
+        doneTitle: expect.any(String),
+      });
+    }
   });
 
   it("adds a private note, showing the note itself", async () => {
@@ -353,6 +426,7 @@ describe("the Yes/No card (VAY-2524)", () => {
       args,
       reader({
         thread: async () => ({
+          version: 4,
           guestName: "Anna Keller-Brandt",
           channel: "ota",
           providerChannel: "Airbnb",

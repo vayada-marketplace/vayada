@@ -38,7 +38,8 @@ const repository = {
           floor: "1",
           status: "available",
           sortOrder: 1,
-          metadata: {},
+          // The read model adds the room type's rooms revision to every room's metadata.
+          metadata: { roomUnitsRevision: 7 },
         },
       ],
     };
@@ -157,11 +158,18 @@ describe("the card's reads, as the person (VAY-2524)", () => {
   it("reads rooms, room types, linked room types, blocks, a conversation and a booking", async () => {
     const reader = await readerAs(OWNER);
     expect(await reader.rooms(P1)).toEqual([
-      { roomId: R12, roomTypeId: DELUXE, roomNumber: "12", status: "available" },
+      {
+        roomId: R12,
+        roomTypeId: DELUXE,
+        roomNumber: "12",
+        status: "available",
+        roomUnitsRevision: 7,
+      },
     ]);
     expect(await reader.roomTypeNames(P1)).toEqual(new Map([[DELUXE, "Deluxe Double"]]));
     expect(await reader.linkedRoomTypeIds(P1, DELUXE.toUpperCase())).toEqual([SUITE]);
     expect(await reader.roomBlock(P1, BLOCK)).toMatchObject({
+      version: "3",
       roomId: R12,
       startsOn: "2026-12-12",
       endsOn: "2026-12-14",
@@ -169,6 +177,7 @@ describe("the card's reads, as the person (VAY-2524)", () => {
     });
     expect(await reader.roomBlock(P1, "abababab-0000-4000-8000-000000000099")).toBeNull();
     expect(await reader.thread(P1, THREAD)).toEqual({
+      version: 4,
       guestName: "Anna Keller",
       channel: "ota",
       providerChannel: "airbnb",

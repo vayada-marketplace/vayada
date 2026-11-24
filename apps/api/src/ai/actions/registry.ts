@@ -1,8 +1,9 @@
 // The AI action registry (VAY-2507): every action the in-app assistant and MCP can use, and the
-// only routes an AI may run as a user. Registration refuses an action whose route is on the never
-// list, deny-listed or not sorted for the AI, so the app does not even start with one. Change
-// actions (VAY-2522) run only through the executor of AI changes, which alone can mint a delegation
-// that writes (VAY-2524); until it exists they are offered on no surface.
+// only routes an AI may run as a user, with the reads vayada makes for a change's expected
+// versions (their answers never reach the model). Registration refuses an action whose route is on
+// the never list, deny-listed or not sorted for the AI, so the app does not even start with one.
+// Change actions (VAY-2522) run only through the executor of AI changes, which alone can mint a
+// delegation that writes (VAY-2524); until it exists they are offered on no surface.
 import type { DelegatedRouteGate, RequestContext } from "@vayada/backend-auth";
 import { z } from "zod";
 
@@ -39,9 +40,11 @@ export const CHANGE_ACTIONS: readonly ChangeAction[] = assertChangeRegistry(
   AI_ACTIONS,
 );
 
-const ACTION_ROUTES = new Set<string>(
-  [...AI_ACTIONS, ...CHANGE_ACTIONS].map((action) => action.route),
-);
+const ACTION_ROUTES = new Set<string>([
+  ...[...AI_ACTIONS, ...CHANGE_ACTIONS].map((action) => action.route),
+  // vayada reads a change's expected versions as the person when the AI asks (VAY-2524).
+  ...CHANGE_ACTIONS.flatMap((action) => (action.currentState ? [action.currentState.route] : [])),
+]);
 const BY_KEY = new Map(AI_ACTIONS.map((action) => [action.key, action]));
 const CHANGE_BY_KEY = new Map(CHANGE_ACTIONS.map((action) => [action.key, action]));
 const CHANGE_BY_ROUTE = new Map<string, ChangeAction>(
@@ -49,8 +52,9 @@ const CHANGE_BY_ROUTE = new Map<string, ChangeAction>(
 );
 
 /**
- * The auth plugin's delegation gate: an AI may run exactly the routes of registered actions. A
- * change route also needs a delegation that may write, which only the executor mints (VAY-2522).
+ * The auth plugin's delegation gate: an AI may run exactly the routes of registered actions, and
+ * vayada the reads of their expected versions. A change route also needs a delegation that may
+ * write, which only the executor mints (VAY-2522).
  */
 export const aiActionRouteGate: DelegatedRouteGate = {
   allowsRoute: (method, routeUrl) => ACTION_ROUTES.has(`${method} ${routeUrl}`),
@@ -103,7 +107,8 @@ export function delegatedWriteProblem(write: DelegatedWrite): string | null {
   for (const field of keyFields) {
     if (write.body[field] !== key) return "the retry key in the body is not the request's";
   }
-  if (!action.input.safeParse(input).success) {
+  // The AI's input with the versions vayada filled in, and nothing else.
+  if (!action.requestInput.safeParse(input).success) {
     return "the request is not what this change lets the AI send";
   }
   return null;
@@ -181,8 +186,30 @@ export function assertChangeRegistry(
     if (action.surfaces.length > 0) {
       throw new Error(`AI change ${action.key} has a surface before Ask first exists (VAY-2524)`);
     }
+    if (action.currentState) assertCurrentStateRoute(action.key, action.currentState.route);
   }
   return Object.freeze([...actions]);
+}
+
+/**
+ * The read of a change's expected versions joins the delegation gate, so it passes the rules of an
+ * action's route except one: it may still wait for its own read action ("later"). Never a route
+ * on the never list or one that is not for the AI at all.
+ */
+function assertCurrentStateRoute(key: string, route: string) {
+  if (!new Set<string>(ROUTE_MANIFEST).has(route)) {
+    throw new Error(`AI change ${key}: its versions' read ${route} is not in the route list`);
+  }
+  const never = neverArea(route);
+  if (never) {
+    throw new Error(`AI change ${key}: its versions' read ${route} is on the never list`);
+  }
+  const routeClass = classifyRoute(route);
+  if (routeClass && routeClass.class !== "later") {
+    throw new Error(
+      `AI change ${key}: its versions' read ${route} is sorted as ${JSON.stringify(routeClass)}`,
+    );
+  }
 }
 
 function assertActionList(actions: readonly { key: string; name: string; route: string }[]) {

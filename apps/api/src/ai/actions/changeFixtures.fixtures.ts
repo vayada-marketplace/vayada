@@ -16,7 +16,7 @@ export type ChangeFixture = {
   action: string;
   /** buildApp options that mount the route on this fixture's fake storage. */
   appOptions: () => Partial<AppOptions>;
-  /** The AI's input for a property. */
+  /** The change's stored input for a property: the AI's, with the versions vayada filled in. */
   input: (propertyId: string) => Record<string, unknown>;
   /** The commands the route handed to storage so far. */
   commands: () => readonly unknown[];

@@ -426,7 +426,8 @@ running with an expired lease --> resumed by the recovery job (same steps, same 
   tool-call id) or a resume after a deploy finds the row by its business key and gets the stored
   result. Provider and transport ids are logged, never used as the identity.
 - **Preconditions on every write.** A retry of "set price to 100" after a person changed it to 150
-  is refused ("this changed since"), not applied.
+  is refused ("this changed since"), not applied. vayada reads them when the AI asks (§ change
+  actions below); the AI never sends them.
 - The model, Mastra, the AI SDK and the browser never execute a change. They create the row or
   answer it. The SDK's and Mastra's own tool approval is not used, because on continuation they
   would execute the tool themselves and make a second executor.
@@ -714,10 +715,21 @@ write can not escape a delegation narrowed to fewer properties). Beside the read
   (notes and room blocks take `commandId` and `idempotencyKey`); the executor fills it, bound to the
   action (`<key>:<action name>`), and the AI can never send it;
 - `preconditions`: body fields the route compares with the current state (expected versions); only
-  a POST declared `addsNew` (a note, a new block) has none. No read action returns these versions
-  yet: VAY-2524 decides who fills them (captured when the Ask-first card is shown, so the person's
-  Yes binds to what they saw) and, if the executor does, takes them out of the AI's input before any
-  surface offers a change; the reads that expose them come with their batch;
+  a POST declared `addsNew` (a note, a new block) has none. **vayada fills them, never the AI**
+  (Flamur, 2026-11-24): they are not in the AI's input, and each change names the read route that
+  holds them (`currentState`: the rooms list for a room's rooms revision, the room-block list for a
+  block's version, the conversation for its version). When the AI asks, `proposeChange` reads them
+  there as the person, through the tool call's own delegation (read only, on its properties, the
+  route's own rights checks; [`currentState.ts`](../apps/api/src/ai/changes/currentState.ts)),
+  and the operation keeps them with the AI's arguments, but **not in its business key**: a retry
+  finds the change also after it ran and moved its record on, and a still-pending change whose
+  record moved is closed as `changed` and asked anew. A record that is not there is refused
+  (`not_found`), unless the change that a retry would join made it go (a block it released): then
+  the retry gets that run. One the person can't read is `not_allowed`, and a read that can't answer
+  is `unavailable`; nothing is stored. The delegation gate allows these read routes for that, and
+  their answers never reach the model or the log. While the change waits, the card compares the
+  record's version again, so one a person changed before the Yes closes as `changed`; between the
+  Yes and the run the route itself refuses it (`*_conflict`, also `changed`);
 - `authoritySites`: every rights check inside the transaction, from
   [`authoritySites.ts`](../apps/api/src/ai/actions/authoritySites.ts); only checks that already take
   the AI's limits may be listed, so a change through any other can not be registered;

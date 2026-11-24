@@ -13,6 +13,8 @@ const rooms = z.object({
       roomTypeId: z.string(),
       roomNumber: z.string(),
       status: z.string(),
+      // The room type's rooms revision, as the PMS sends it back with a room change.
+      metadata: z.object({ roomUnitsRevision: z.number().optional() }).nullish(),
     }),
   ),
 });
@@ -23,6 +25,7 @@ const roomBlocks = z.object({
   items: z.array(
     z.object({
       blockId: z.string(),
+      version: z.string(),
       roomTypeId: z.string(),
       roomId: z.string().nullable(),
       startsOn: z.string(),
@@ -37,6 +40,7 @@ const linkedGroups = z.object({
 });
 const thread = z.object({
   thread: z.object({
+    version: z.number(),
     channel: z.enum(["ota", "email"]),
     providerChannel: z.string().nullable(),
     guest: z.object({ displayName: z.string().nullable() }),
@@ -83,7 +87,12 @@ export function createCardReader(app: FastifyInstance, authorization: string): C
 
   return {
     async rooms(propertyId) {
-      return (await list(`${property(propertyId)}/rooms`, rooms)).items;
+      return (await list(`${property(propertyId)}/rooms`, rooms)).items.map(
+        ({ metadata, ...room }) => ({
+          ...room,
+          roomUnitsRevision: metadata?.roomUnitsRevision ?? null,
+        }),
+      );
     },
     async roomTypeNames(propertyId) {
       const { items } = await list(`${property(propertyId)}/room-types`, roomTypes);
@@ -112,6 +121,7 @@ export function createCardReader(app: FastifyInstance, authorization: string): C
       );
       return (
         value && {
+          version: value.thread.version,
           guestName: value.thread.guest.displayName,
           channel: value.thread.channel,
           providerChannel: value.thread.providerChannel,
