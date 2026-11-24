@@ -208,8 +208,11 @@ export async function enqueueBookingLifecycleEmailJob(
     transition,
     ...(input.resendKey ? { resentByUserId: input.actor?.userId } : {}),
     // VAY-2099: the sender adds the PMS origin (AUTH_PMS_WEB_ORIGIN) for a link to the request.
+    // The link names the hotel, so a login with several hotels opens the booking under this one.
     ...(input.kind === "host_review_required"
-      ? { pmsBookingPath: `/bookings/${encodeURIComponent(input.booking.guestBookingId)}` }
+      ? {
+          pmsBookingPath: `/bookings/${encodeURIComponent(input.booking.guestBookingId)}?property=${encodeURIComponent(input.booking.propertyId)}`,
+        }
       : {}),
   };
   const actorType = input.actor?.type ?? "system";
