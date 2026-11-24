@@ -9,20 +9,12 @@ import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import pg from "pg";
 
 import { createPgAiActionLog } from "../actionLog/actionLog.js";
+import type { ConversationStore } from "../assistant/conversationStore.js";
 import { createAiChangeExecutor, type AiChangeExecutor } from "../executor/executor.js";
-import { createPgAiOperationStore, type AiOperation } from "../executor/operationStore.js";
+import { createPgAiOperationStore } from "../executor/operationStore.js";
 import { startAiChangeRecoveryWorker } from "../executor/recoveryWorker.js";
 import type { PendingActionRouteOptions } from "./pendingActions.js";
 import { createAiChangeProposer } from "./proposeChange.js";
-
-/**
- * Until conversations (VAY-2518) and MCP connections (VAY-2528) exist, an in-app conversation
- * always counts as still there and an MCP connection never does: no MCP change can be answered
- * before its connection can be checked. Their own checks replace this when they land.
- */
-export async function interimChannelActive(operation: AiOperation): Promise<boolean> {
-  return operation.surface === "in_app";
-}
 
 export function createAiChangesRuntime(config: {
   connectionString: string;
@@ -30,6 +22,11 @@ export function createAiChangesRuntime(config: {
   authorizationResolver: AuthorizationResolver;
   /** AI is on for the account: its monthly budget is above 0. */
   aiEnabled(organizationId: string): Promise<boolean>;
+  /**
+   * The assistant's chats (VAY-2518), read when a change is answered; undefined with the
+   * assistant off.
+   */
+  chats(): Pick<ConversationStore, "exists"> | undefined;
   allowedOrigins: readonly string[];
   /** The recovery job runs only where background workers do. */
   backgroundWorkersEnabled: boolean;
@@ -69,7 +66,15 @@ export function createAiChangesRuntime(config: {
         return executor.startAndRun(operationId);
       },
       aiEnabled: config.aiEnabled,
-      channelActive: interimChannelActive,
+      // An in-app change needs its chat, still the person's: with the assistant off there is
+      // none (Flamur, 2026-11-24: fail closed). No MCP change can be answered before its
+      // connection can be checked (VAY-2528).
+      async channelActive(operation) {
+        const chats = config.chats();
+        if (operation.surface !== "in_app" || !operation.conversationId || !chats) return false;
+        const { organizationId, propertyId, userId } = operation;
+        return chats.exists({ organizationId, propertyId, userId }, operation.conversationId);
+      },
       allowedOrigins: config.allowedOrigins,
     } satisfies Omit<PendingActionRouteOptions, "root">,
 
