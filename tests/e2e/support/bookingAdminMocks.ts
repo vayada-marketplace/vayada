@@ -713,6 +713,52 @@ export async function mockBookingAdminShellRoutes(
           })
         : route.fulfill({ status: 204 }),
   );
+  // The Details window (VAY-2594): nothing yet.
+  await page.route("**/api/booking/properties/*/dashboard/details**", (route) =>
+    route.fulfill({
+      json: {
+        details: {
+          pageViewsCountedFrom: null,
+          roomTypes: [],
+          leadTimes: [],
+          canceledBookingCount: 0,
+          topBookings: [],
+          recentBookings: [],
+        },
+        bookingsHidden: false,
+        canOpenInPms: false,
+      },
+    }),
+  );
+  // Page view tracking (VAY-2594): counted, so no amber banner.
+  await page.route("**/api/booking/properties/*/dashboard/tracking**", (route) =>
+    route.fulfill({
+      json: {
+        tracking: {
+          propertyId: "property-1",
+          bookingPageBookingCount: 0,
+          pageViewCount: 0,
+          trackingMissing: false,
+        },
+      },
+    }),
+  );
+  // Guest insights (VAY-2594): no guests yet.
+  await page.route("**/api/booking/properties/*/dashboard/guests**", (route) =>
+    route.fulfill({
+      json: {
+        guestInsights: {
+          guestCount: 0,
+          nationalities: [],
+          ages: [],
+          ageKnownCount: 0,
+          stays: [],
+          averageNights: null,
+          averageLeadDays: null,
+        },
+      },
+    }),
+  );
   // Bookings by channel (VAY-2594): nothing yet.
   await page.route("**/api/booking/properties/*/dashboard/channels**", (route) =>
     route.fulfill({ json: { channelMix: { channels: [], directSources: [] } } }),

@@ -20,32 +20,34 @@ export type ChannelRow = {
 /**
  * Shares of the range's bookings, largest first, with each share's relative change against the
  * period before: (share now − share before) ÷ share before. Keys without bookings in the range are
- * left out.
+ * left out. keepOrder and keepEmpty serve fixed lists such as lead times; the counts may also be
+ * amounts, as for revenue by room type.
  */
 export function channelRows(
   counts: readonly { key: string; bookings: number; previous: number }[],
+  options: { keepOrder?: boolean; keepEmpty?: boolean } = {},
 ): ChannelRow[] {
   const total = counts.reduce((sum, row) => sum + row.bookings, 0);
   const previousTotal = counts.reduce((sum, row) => sum + row.previous, 0);
   if (total === 0) return [];
-  const rows = counts
-    .filter((row) => row.bookings > 0)
-    .sort((a, b) => b.bookings - a.bookings || a.key.localeCompare(b.key))
-    .map((row) => {
-      const share = (row.bookings / total) * 100;
-      const before = previousTotal > 0 ? (row.previous / previousTotal) * 100 : 0;
-      let change: ChannelChange;
-      if (before === 0) change = { kind: "new" };
-      else {
-        const percent = Math.round(((share - before) / before) * 100);
-        change =
-          percent === 0
-            ? { kind: "unchanged" }
-            : { kind: percent > 0 ? "up" : "down", percent: Math.abs(percent) };
-      }
-      return { key: row.key, bookings: row.bookings, share, change, width: 0 };
-    });
-  const largest = rows[0]?.share ?? 0;
+  const listed = counts.filter((row) => options.keepEmpty || row.bookings > 0);
+  if (!options.keepOrder)
+    listed.sort((a, b) => b.bookings - a.bookings || a.key.localeCompare(b.key));
+  const rows = listed.map((row) => {
+    const share = (row.bookings / total) * 100;
+    const before = previousTotal > 0 ? (row.previous / previousTotal) * 100 : 0;
+    let change: ChannelChange;
+    if (before === 0) change = share === 0 ? { kind: "unchanged" } : { kind: "new" };
+    else {
+      const percent = Math.round(((share - before) / before) * 100);
+      change =
+        percent === 0
+          ? { kind: "unchanged" }
+          : { kind: percent > 0 ? "up" : "down", percent: Math.abs(percent) };
+    }
+    return { key: row.key, bookings: row.bookings, share, change, width: 0 };
+  });
+  const largest = Math.max(0, ...rows.map((row) => row.share));
   return rows.map((row) => ({ ...row, width: largest > 0 ? (row.share / largest) * 100 : 0 }));
 }
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useTranslation } from "@/lib/i18n";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { settingsService, type PropertySettings } from "@/services/settings";
@@ -12,8 +11,11 @@ import {
   useDashboardSetupChecklist,
 } from "@/components/dashboard/DashboardSetupChecklist";
 import { ChannelsCard } from "@/components/dashboard/ChannelsCard";
+import { GuestInsights } from "@/components/dashboard/GuestInsights";
+import { TrackingBanner } from "@/components/dashboard/TrackingBanner";
 import { ConversionFunnelCard } from "@/components/dashboard/ConversionFunnelCard";
 import { DayBookingsWindow } from "@/components/dashboard/DayBookingsWindow";
+import { DetailsWindow, type DetailsMetric } from "@/components/dashboard/DetailsWindow";
 import { RevenueChart } from "@/components/dashboard/RevenueChart";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
 import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
@@ -24,27 +26,13 @@ import {
   rangeQuery,
   TIME_RANGES,
   type ChannelMix,
+  type GuestInsights as GuestInsightsData,
   type DashboardStats,
   type ConversionFunnel,
   type RevenueDays,
   type Sparklines,
   type TimeRange,
-  type PageViewsTimeline,
 } from "@/services/dashboard";
-
-// ISO date strings come from the backend already aligned to the property
-// timezone; `parseIsoDate` builds a Date at local midnight so Intl
-// formatting doesn't shift the day backwards on negative-UTC clients.
-function parseIsoDate(iso: string): Date {
-  const [y, m, d] = iso.split("-").map(Number);
-  return new Date(y, (m ?? 1) - 1, d ?? 1);
-}
-
-function formatShortDate(iso: string, locale: string): string {
-  return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }).format(
-    parseIsoDate(iso),
-  );
-}
 
 export default function DashboardPage() {
   const { t, locale } = useTranslation();
@@ -53,6 +41,10 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [channels, setChannels] = useState<ChannelMix | null>(null);
   const [channelsError, setChannelsError] = useState(false);
+  const [guests, setGuests] = useState<GuestInsightsData | null>(null);
+  const [guestsError, setGuestsError] = useState(false);
+  // Page views not counted though guests book on the page (VAY-2594): the amber banner.
+  const [trackingMissing, setTrackingMissing] = useState(false);
   const [funnelError, setFunnelError] = useState(false);
   const [funnel, setFunnel] = useState<ConversionFunnel | null>(null);
   const [sparklines, setSparklines] = useState<Sparklines | null>(null);
@@ -66,8 +58,16 @@ export default function DashboardPage() {
   const setupChecklist = useDashboardSetupChecklist();
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [pageViewsModalOpen, setPageViewsModalOpen] = useState(false);
+  // The Details window's metric while it is open (VAY-2594).
+  const [detailsMetric, setDetailsMetric] = useState<DetailsMetric | null>(null);
   const fetchSequence = useRef(0);
+
+  useEffect(() => {
+    dashboardService
+      .getTrackingMissing()
+      .then(setTrackingMissing)
+      .catch(() => setTrackingMissing(false));
+  }, []);
 
   useEffect(() => {
     settingsService
@@ -91,13 +91,16 @@ export default function DashboardPage() {
     setRevenueDays(null);
     setRevenueError(false);
     setChannelsError(false);
-    const [statsData, channelsData, funnelData, sparklinesData, revenueData] =
+    setGuests(null);
+    setGuestsError(false);
+    const [statsData, channelsData, funnelData, sparklinesData, revenueData, guestsData] =
       await Promise.allSettled([
         dashboardService.getStats(range, timeZone),
         dashboardService.getChannelMix(range, timeZone),
         dashboardService.getConversionFunnel(range, timeZone),
         dashboardService.getSparklines(range, timeZone),
         dashboardService.getRevenueDays(range, timeZone),
+        dashboardService.getGuestInsights(range, timeZone),
       ]);
     if (sequence !== fetchSequence.current) return;
     if (statsData.status === "fulfilled") setStats(statsData.value);
@@ -108,6 +111,8 @@ export default function DashboardPage() {
     if (sparklinesData.status === "fulfilled") setSparklines(sparklinesData.value);
     if (revenueData.status === "fulfilled") setRevenueDays(revenueData.value);
     else setRevenueError(true);
+    if (guestsData.status === "fulfilled") setGuests(guestsData.value);
+    else setGuestsError(true);
     setLoading(false);
   }, []);
 
@@ -134,6 +139,8 @@ export default function DashboardPage() {
     setFunnel(null);
     setFunnelError(false);
     setChannelsError(false);
+    setGuests(null);
+    setGuestsError(false);
     setSparklines(null);
     setRevenueDays(null);
     setOpenDay(null);
@@ -173,6 +180,10 @@ export default function DashboardPage() {
       )
     : null;
 
+  // The Details window reads by the property's time zone: without one, the cards don't offer it.
+  const openDetails = (metric: DetailsMetric) =>
+    propertyTimeZone ? () => setDetailsMetric(metric) : undefined;
+
   return (
     <PageLayout className="space-y-3 md:space-y-4">
       <PageHeader
@@ -207,6 +218,7 @@ export default function DashboardPage() {
 
       {/* Shows only when the booking page needs attention; the header's pill says Live (VAY-2594). */}
       <BookingPageStatusCard />
+      {trackingMissing && <TrackingBanner t={t} />}
 
       <DashboardSetupChecklistCard setup={setupChecklist} hotelName={hotelName} />
 
@@ -237,6 +249,8 @@ export default function DashboardPage() {
           locale={locale}
           t={t}
           sparkline={sparklines?.revenue ?? []}
+          onClick={openDetails("revenue")}
+          ariaLabel={t("dashboard.details.open.revenue")}
         />
         <SummaryCard
           label={t("dashboard.stats.bookings")}
@@ -245,6 +259,8 @@ export default function DashboardPage() {
           locale={locale}
           t={t}
           sparkline={sparklines?.bookings ?? []}
+          onClick={openDetails("bookings")}
+          ariaLabel={t("dashboard.details.open.bookings")}
         />
         <SummaryCard
           label={t("dashboard.stats.pageViews")}
@@ -253,8 +269,8 @@ export default function DashboardPage() {
           locale={locale}
           t={t}
           sparkline={sparklines?.page_views ?? []}
-          onClick={() => setPageViewsModalOpen(true)}
-          ariaLabel={t("dashboard.pageViewsModal.openLabel")}
+          onClick={openDetails("views")}
+          ariaLabel={t("dashboard.details.open.views")}
         />
         <SummaryCard
           label={t("dashboard.stats.conversionRate")}
@@ -267,6 +283,8 @@ export default function DashboardPage() {
           locale={locale}
           t={t}
           sparkline={[]}
+          onClick={openDetails("conversion")}
+          ariaLabel={t("dashboard.details.open.conversion")}
         />
       </div>
 
@@ -277,6 +295,7 @@ export default function DashboardPage() {
         locale={locale}
         t={t}
         onOpenDay={setOpenDay}
+        onDetails={openDetails("revenue")}
       />
       {openDay && revenueDays && (
         <DayBookingsWindow
@@ -289,12 +308,19 @@ export default function DashboardPage() {
         />
       )}
 
-      {pageViewsModalOpen && (
-        <PageViewsDetailModal
+      {detailsMetric && propertyTimeZone && (
+        <DetailsWindow
+          metric={detailsMetric}
+          onMetric={setDetailsMetric}
+          range={timeRange}
+          timeZone={propertyTimeZone}
+          stats={stats}
+          revenueDays={revenueDays}
+          revenueFailed={revenueError}
+          revenueComparison={revenueComparison}
           locale={locale}
           t={t}
-          timeZone={propertyTimeZone}
-          onClose={() => setPageViewsModalOpen(false)}
+          onClose={() => setDetailsMetric(null)}
         />
       )}
 
@@ -317,241 +343,18 @@ export default function DashboardPage() {
           exportFileName={funnelExportFileName}
           timeRange={timeRange}
           onTimeRangeChange={selectTimeRange}
+          onDetails={openDetails("conversion")}
         />
       </div>
+
+      <GuestInsights
+        data={guests}
+        loading={loading}
+        error={guestsError}
+        range={timeRange}
+        locale={locale}
+        t={t}
+      />
     </PageLayout>
-  );
-}
-
-interface PageViewsDetailModalProps {
-  locale: string;
-  t: (key: string, params?: Record<string, string | number>) => string;
-  timeZone: string | null;
-  onClose: () => void;
-}
-
-function PageViewsDetailModal({ locale, t, timeZone, onClose }: PageViewsDetailModalProps) {
-  // Self-fetching: the modal owns its own week_offset state and reloads
-  // when the user navigates. Keeping this out of the parent dashboard
-  // means the parent's date range doesn't accidentally reset
-  // the user's drill-down position when the modal opens.
-  const [weekOffset, setWeekOffset] = useState(0);
-  const [data, setData] = useState<PageViewsTimeline | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
-  const closeRef = useRef<HTMLButtonElement>(null);
-
-  // The window renders at the end of <body>, so focus moves into it and goes back on close.
-  useEffect(() => {
-    const opener = document.activeElement;
-    closeRef.current?.focus();
-    return () => {
-      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
-    };
-  }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(false);
-    setData(null);
-    if (!timeZone) {
-      setError(true);
-      setLoading(false);
-      return;
-    }
-    dashboardService
-      .getPageViewsTimeline(weekOffset, timeZone)
-      .then((d) => {
-        if (!cancelled) setData(d);
-      })
-      .catch(() => {
-        if (!cancelled) setError(true);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [weekOffset, reloadKey, timeZone]);
-
-  const max = data ? Math.max(...data.buckets.map((b) => b.count), 1) : 1;
-  const diff = data ? data.total - data.previous_total : 0;
-  const pctChange =
-    data && data.previous_total > 0 ? Math.round((diff / data.previous_total) * 100) : null;
-
-  const rangeLabel = data
-    ? t("dashboard.pageViewsModal.subtitleRange", {
-        start: formatShortDate(data.window_start, locale),
-        end: formatShortDate(data.window_end, locale),
-      })
-    : "";
-
-  // On <body>, not inside the page's space-y stack: its margin-top would push the backdrop down
-  // and leave a white strip above the header (VAY-2590).
-  return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-    >
-      <div
-        className="bg-white rounded-xl shadow-xl max-w-2xl w-full p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between mb-1">
-          <h2 className="text-lg font-semibold text-gray-900">
-            {t("dashboard.pageViewsModal.title")}
-          </h2>
-          <button
-            ref={closeRef}
-            type="button"
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 -mr-2 -mt-1 p-2"
-            aria-label={t("dashboard.pageViewsModal.close")}
-          >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.5}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="flex items-center justify-between mb-5">
-          <button
-            type="button"
-            onClick={() => setWeekOffset((o) => o + 1)}
-            className="p-1 -ml-1 text-gray-500 hover:text-gray-900 disabled:opacity-30"
-            aria-label={t("dashboard.pageViewsModal.previousWeek")}
-            disabled={loading}
-          >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.5}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
-            </svg>
-          </button>
-          <p className="text-[13px] text-gray-500 text-center flex-1">{rangeLabel || " "}</p>
-          <button
-            type="button"
-            onClick={() => setWeekOffset((o) => Math.max(0, o - 1))}
-            className="p-1 -mr-1 text-gray-500 hover:text-gray-900 disabled:opacity-30"
-            aria-label={t("dashboard.pageViewsModal.nextWeek")}
-            disabled={weekOffset === 0 || loading}
-          >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.5}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-            </svg>
-          </button>
-        </div>
-
-        {error ? (
-          <div className="h-48 mb-5 flex flex-col items-center justify-center text-center">
-            <p className="text-[13px] text-red-600">{t("dashboard.pageViewsModal.error")}</p>
-            <button
-              type="button"
-              onClick={() => setReloadKey((key) => key + 1)}
-              className="mt-3 text-[13px] font-medium text-primary-600 hover:text-primary-700"
-            >
-              {t("dashboard.pageViewsModal.retry")}
-            </button>
-          </div>
-        ) : (
-          <>
-            <div
-              className={`flex items-end gap-2 h-40 mb-2 transition-opacity ${loading ? "opacity-50" : ""}`}
-              aria-busy={loading}
-              aria-label={loading ? t("common.loading") : undefined}
-            >
-              {(data?.buckets ?? Array.from({ length: 7 }, () => ({ date: "", count: 0 }))).map(
-                (b, i) => (
-                  <div key={i} className="flex-1 flex flex-col items-center justify-end h-full">
-                    <span className="text-[11px] font-medium text-gray-700 mb-1">
-                      {loading ? "" : formatNumber(b.count, locale)}
-                    </span>
-                    <div
-                      className={`w-full rounded-t ${loading ? "bg-gray-200 animate-pulse" : "bg-primary-500"}`}
-                      style={{
-                        height: `${loading ? 20 + i * 8 : Math.max((b.count / max) * 100, 2)}%`,
-                      }}
-                    />
-                  </div>
-                ),
-              )}
-            </div>
-            <div className="flex gap-2 mb-5">
-              {(data?.buckets ?? []).map((b) => (
-                <span
-                  key={b.date}
-                  className="flex-1 text-center text-[11px] text-gray-500 truncate"
-                  title={formatShortDate(b.date, locale)}
-                >
-                  {formatShortDate(b.date, locale)}
-                </span>
-              ))}
-            </div>
-          </>
-        )}
-
-        <div className="border-t border-gray-100 pt-4 grid grid-cols-2 gap-4 text-[13px]">
-          <div>
-            <div className="text-gray-500">{t("dashboard.pageViewsModal.totalInWindow")}</div>
-            <div className="text-xl font-semibold text-gray-900">
-              {loading || error ? "--" : formatNumber(data?.total ?? 0, locale)}
-            </div>
-          </div>
-          <div>
-            <div className="text-gray-500">{t("dashboard.pageViewsModal.vsPrevious7Days")}</div>
-            {loading || error ? (
-              <div className="text-xl font-semibold text-gray-400">--</div>
-            ) : data && data.has_previous_data ? (
-              <div
-                className={`text-xl font-semibold ${diff > 0 ? "text-green-600" : diff < 0 ? "text-red-500" : "text-gray-900"}`}
-              >
-                {diff > 0 ? "+" : ""}
-                {formatNumber(diff, locale)}
-                {pctChange !== null && (
-                  <span className="text-[13px] font-normal ml-2">
-                    ({diff > 0 ? "+" : ""}
-                    {formatNumber(pctChange, locale)}%)
-                  </span>
-                )}
-              </div>
-            ) : (
-              <div className="text-[13px] text-gray-500 mt-1">
-                {t("dashboard.pageViewsModal.noPrevious")}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>,
-    document.body,
   );
 }

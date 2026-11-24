@@ -49,6 +49,16 @@ describe.skipIf(!connectionString)("target Booking funnel PostgreSQL scope", () 
         "rate_selected",
       ],
       [propertyId, "last", "2026-03-09T03:59:59Z", { funnelSequence: 2 }, "human", "rate_selected"],
+      // VAY-2594: a guest who picked dates but chose no room.
+      [propertyId, "searcher", "2026-03-08T06:00:00Z", {}, "human", "page_visit"],
+      [
+        propertyId,
+        "searcher",
+        "2026-03-08T06:01:00Z",
+        { funnelSequence: 2 },
+        "human",
+        "dates_searched",
+      ],
     ] as const) {
       await pool.query(
         `INSERT INTO distribution.booking_web_events
@@ -77,9 +87,11 @@ describe.skipIf(!connectionString)("target Booking funnel PostgreSQL scope", () 
       windowStart: "2026-03-08",
       windowEnd: "2026-03-08",
     });
-    expect(funnel?.steps[0]?.count).toBe(2);
-    expect(funnel?.steps[1]).toMatchObject({ stage: "rate_selected", count: 2 });
-    expect(funnel?.steps).toHaveLength(6);
+    expect(funnel?.steps[0]?.count).toBe(3);
+    // The searcher, plus the two who chose a rate on the page's own dates.
+    expect(funnel?.steps[1]).toMatchObject({ stage: "dates_searched", count: 3 });
+    expect(funnel?.steps[2]).toMatchObject({ stage: "rate_selected", count: 2 });
+    expect(funnel?.steps).toHaveLength(7);
     expect(funnel?.biggestDrop).toBe("details_completed");
     const empty = await readPort.getConversionFunnel({
       propertyId,
@@ -95,13 +107,13 @@ describe.skipIf(!connectionString)("target Booking funnel PostgreSQL scope", () 
       windowStart: "2026-03-08",
       windowEnd: "2026-03-09",
     });
-    // New York: "before" is 7 March, "human" and "last" are 8 March, "after" is 9 March.
+    // New York: "before" is 7 March, "human", "last" and "searcher" are 8 March, "after" is 9 March.
     expect(timeline).toMatchObject({
       timeZone: "America/New_York",
-      total: 3,
+      total: 4,
       previousTotal: 1,
       buckets: [
-        { date: "2026-03-08", count: 2 },
+        { date: "2026-03-08", count: 3 },
         { date: "2026-03-09", count: 1 },
       ],
     });
@@ -163,7 +175,7 @@ describe.skipIf(!connectionString)("target Booking funnel PostgreSQL scope", () 
       windowEnd: "2026-03-11",
     });
     expect(funnel?.steps[0]).toMatchObject({ stage: "page_visit", count: 1 });
-    expect(funnel?.steps[1]).toMatchObject({ stage: "rate_selected", count: 1 });
+    expect(funnel?.steps[2]).toMatchObject({ stage: "rate_selected", count: 1 });
   });
 
   it("shows add-ons only when public active definitions and the property flag both allow them", async () => {
@@ -175,12 +187,12 @@ describe.skipIf(!connectionString)("target Booking funnel PostgreSQL scope", () 
       "INSERT INTO booking.addon_definitions (property_id, name, pricing_model, currency) VALUES ($1, 'Breakfast', 'per_guest', 'USD')",
       [propertyId],
     );
-    expect((await readPort.getConversionFunnel(input))?.steps).toHaveLength(7);
+    expect((await readPort.getConversionFunnel(input))?.steps).toHaveLength(8);
     await pool.query(
       "UPDATE booking.booking_settings SET show_addons_step = FALSE WHERE property_id = $1",
       [propertyId],
     );
-    expect((await readPort.getConversionFunnel(input))?.steps).toHaveLength(6);
+    expect((await readPort.getConversionFunnel(input))?.steps).toHaveLength(7);
   });
 
   it("omits test/demo properties and rejects missing properties or timezones", async () => {

@@ -332,6 +332,14 @@ describe("@vayada/domain-booking dashboard metrics read model contract", () => {
         channels: [],
         directSources: [],
       }),
+      getDashboardDetails: async (input) => emptyDetails(input.propertyId),
+      getGuestInsights: async (input) => emptyGuests(input.propertyId),
+      getTrackingCheck: async (input) => ({
+        propertyId: input.propertyId,
+        bookingPageBookingCount: 0,
+        pageViewCount: 0,
+        trackingMissing: false,
+      }),
       getRevenueDays: async () => null,
       getDayBookings: async () => null,
       async getPageViewTimeline(input) {
@@ -365,6 +373,14 @@ describe("@vayada/domain-booking dashboard metrics read model contract", () => {
         channels: [],
         directSources: [],
       }),
+      getDashboardDetails: async (input) => emptyDetails(input.propertyId),
+      getGuestInsights: async (input) => emptyGuests(input.propertyId),
+      getTrackingCheck: async (input) => ({
+        propertyId: input.propertyId,
+        bookingPageBookingCount: 0,
+        pageViewCount: 0,
+        trackingMissing: false,
+      }),
       getRevenueDays: async () => null,
       getDayBookings: async () => null,
       getPageViewTimeline: async (input) => fakePageViews(input.propertyId),
@@ -393,6 +409,14 @@ describe("@vayada/domain-booking dashboard metrics read model contract", () => {
         propertyId: input.propertyId,
         channels: [],
         directSources: [],
+      }),
+      getDashboardDetails: async (input) => emptyDetails(input.propertyId),
+      getGuestInsights: async (input) => emptyGuests(input.propertyId),
+      getTrackingCheck: async (input) => ({
+        propertyId: input.propertyId,
+        bookingPageBookingCount: 0,
+        pageViewCount: 0,
+        trackingMissing: false,
       }),
       getRevenueDays: async () => null,
       getDayBookings: async () => null,
@@ -612,5 +636,30 @@ function fakePageViews(propertyId: string) {
     previousBuckets,
     total: buckets.reduce((sum, bucket) => sum + bucket.count, 0),
     previousTotal: previousBuckets.reduce((sum, bucket) => sum + bucket.count, 0),
+  };
+}
+
+function emptyDetails(propertyId: string) {
+  return {
+    propertyId,
+    pageViewsCountedFrom: null,
+    roomTypes: [],
+    leadTimes: [],
+    canceledBookingCount: 0,
+    topBookings: [],
+    recentBookings: [],
+  };
+}
+
+function emptyGuests(propertyId: string) {
+  return {
+    propertyId,
+    guestCount: 0,
+    nationalities: [],
+    ages: [],
+    ageKnownCount: 0,
+    stays: [],
+    averageNights: null,
+    averageLeadDays: null,
   };
 }
