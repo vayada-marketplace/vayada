@@ -158,6 +158,51 @@ export type BookingDashboardMetricsReadModel = {
   liveSinceDate: BookingDate | null;
 };
 
+/** One day of the revenue chart: direct bookings made that day (VAY-2594). */
+export type BookingRevenueDay = {
+  /** Property-local calendar date the bookings were made. */
+  date: BookingDate;
+  revenue: BookingMoney;
+  bookingCount: number;
+  /** Bookings in another currency than the property's: counted, but not in revenue. */
+  otherCurrencyBookingCount: number;
+};
+
+export type BookingRevenueDaysReadModel = {
+  propertyId: string;
+  windowStart: BookingDate;
+  windowEnd: BookingDate;
+  /** One entry per day of the window, days without bookings included. */
+  days: readonly BookingRevenueDay[];
+};
+
+/** A direct booking made on the day the dashboard's day window shows (VAY-2594). */
+export type BookingDayBooking = {
+  /** The booking's id, which PMS opens it by. */
+  id: string;
+  reference: string;
+  checkIn: BookingDate;
+  checkOut: BookingDate;
+  nights: number;
+  roomCount: number;
+  /** The booked room types' names, in room order (empty when unknown). */
+  roomNames: readonly string[];
+  /** The booking's total in its own currency. */
+  total: BookingMoney;
+  /** False for a booking in another currency, which the day's revenue leaves out. */
+  countedInRevenue: boolean;
+};
+
+export type BookingDayBookingsReadModel = {
+  propertyId: string;
+  date: BookingDate;
+  revenue: BookingMoney;
+  bookingCount: number;
+  /** Nights times rooms, over every booking of the day. */
+  roomNights: number;
+  bookings: readonly BookingDayBooking[];
+};
+
 export type BookingDashboardMetricsPeriodInput = {
   propertyId: string;
   periodStart: BookingDate;
@@ -189,6 +234,15 @@ export type BookingDashboardMetricsReadPort =
       windowStart: BookingDate;
       windowEnd: BookingDate;
     }): Promise<BookingPageViewTimelineReadModel | null>;
+    getRevenueDays(input: {
+      propertyId: string;
+      windowStart: BookingDate;
+      windowEnd: BookingDate;
+    }): Promise<BookingRevenueDaysReadModel | null>;
+    getDayBookings(input: {
+      propertyId: string;
+      date: BookingDate;
+    }): Promise<BookingDayBookingsReadModel | null>;
   };
 
 // ─── Booking reservations read model ────────────────────────────────────────

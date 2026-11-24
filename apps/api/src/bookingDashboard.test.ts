@@ -74,6 +74,8 @@ type DashboardAppOptions = {
   resolvedCanonicalPropertyId?: string | null;
   resolvedPropertyIds?: string[];
   canonicalPropertyResolutionError?: Error;
+  /** Also link the property in PMS, as for a hotel using both. */
+  pmsPropertyLinked?: boolean;
 };
 
 describe("Booking dashboard routes", () => {
@@ -115,6 +117,184 @@ describe("Booking dashboard routes", () => {
     }
   });
 
+  it("serves the revenue chart's days and one day's bookings (VAY-2594)", async () => {
+    const reads: unknown[] = [];
+    const money = (amountDecimal: string) => ({ amountDecimal, currency: "EUR" });
+    app = buildDashboardApp({
+      readPort: {
+        ...fakeReadPort(),
+        async getRevenueDays(input) {
+          reads.push(input);
+          return {
+            ...input,
+            days: [
+              {
+                date: input.windowStart,
+                revenue: money("200.00"),
+                bookingCount: 1,
+                otherCurrencyBookingCount: 0,
+              },
+            ],
+          };
+        },
+        async getDayBookings(input) {
+          reads.push(input);
+          return {
+            ...input,
+            revenue: money("200.00"),
+            bookingCount: 1,
+            roomNights: 2,
+            bookings: [
+              {
+                id: "booking-1",
+                reference: "VB-1050",
+                checkIn: "2026-07-01",
+                checkOut: "2026-07-03",
+                nights: 2,
+                roomCount: 1,
+                roomNames: ["Deluxe Room"],
+                total: money("200.00"),
+                countedInRevenue: true,
+              },
+            ],
+          };
+        },
+      },
+    });
+    const headers = { authorization: "Bearer valid-token" };
+    const base = "/api/booking/properties/prop_alpenrose/dashboard";
+    const days = await injectJson(app, {
+      method: "GET",
+      url: `${base}/revenue-days`,
+      headers,
+      query: { windowStart: "2026-04-02", windowEnd: "2026-06-30" },
+    });
+    expect(days.statusCode).toBe(200);
+    expect(days.body).toMatchObject({
+      revenueDays: { days: [{ date: "2026-04-02", bookingCount: 1 }] },
+    });
+    // As the other windows: the last 90 days, not a day more.
+    for (const query of [
+      { windowStart: "2026-04-01", windowEnd: "2026-06-30" },
+      { windowStart: "2026-06-30", windowEnd: "2026-06-01" },
+    ]) {
+      const refused = await injectJson(app, {
+        method: "GET",
+        url: `${base}/revenue-days`,
+        headers,
+        query,
+      });
+      expect(refused.statusCode).toBe(400);
+    }
+
+    const day = await injectJson(app, {
+      method: "GET",
+      url: `${base}/day-bookings`,
+      headers,
+      query: { date: "2026-06-12" },
+    });
+    expect(day.statusCode).toBe(200);
+    // Analytics alone: the day's totals, but not its bookings.
+    expect(day.body).toMatchObject({
+      dayBookings: { date: "2026-06-12", bookingCount: 1, bookings: [] },
+      bookingsHidden: true,
+      canOpenInPms: false,
+    });
+    const badDays: Record<string, string>[] = [{}, { date: "2026-02-30" }, { date: "12.06.2026" }];
+    for (const query of badDays) {
+      const refused = await injectJson(app, {
+        method: "GET",
+        url: `${base}/day-bookings`,
+        headers,
+        query,
+      });
+      expect(refused.statusCode).toBe(400);
+    }
+    expect(reads).toEqual([
+      { propertyId: "prop_alpenrose", windowStart: "2026-04-02", windowEnd: "2026-06-30" },
+      { propertyId: "prop_alpenrose", date: "2026-06-12" },
+    ]);
+  });
+
+  it("shows a day's bookings to people who may read reservations (VAY-2594)", async () => {
+    app = buildDashboardApp({
+      permissions: ["booking.analytics.read", "booking.reservation.read"],
+      readPort: {
+        ...fakeReadPort(),
+        getDayBookings: async (input) => ({
+          ...input,
+          revenue: { amountDecimal: "200.00", currency: "EUR" },
+          bookingCount: 1,
+          roomNights: 2,
+          bookings: [
+            {
+              id: "booking-1",
+              reference: "VB-1050",
+              checkIn: "2026-07-01",
+              checkOut: "2026-07-03",
+              nights: 2,
+              roomCount: 1,
+              roomNames: ["Deluxe Room"],
+              total: { amountDecimal: "200.00", currency: "EUR" },
+              countedInRevenue: true,
+            },
+          ],
+        }),
+      },
+    });
+    const day = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/properties/prop_alpenrose/dashboard/day-bookings",
+      headers: { authorization: "Bearer valid-token" },
+      query: { date: "2026-06-12" },
+    });
+    expect(day.body).toMatchObject({
+      dayBookings: { bookings: [{ reference: "VB-1050" }] },
+      bookingsHidden: false,
+      // Without PMS access, Open booking stays in Booking Admin.
+      canOpenInPms: false,
+    });
+  });
+
+  it("lets Open booking go to PMS for people PMS lets read reservations (VAY-2594)", async () => {
+    app = buildDashboardApp({
+      permissions: ["booking.analytics.read", "pms.reservation.read"],
+      entitlements: [
+        activeBookingEntitlement,
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+          // PMS keys access by the canonical property, not the booking hotel id in the URL.
+          resource: {
+            product: "pms",
+            resourceType: "pms_property",
+            resourceId: canonicalPropertyId,
+          },
+        },
+      ],
+      pmsPropertyLinked: true,
+      readPort: {
+        ...fakeReadPort(),
+        getDayBookings: async (input) => ({
+          ...input,
+          revenue: { amountDecimal: "0.00", currency: "EUR" },
+          bookingCount: 0,
+          roomNights: 0,
+          bookings: [],
+        }),
+      },
+    });
+    const day = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/properties/prop_alpenrose/dashboard/day-bookings",
+      headers: { authorization: "Bearer valid-token" },
+      query: { date: "2026-06-12" },
+    });
+    expect(day.statusCode).toBe(200);
+    expect(day.body).toMatchObject({ canOpenInPms: true, bookingsHidden: false });
+  });
+
   it("returns target dashboard stats from the injected Booking read port", async () => {
     const calls: unknown[] = [];
     app = buildDashboardApp({
@@ -130,6 +310,8 @@ describe("Booking dashboard routes", () => {
           return fakeSparklines(input.propertyId);
         },
         getConversionFunnel: async () => ({ steps: [], paymentMethods: [], biggestDrop: null }),
+        getRevenueDays: async () => null,
+        getDayBookings: async () => null,
         async getPageViewTimeline(input) {
           return fakePageViews(input.propertyId);
         },
@@ -274,6 +456,8 @@ describe("Booking dashboard routes", () => {
         getSourceMix: denied,
         getSparklines: denied,
         getConversionFunnel: denied,
+        getRevenueDays: denied,
+        getDayBookings: denied,
         getPageViewTimeline: denied,
       },
     });
@@ -303,9 +487,21 @@ describe("Booking dashboard routes", () => {
         headers,
         query: { windowStart: "2026-06-01", windowEnd: "2026-06-30" },
       }),
+      injectJson(app, {
+        method: "GET",
+        url: "/api/booking/properties/prop_alpenrose/dashboard/revenue-days",
+        headers,
+        query: { windowStart: "2026-06-01", windowEnd: "2026-06-30" },
+      }),
+      injectJson(app, {
+        method: "GET",
+        url: "/api/booking/properties/prop_alpenrose/dashboard/day-bookings",
+        headers,
+        query: { date: "2026-06-12" },
+      }),
     ]);
 
-    expect(responses.map(({ statusCode }) => statusCode)).toEqual([403, 403, 403, 403]);
+    expect(responses.map(({ statusCode }) => statusCode)).toEqual([403, 403, 403, 403, 403, 403]);
   });
 
   it("returns the same denial for unassigned and cross-tenant properties", async () => {
@@ -381,6 +577,8 @@ describe("Booking dashboard routes", () => {
           return fakeSparklines(input.propertyId);
         },
         getConversionFunnel: async () => ({ steps: [], paymentMethods: [], biggestDrop: null }),
+        getRevenueDays: async () => null,
+        getDayBookings: async () => null,
         async getPageViewTimeline(input) {
           return fakePageViews(input.propertyId);
         },
@@ -417,6 +615,8 @@ describe("Booking dashboard routes", () => {
           return fakeSparklines(input.propertyId);
         },
         getConversionFunnel: async () => ({ steps: [], paymentMethods: [], biggestDrop: null }),
+        getRevenueDays: async () => null,
+        getDayBookings: async () => null,
         async getPageViewTimeline(input) {
           return fakePageViews(input.propertyId);
         },
@@ -841,6 +1041,7 @@ function buildDashboardApp(options: DashboardAppOptions = {}): ReturnType<typeof
         options.linkedPropertyId,
         options.linkedCanonicalPropertyId,
         options.membershipStatus,
+        options.pmsPropertyLinked,
       ),
       propertyAccessRepository,
       rolePermissionRepository: {
@@ -861,6 +1062,7 @@ function createIdentityRepository(
   linkedPropertyId = "prop_alpenrose",
   linkedCanonicalPropertyId = canonicalPropertyId,
   membershipStatus: "active" | "inactive" = "active",
+  pmsPropertyLinked = false,
 ): IdentityRepository {
   return {
     async findUserByProviderUserId() {
@@ -910,6 +1112,17 @@ function createIdentityRepository(
           relationship: "owner",
           status: "active",
         },
+        ...(pmsPropertyLinked
+          ? [
+              {
+                product: "pms",
+                resourceType: "pms_property",
+                resourceId: linkedCanonicalPropertyId,
+                relationship: "owner",
+                status: "active",
+              } as const,
+            ]
+          : []),
       ];
     },
   };
@@ -927,6 +1140,8 @@ function fakeReadPort(): BookingDashboardMetricsReadPort {
       return fakeSparklines(input.propertyId);
     },
     getConversionFunnel: async () => ({ steps: [], paymentMethods: [], biggestDrop: null }),
+    getRevenueDays: async () => null,
+    getDayBookings: async () => null,
     async getPageViewTimeline(input) {
       return fakePageViews(input.propertyId);
     },

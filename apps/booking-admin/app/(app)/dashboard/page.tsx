@@ -12,6 +12,8 @@ import {
   useDashboardSetupChecklist,
 } from "@/components/dashboard/DashboardSetupChecklist";
 import { ConversionFunnelCard } from "@/components/dashboard/ConversionFunnelCard";
+import { DayBookingsWindow } from "@/components/dashboard/DayBookingsWindow";
+import { RevenueChart } from "@/components/dashboard/RevenueChart";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
 import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
 import { compareConversion, compareSummary, conversionRate } from "@/lib/utils/dashboardSummary";
@@ -23,6 +25,7 @@ import {
   type DashboardStats,
   type BookingsBySource,
   type ConversionFunnel,
+  type RevenueDays,
   type Sparklines,
   type TimeRange,
   type PageViewsTimeline,
@@ -67,6 +70,10 @@ export default function DashboardPage() {
   const [funnelError, setFunnelError] = useState(false);
   const [funnel, setFunnel] = useState<ConversionFunnel | null>(null);
   const [sparklines, setSparklines] = useState<Sparklines | null>(null);
+  const [revenueDays, setRevenueDays] = useState<RevenueDays | null>(null);
+  const [revenueError, setRevenueError] = useState(false);
+  // The revenue chart's day whose bookings are open (VAY-2594).
+  const [openDay, setOpenDay] = useState<string | null>(null);
   const [propertyTimeZone, setPropertyTimeZone] = useState<string | null>(null);
   const [hotelName, setHotelName] = useState("");
   // VAY-2247 wave 2: the setup checklist, where the server offers it.
@@ -95,18 +102,24 @@ export default function DashboardPage() {
     setFunnel(null);
     setFunnelError(false);
     setSparklines(null);
-    const [statsData, sourcesData, funnelData, sparklinesData] = await Promise.allSettled([
-      dashboardService.getStats(range, timeZone),
-      dashboardService.getBookingsBySource(range, timeZone),
-      dashboardService.getConversionFunnel(range, timeZone),
-      dashboardService.getSparklines(range, timeZone),
-    ]);
+    setRevenueDays(null);
+    setRevenueError(false);
+    const [statsData, sourcesData, funnelData, sparklinesData, revenueData] =
+      await Promise.allSettled([
+        dashboardService.getStats(range, timeZone),
+        dashboardService.getBookingsBySource(range, timeZone),
+        dashboardService.getConversionFunnel(range, timeZone),
+        dashboardService.getSparklines(range, timeZone),
+        dashboardService.getRevenueDays(range, timeZone),
+      ]);
     if (sequence !== fetchSequence.current) return;
     if (statsData.status === "fulfilled") setStats(statsData.value);
     if (sourcesData.status === "fulfilled") setSources(sourcesData.value);
     if (funnelData.status === "fulfilled") setFunnel(funnelData.value);
     else setFunnelError(true);
     if (sparklinesData.status === "fulfilled") setSparklines(sparklinesData.value);
+    if (revenueData.status === "fulfilled") setRevenueDays(revenueData.value);
+    else setRevenueError(true);
     setLoading(false);
   }, []);
 
@@ -118,6 +131,7 @@ export default function DashboardPage() {
       setSources(null);
       setFunnel(null);
       setSparklines(null);
+      setRevenueDays(null);
       setLoading(false);
       return;
     }
@@ -132,6 +146,8 @@ export default function DashboardPage() {
     setFunnel(null);
     setFunnelError(false);
     setSparklines(null);
+    setRevenueDays(null);
+    setOpenDay(null);
     setDashboardRange(range);
   };
 
@@ -290,6 +306,25 @@ export default function DashboardPage() {
           sparkline={[]}
         />
       </div>
+
+      <RevenueChart
+        data={revenueDays}
+        loading={loading}
+        error={revenueError}
+        locale={locale}
+        t={t}
+        onOpenDay={setOpenDay}
+      />
+      {openDay && revenueDays && (
+        <DayBookingsWindow
+          date={openDay}
+          days={revenueDays.days}
+          locale={locale}
+          t={t}
+          onNavigate={setOpenDay}
+          onClose={() => setOpenDay(null)}
+        />
+      )}
 
       {pageViewsModalOpen && (
         <PageViewsDetailModal

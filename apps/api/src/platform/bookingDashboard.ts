@@ -4,8 +4,10 @@ import type {
   BookingDashboardMetricsReadModel,
   BookingDashboardMetricsReadPort,
   BookingDate,
+  BookingDayBookingsReadModel,
   BookingMoney,
   BookingPageViewTimelineReadModel,
+  BookingRevenueDaysReadModel,
   BookingSourceMixReadModel,
   BookingSparklineReadModel,
 } from "@vayada/domain-booking";
@@ -61,6 +63,31 @@ type BookingPageViewBucketRow = {
   timeZone: string | null;
   bucketDate: string | Date;
   pageViewCount: string;
+};
+
+type BookingRevenueDayRow = {
+  propertyFound: boolean;
+  date: string | Date;
+  revenueAmount: string | null;
+  bookingCount: string;
+  otherCurrencyBookingCount: string;
+  currency: string | null;
+};
+
+type BookingDayBookingsRow = {
+  propertyFound: boolean;
+  currency: string | null;
+  bookings: {
+    id: string;
+    reference: string;
+    checkIn: string;
+    checkOut: string;
+    roomCount: number;
+    totalAmount: string;
+    currency: string;
+    counted: boolean;
+    roomNames: string[] | null;
+  }[];
 };
 
 export function createTargetBookingDashboardMetricsReadPort(config: {
@@ -246,6 +273,68 @@ export function createTargetBookingDashboardMetricsReadPort(config: {
         previousTotal: previousBuckets.reduce((sum, bucket) => sum + bucket.count, 0),
       } satisfies BookingPageViewTimelineReadModel;
     },
+    async getRevenueDays(input) {
+      const result = await pool.query<BookingRevenueDayRow>(revenueDaysSql(), [
+        input.propertyId,
+        input.windowStart,
+        input.windowEnd,
+      ]);
+      if (!result.rows[0]?.propertyFound) return null;
+      const currency = result.rows[0].currency ?? "USD";
+      return {
+        propertyId: input.propertyId,
+        windowStart: input.windowStart,
+        windowEnd: input.windowEnd,
+        days: result.rows.map((row) => ({
+          date: toDateString(row.date) ?? String(row.date),
+          revenue: money(numeric(row.revenueAmount), currency),
+          bookingCount: Number(row.bookingCount),
+          otherCurrencyBookingCount: Number(row.otherCurrencyBookingCount ?? 0),
+        })),
+      } satisfies BookingRevenueDaysReadModel;
+    },
+    async getDayBookings(input) {
+      const result = await pool.query<BookingDayBookingsRow>(dayBookingsSql(), [
+        input.propertyId,
+        input.date,
+      ]);
+      const row = result.rows[0];
+      if (!row?.propertyFound) return null;
+      const currency = row.currency ?? "USD";
+      const bookings = row.bookings.map((booking) => {
+        const nights = inclusiveDays(booking.checkIn, booking.checkOut) - 1;
+        return {
+          id: booking.id,
+          reference: booking.reference,
+          checkIn: booking.checkIn,
+          checkOut: booking.checkOut,
+          nights,
+          roomCount: booking.roomCount,
+          // One name per room type, in room order.
+          roomNames: [...new Set(booking.roomNames ?? [])],
+          total: money(numeric(booking.totalAmount), booking.currency),
+          countedInRevenue: booking.counted,
+        };
+      });
+      return {
+        propertyId: input.propertyId,
+        date: input.date,
+        revenue: money(
+          bookings.reduce(
+            (sum, booking) =>
+              booking.countedInRevenue ? sum + numeric(booking.total.amountDecimal) : sum,
+            0,
+          ),
+          currency,
+        ),
+        bookingCount: bookings.length,
+        roomNights: bookings.reduce(
+          (sum, booking) => sum + Math.max(booking.nights, 1) * booking.roomCount,
+          0,
+        ),
+        bookings,
+      } satisfies BookingDayBookingsReadModel;
+    },
     async close() {
       if (ownsPool) await pool.end();
     },
@@ -426,6 +515,81 @@ function sparklineSql(): string {
    AND booking.booked_on <= bucket.bucket_end
   GROUP BY bucket.bucket_start, bucket.bucket_end
   ORDER BY bucket.bucket_start`;
+}
+
+// One row per day of the window: the direct bookings made that day (VAY-2594 revenue chart).
+function revenueDaysSql(): string {
+  return `${bookingScopedPropertyCte()},
+  ${propertyCurrencyCte()},
+  ${datedBookingsCte()},
+  days AS (
+    SELECT day::date AS day FROM generate_series($2::date, $3::date, INTERVAL '1 day') day
+  )
+  SELECT
+    EXISTS (SELECT 1 FROM scoped_property) AS "propertyFound",
+    days.day::text AS date,
+    COALESCE(SUM(booking.total_amount) FILTER (WHERE ${COUNTED_AMOUNT}), 0)::text AS "revenueAmount",
+    COUNT(booking.id)::text AS "bookingCount",
+    COUNT(booking.id) FILTER (WHERE ${OTHER_CURRENCY})::text AS "otherCurrencyBookingCount",
+    (SELECT currency FROM property_currency) AS currency
+  FROM days
+  LEFT JOIN dated_bookings booking
+    ON booking.booking_channel = 'direct'
+   AND booking.booked_on = days.day
+  GROUP BY days.day
+  ORDER BY days.day`;
+}
+
+// The direct bookings made on one day, with their room types (VAY-2594 day window).
+function dayBookingsSql(): string {
+  return `${bookingScopedPropertyCte()},
+  ${propertyCurrencyCte()},
+  ${datedBookingsCte()}
+  SELECT
+    EXISTS (SELECT 1 FROM scoped_property) AS "propertyFound",
+    (SELECT currency FROM property_currency) AS currency,
+    COALESCE((
+      SELECT jsonb_agg(jsonb_build_object(
+        'id', booking.id::text,
+        'reference', booking.public_reference,
+        'checkIn', booking.check_in::text,
+        'checkOut', booking.check_out::text,
+        'roomCount', booking.room_count,
+        'totalAmount', booking.total_amount::text,
+        'currency', booking.currency::text,
+        'counted', ${COUNTED_AMOUNT},
+        'roomNames', COALESCE(
+          (
+            SELECT array_agg(typed.name ORDER BY typed.first_position)
+            FROM (
+              SELECT room_type.name, MIN(assignment.position) AS first_position
+              FROM pms.operational_booking_assignments assignment
+              JOIN pms.room_types room_type
+                ON room_type.id = assignment.room_type_id
+               AND room_type.property_id = assignment.property_id
+              WHERE assignment.guest_booking_id = booking.id
+                AND assignment.property_id = booking.property_id
+                AND NOT (assignment.assignment_status = 'released'
+                  AND assignment.assignment_payload @> '{"channexAlterationReleased":true}')
+              GROUP BY room_type.id, room_type.name
+            ) typed
+          ),
+          (
+            SELECT array_agg(room_type.name ORDER BY selection.position)
+            FROM jsonb_array_elements(
+              CASE WHEN jsonb_typeof(booking.booking_metadata -> 'pricingSelections') = 'array'
+                THEN booking.booking_metadata -> 'pricingSelections' ELSE '[]'::jsonb END
+            ) WITH ORDINALITY AS selection(value, position)
+            JOIN pms.room_types room_type
+              ON room_type.id::text = selection.value ->> 'roomTypeId'
+             AND room_type.property_id = booking.property_id
+          )
+        )
+      ) ORDER BY booking.created_at, booking.id)
+      FROM dated_bookings booking
+      WHERE booking.booking_channel = 'direct'
+        AND booking.booked_on = $2::date
+    ), '[]'::jsonb) AS bookings`;
 }
 
 function pageViewBucketsSql(): string {

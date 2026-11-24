@@ -77,6 +77,47 @@ export interface PageViewsTimeline {
   has_previous_data: boolean;
 }
 
+/** One bar of the revenue chart: direct bookings made that day (VAY-2594). */
+export interface RevenueDay {
+  date: string;
+  revenue: number;
+  bookings: number;
+}
+
+export interface RevenueDays {
+  currency: string;
+  days: RevenueDay[];
+}
+
+export interface DayBooking {
+  /** The booking's id, which PMS opens it by. */
+  id: string;
+  reference: string;
+  check_in: string;
+  check_out: string;
+  nights: number;
+  room_names: string[];
+  /** The booking's total in its own currency. */
+  total: number;
+  currency: string;
+  /** False for a booking in another currency, which the day's revenue leaves out. */
+  counted_in_revenue: boolean;
+}
+
+/** The day window: the direct bookings made on one day (VAY-2594). */
+export interface DayBookings {
+  date: string;
+  currency: string;
+  revenue: number;
+  bookings: number;
+  room_nights: number;
+  list: DayBooking[];
+  /** The day's bookings are for people who may read reservations; others see the totals. */
+  bookings_hidden: boolean;
+  /** Open booking goes to PMS; otherwise to Reservations here. */
+  can_open_in_pms: boolean;
+}
+
 /** Today, the last 7, 30 or 90 days, each ending today in the property's time zone. */
 export type TimeRange = "today" | "week" | "month" | "quarter";
 
@@ -156,6 +197,33 @@ type TargetSparklinesResponse = {
       pageViewCount: number;
     }[];
   };
+};
+
+type TargetRevenueDaysResponse = {
+  revenueDays: {
+    days: { date: string; revenue: Money; bookingCount: number }[];
+  };
+};
+
+type TargetDayBookingsResponse = {
+  dayBookings: {
+    date: string;
+    revenue: Money;
+    bookingCount: number;
+    roomNights: number;
+    bookings: {
+      id: string;
+      reference: string;
+      checkIn: string;
+      checkOut: string;
+      nights: number;
+      roomNames: string[];
+      total: Money;
+      countedInRevenue: boolean;
+    }[];
+  };
+  bookingsHidden?: boolean;
+  canOpenInPms: boolean;
 };
 
 type TargetPageViewsResponse = {
@@ -302,6 +370,51 @@ export const dashboardService = {
       revenue: response.sparklines.points.map((point) => amount(point.revenue)),
       bookings: response.sparklines.points.map((point) => point.bookingCount),
       page_views: response.sparklines.points.map((point) => point.pageViewCount),
+    };
+  },
+
+  /** One entry per day of the range, for the revenue chart. */
+  getRevenueDays: async (range: TimeRange, timeZone: string): Promise<RevenueDays> => {
+    const basePath = requireDashboardBasePath();
+    const query = rangeQuery(range, timeZone);
+    const response = await apiClient.get<TargetRevenueDaysResponse>(
+      `${basePath}/revenue-days?windowStart=${query.currentStart}&windowEnd=${query.currentEnd}`,
+    );
+    return {
+      currency: response.revenueDays.days[0]?.revenue.currency ?? "EUR",
+      days: response.revenueDays.days.map((day) => ({
+        date: day.date,
+        revenue: amount(day.revenue),
+        bookings: day.bookingCount,
+      })),
+    };
+  },
+
+  getDayBookings: async (date: string): Promise<DayBookings> => {
+    const basePath = requireDashboardBasePath();
+    const response = await apiClient.get<TargetDayBookingsResponse>(
+      `${basePath}/day-bookings?date=${encodeURIComponent(date)}`,
+    );
+    const day = response.dayBookings;
+    return {
+      date: day.date,
+      currency: day.revenue.currency,
+      revenue: amount(day.revenue),
+      bookings: day.bookingCount,
+      room_nights: day.roomNights,
+      list: day.bookings.map((booking) => ({
+        id: booking.id,
+        reference: booking.reference,
+        check_in: booking.checkIn,
+        check_out: booking.checkOut,
+        nights: booking.nights,
+        room_names: booking.roomNames,
+        total: amount(booking.total),
+        currency: booking.total.currency,
+        counted_in_revenue: booking.countedInRevenue,
+      })),
+      bookings_hidden: response.bookingsHidden === true,
+      can_open_in_pms: response.canOpenInPms === true,
     };
   },
 

@@ -28,7 +28,7 @@ describe.skipIf(!url)("dashboard booking money", () => {
         currency?: string;
         createdAt: string;
         checkIn?: string;
-        metadata?: Record<string, string>;
+        metadata?: Record<string, unknown>;
       }) => {
         const id = randomUUID();
         await pool.query(
@@ -49,11 +49,17 @@ describe.skipIf(!url)("dashboard booking money", () => {
       };
       // VAY-2594: direct bookings, dated by the day they were made in the property's time zone
       // (Europe/Berlin), whatever the arrival date.
-      await insert({
+      const roomType = randomUUID();
+      await pool.query(
+        `INSERT INTO pms.room_types(id,property_id,name) VALUES($1,$2,'Deluxe Room')`,
+        [roomType, property],
+      );
+      const first = await insert({
         channel: "direct",
         source: "booking_engine",
         total: 200,
         createdAt: "2026-09-30T22:30:00Z",
+        metadata: { channel: "direct", pricingSelections: [{ roomTypeId: roomType }] },
       });
       await insert({
         channel: "direct",
@@ -190,6 +196,59 @@ describe.skipIf(!url)("dashboard booking money", () => {
       expect(year.points.at(-1)?.bucketEnd).toBe("2026-12-31");
       expect(year.points.reduce((total, point) => total + point.bookingCount, 0)).toBe(3);
 
+      // The revenue chart: one day per date of the window, direct bookings by booking date.
+      const revenueDays = await port.getRevenueDays({
+        propertyId: property,
+        windowStart: period.periodStart,
+        windowEnd: period.periodEnd,
+      });
+      expect(
+        revenueDays?.days.map((day) => [day.date, day.bookingCount, day.revenue.amountDecimal]),
+      ).toEqual([
+        ["2026-10-01", 1, "200.00"],
+        ["2026-10-02", 0, "0.00"],
+        ["2026-10-03", 1, "100.00"],
+        ["2026-10-04", 0, "0.00"],
+        ["2026-10-05", 0, "0.00"],
+        ["2026-10-06", 0, "0.00"],
+        ["2026-10-07", 0, "0.00"],
+      ]);
+      // The day window: Oct 1 in Berlin, though the booking was made on Sep 30 in UTC.
+      const day = await port.getDayBookings({ propertyId: property, date: "2026-10-01" });
+      expect(day).toMatchObject({
+        date: "2026-10-01",
+        bookingCount: 1,
+        roomNights: 2,
+        revenue: { amountDecimal: "200.00", currency: "EUR" },
+        bookings: [
+          {
+            id: first,
+            reference: first,
+            checkIn: "2026-12-01",
+            checkOut: "2026-12-03",
+            nights: 2,
+            roomCount: 1,
+            roomNames: ["Deluxe Room"],
+            total: { amountDecimal: "200.00", currency: "EUR" },
+            countedInRevenue: true,
+          },
+        ],
+      });
+      // Booking sites' bookings aren't in the window.
+      expect(
+        (await port.getDayBookings({ propertyId: property, date: "2026-10-02" }))?.bookings,
+      ).toEqual([]);
+      expect(
+        await port.getDayBookings({ propertyId: randomUUID(), date: "2026-10-01" }),
+      ).toBeNull();
+      expect(
+        await port.getRevenueDays({
+          propertyId: randomUUID(),
+          windowStart: "2026-10-01",
+          windowEnd: "2026-10-02",
+        }),
+      ).toBeNull();
+
       // VAY-2390: amounts are in the PMS pricing currency, not Booking settings' default. A direct
       // booking in another currency is counted, but not added to revenue or rates.
       await pool.query(
@@ -213,6 +272,12 @@ describe.skipIf(!url)("dashboard booking money", () => {
         otherCurrencyBookingCount: 1,
         totalRevenue: { amountDecimal: "300.00", currency: "EUR" },
       });
+      const gbpDay = await port.getDayBookings({ propertyId: property, date: "2026-10-05" });
+      expect(gbpDay).toMatchObject({
+        bookingCount: 1,
+        revenue: { amountDecimal: "0.00", currency: "EUR" },
+        bookings: [{ total: { amountDecimal: "70.00", currency: "GBP" }, countedInRevenue: false }],
+      });
       const mixedSpark = await port.getSparklines({
         propertyId: property,
         windowStart: period.periodStart,
@@ -228,6 +293,7 @@ describe.skipIf(!url)("dashboard booking money", () => {
       await pool.query("DELETE FROM pms.channel_connections WHERE property_id=$1", [property]);
       await pool.query("DELETE FROM booking.guest_bookings WHERE property_id=$1", [property]);
       await pool.query("DELETE FROM booking.booking_settings WHERE property_id=$1", [property]);
+      await pool.query("DELETE FROM pms.room_types WHERE property_id=$1", [property]);
       await pool.query("DELETE FROM pms.property_pricing_settings WHERE property_id=$1", [
         property,
       ]);

@@ -726,6 +726,30 @@ export async function mockBookingAdminShellRoutes(
   await page.route("**/api/booking/properties/*/dashboard/sparklines**", (route) =>
     route.fulfill({ json: { sparklines: { points: [] } } }),
   );
+  // The revenue chart (VAY-2594): a day with nothing for every day asked for.
+  await page.route("**/api/booking/properties/*/dashboard/revenue-days**", (route) => {
+    const url = new URL(route.request().url());
+    const days: string[] = [];
+    const end = url.searchParams.get("windowEnd") ?? "";
+    for (
+      let day = new Date(`${url.searchParams.get("windowStart")}T00:00:00Z`);
+      day.toISOString().slice(0, 10) <= end && days.length < 90;
+      day.setUTCDate(day.getUTCDate() + 1)
+    )
+      days.push(day.toISOString().slice(0, 10));
+    return route.fulfill({
+      json: {
+        revenueDays: {
+          days: days.map((date) => ({
+            date,
+            revenue: { amountDecimal: "0.00", currency: "EUR" },
+            bookingCount: 0,
+            otherCurrencyBookingCount: 0,
+          })),
+        },
+      },
+    });
+  });
   await page.route("**/api/booking/properties/*/dashboard/page-views**", (route) =>
     route.fulfill({
       json: {
