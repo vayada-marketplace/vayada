@@ -16,7 +16,7 @@ const id = (n: number) => `55500000-0000-4000-8000-${String(n).padStart(12, "0")
 const leftover = (block: number, n: number | string) =>
   `('55500000-0000-4000-800${block}-' || lpad((${n})::text, 12, '0'))::uuid`;
 
-// The 21 accounts named on Flamur's list, as in the migration.
+// The 22 accounts named on Flamur's list, as in the migration.
 const NAMED = [
   "org_01KZ15CS16ZTJ3B8NKWFNNZ04A",
   "org_01KZ9D0RJZW05H8JFA3C72Q6ZT",
@@ -39,6 +39,7 @@ const NAMED = [
   "org_01KZY2QXGPX8PPDXZAHWG0ATBA",
   "org_01KZY9HV858JJS6NG89Y1HC3HW",
   "org_01M5EYG361MJS6T0AQH4RA64XN",
+  "org_01M6Q2VNAACPQADPC4F6V85WFB", // Timo's Depadma account
 ];
 const CODEXQA = 19; // index in NAMED: keeps its Stripe test account
 const TESTE1234 = 20; // index in NAMED: its booking page is published
@@ -49,8 +50,6 @@ const TIGA = id(10); // kept real hotel on the WorkOS list
 const TIGA_HOTEL = id(11);
 const OUTSIDE_SIGNUP = id(12); // kept (decision 106), its page stays published
 const OUTSIDE_SIGNUP_HOTEL = id(13);
-const DEPADMA = id(14); // waits for Timo
-const DEPADMA_HOTEL = id(15);
 const SEPTEMBER = id(16); // outside WorkOS, created in September: not on the list
 const SEPTEMBER_HOTEL = id(17);
 const CLOSED = id(18); // outside WorkOS, created in August, already archived: left as it is
@@ -65,7 +64,6 @@ const SEED = `
     ('${PLATFORM}', 'platform', 'Vayada Platform', 'vay2602-platform', 'active', 'org_01M0YF1WF2TNNA6MMX2ZBYHMSY', '2026-08-26'),
     ('${TIGA}', 'hotel_group', 'Tiga', 'vay2602-tiga', 'active', 'org_01M6A933D9RY1PYH4ZD7XA58K1', '2026-11-01'),
     ('${OUTSIDE_SIGNUP}', 'hotel_group', 'Outside sign-up', 'vay2602-outside', 'active', 'org_01M6DGVQAEHW5PVH2QH6DABVAJ', '2026-11-02'),
-    ('${DEPADMA}', 'hotel_group', 'Depadma', 'vay2602-depadma', 'active', 'org_01M6Q2VNAACPQADPC4F6V85WFB', '2026-11-06'),
     ('${SEPTEMBER}', 'hotel_group', 'September', 'vay2602-september', 'active', 'org_vay2602_september', '2026-09-10'),
     ('${CLOSED}', 'hotel_group', 'Closed smoke', 'vay2602-closed', 'archived', 'org_vay2602_closed', '2026-08-20'),
     ('${KEPT_AUGUST}', 'hotel_group', 'Kept August', 'vay2602-kept-august', 'active', 'org_01KZQQ019EF052PFARPCG7B613', '2026-08-11');
@@ -73,7 +71,7 @@ const SEED = `
   SELECT ('55500000-0000-4000-8000-' || lpad((100 + n - 1)::text, 12, '0'))::uuid, 'hotel_group',
          'Named ' || n, 'vay2602-named-' || n, 'active', (ARRAY['${NAMED.join("','")}'])[n],
          '2026-08-05'::timestamptz + n * interval '3 days'
-  FROM generate_series(1, 21) n;
+  FROM generate_series(1, 22) n;
   -- The 70 August leftovers: WorkOS no longer knows them.
   INSERT INTO identity.organizations (id, kind, name, slug, status, workos_org_id, created_at)
   SELECT ${leftover(1, "n")}, 'hotel_group', 'QA Next ' || n, 'vay2602-leftover-' || n, 'active',
@@ -90,13 +88,12 @@ const SEED = `
   INSERT INTO hotel_catalog.properties (id, public_id, display_name) VALUES
     ('${TIGA_HOTEL}', 'vay2602-tiga', 'Tiga'),
     ('${OUTSIDE_SIGNUP_HOTEL}', 'vay2602-outside', 'Outside'),
-    ('${DEPADMA_HOTEL}', 'vay2602-depadma', 'Depadma'),
     ('${SEPTEMBER_HOTEL}', 'vay2602-september', 'September'),
     ('${CLOSED_HOTEL}', 'vay2602-closed', 'Closed'),
     ('${KEPT_AUGUST_HOTEL}', 'vay2602-kept-august', 'Kept August');
   INSERT INTO hotel_catalog.properties (id, public_id, display_name)
   SELECT ('55500000-0000-4000-8000-' || lpad((200 + n - 1)::text, 12, '0'))::uuid, 'vay2602-named-' || n, 'Named ' || n
-  FROM generate_series(1, 21) n WHERE n NOT IN (3, 6, 9, 12, 15);
+  FROM generate_series(1, 22) n WHERE n NOT IN (3, 6, 9, 12, 15);
   INSERT INTO hotel_catalog.properties (id, public_id, display_name)
   SELECT ${leftover(2, "n")}, 'vay2602-leftover-' || n, 'QA Next Hotel ' || n FROM generate_series(1, 60) n;
   -- One leftover hotel was retired already.
@@ -107,14 +104,13 @@ const SEED = `
   INSERT INTO identity.organization_resource_links (organization_id, product, resource_type, resource_id, relationship, status) VALUES
     ('${TIGA}', 'hotel_catalog', 'property', '${TIGA_HOTEL}', 'owner', 'active'),
     ('${OUTSIDE_SIGNUP}', 'hotel_catalog', 'property', '${OUTSIDE_SIGNUP_HOTEL}', 'owner', 'active'),
-    ('${DEPADMA}', 'hotel_catalog', 'property', '${DEPADMA_HOTEL}', 'owner', 'active'),
     ('${SEPTEMBER}', 'hotel_catalog', 'property', '${SEPTEMBER_HOTEL}', 'owner', 'active'),
     ('${CLOSED}', 'hotel_catalog', 'property', '${CLOSED_HOTEL}', 'owner', 'active'),
     ('${KEPT_AUGUST}', 'hotel_catalog', 'property', '${KEPT_AUGUST_HOTEL}', 'owner', 'active');
   INSERT INTO identity.organization_resource_links (organization_id, product, resource_type, resource_id, relationship, status)
   SELECT ('55500000-0000-4000-8000-' || lpad((100 + n - 1)::text, 12, '0'))::uuid, 'hotel_catalog', 'property',
          ('55500000-0000-4000-8000-' || lpad((200 + n - 1)::text, 12, '0')), 'owner', 'active'
-  FROM generate_series(1, 21) n WHERE n NOT IN (3, 6, 9, 12, 15);
+  FROM generate_series(1, 22) n WHERE n NOT IN (3, 6, 9, 12, 15);
   -- Half the leftover hotels are held through a PMS link only.
   INSERT INTO identity.organization_resource_links (organization_id, product, resource_type, resource_id, relationship, status)
   SELECT ${leftover(1, "n")},
@@ -177,11 +173,11 @@ const GATES: Array<[string, string, string, string]> = [
   ],
   [
     "a suspended account holds an approved hotel too",
-    `UPDATE identity.organizations SET status = 'suspended' WHERE id = '${DEPADMA}';
+    `UPDATE identity.organizations SET status = 'suspended' WHERE id = '${SEPTEMBER}';
      INSERT INTO identity.organization_resource_links (organization_id, product, resource_type, resource_id, relationship, status)
-     VALUES ('${DEPADMA}', 'hotel_catalog', 'property', (${LEFTOVER_HOTEL})::text, 'owner', 'active')`,
-    `DELETE FROM identity.organization_resource_links WHERE organization_id = '${DEPADMA}' AND resource_id = (${LEFTOVER_HOTEL})::text;
-     UPDATE identity.organizations SET status = 'active' WHERE id = '${DEPADMA}'`,
+     VALUES ('${SEPTEMBER}', 'hotel_catalog', 'property', (${LEFTOVER_HOTEL})::text, 'owner', 'active')`,
+    `DELETE FROM identity.organization_resource_links WHERE organization_id = '${SEPTEMBER}' AND resource_id = (${LEFTOVER_HOTEL})::text;
+     UPDATE identity.organizations SET status = 'active' WHERE id = '${SEPTEMBER}'`,
     "VAY-2602: a hotel is shared with an account that stays",
   ],
   [
@@ -326,7 +322,7 @@ async function state(db: pg.Client) {
   ).rows[0];
 }
 
-// 4 kept + 1 September + 21 named + 70 leftovers active; one already archived.
+// 3 kept + 1 September + 22 named + 70 leftovers active; one already archived.
 const SEEDED = {
   active: 96,
   archived: 1,
@@ -356,7 +352,7 @@ describe.skipIf(!URL)("unused hotel accounts archive 0555", () => {
          DELETE FROM identity.organizations WHERE workos_org_id = ANY(ARRAY['${NAMED.join("','")}'])`,
       );
       const seeded = await state(target.db);
-      expect(seeded).toMatchObject({ active: 75, archived: 1, audits: 0 });
+      expect(seeded).toMatchObject({ active: 74, archived: 1, audits: 0 });
       await target.addMigration();
       expect((await target.run()).failed).toBeNull();
       expect(await state(target.db)).toEqual(seeded);
@@ -402,14 +398,14 @@ describe.skipIf(!URL)("unused hotel accounts archive 0555", () => {
       const accounts = (
         await db.query<{ status: string; n: number }>(
           `SELECT status, count(*)::int AS n FROM identity.organizations
-           WHERE id IN ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::uuid, $7::uuid)
+           WHERE id IN ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::uuid)
            GROUP BY status ORDER BY status`,
-          [TIGA, OUTSIDE_SIGNUP, DEPADMA, SEPTEMBER, PLATFORM, CLOSED, KEPT_AUGUST],
+          [TIGA, OUTSIDE_SIGNUP, SEPTEMBER, PLATFORM, CLOSED, KEPT_AUGUST],
         )
       ).rows;
-      // The kept, waiting, September and platform accounts stay active; the closed one stays archived.
+      // The kept, September and platform accounts stay active; the closed one stays archived.
       expect(accounts).toEqual([
-        { status: "active", n: 6 },
+        { status: "active", n: 5 },
         { status: "archived", n: 1 },
       ]);
       const listed = (
@@ -420,9 +416,9 @@ describe.skipIf(!URL)("unused hotel accounts archive 0555", () => {
           [NAMED],
         )
       ).rows;
-      expect(listed).toEqual([{ status: "archived", n: 91 }]);
+      expect(listed).toEqual([{ status: "archived", n: 92 }]);
 
-      // 16 named hotels and 58 leftover hotels are retired now; the one retired before is untouched,
+      // 17 named hotels and 58 leftover hotels are retired now; the one retired before is untouched,
       // and so is the hotel of the leftover archived before this ran.
       const hotels = (
         await db.query(
@@ -440,7 +436,7 @@ describe.skipIf(!URL)("unused hotel accounts archive 0555", () => {
           preHold: null,
           revision: 1,
           retiredBy: null,
-          n: 7,
+          n: 6,
         },
         {
           lifecycle: "retired",
@@ -456,7 +452,7 @@ describe.skipIf(!URL)("unused hotel accounts archive 0555", () => {
           preHold: "incomplete",
           revision: 2,
           retiredBy: STAFF,
-          n: 74,
+          n: 75,
         },
       ]);
       const untouched = (
@@ -468,7 +464,6 @@ describe.skipIf(!URL)("unused hotel accounts archive 0555", () => {
         [
           TIGA_HOTEL,
           OUTSIDE_SIGNUP_HOTEL,
-          DEPADMA_HOTEL,
           SEPTEMBER_HOTEL,
           CLOSED_HOTEL,
           KEPT_AUGUST_HOTEL,
@@ -511,7 +506,7 @@ describe.skipIf(!URL)("unused hotel accounts archive 0555", () => {
           scope: "property",
           actor: "migration",
           actorUser: STAFF,
-          n: 74,
+          n: 75,
         },
         {
           product: "identity",
@@ -519,18 +514,18 @@ describe.skipIf(!URL)("unused hotel accounts archive 0555", () => {
           scope: "organization",
           actor: "migration",
           actorUser: STAFF,
-          n: 89,
+          n: 90,
         },
       ]);
 
       // Nothing is deleted: memberships, links, bookings and the Stripe test account stay.
       expect(await state(db)).toEqual({
         ...SEEDED,
-        active: 5,
-        archived: 92,
-        retired: 75,
+        active: 4,
+        archived: 93,
+        retired: 76,
         pages: 1,
-        audits: 163,
+        audits: 165,
       });
     } finally {
       await target.drop();

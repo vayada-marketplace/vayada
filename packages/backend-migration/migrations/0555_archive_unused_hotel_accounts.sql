@@ -1,17 +1,18 @@
 -- Migration: 0555_archive_unused_hotel_accounts
 -- Owner: identity, hotel-catalog / VAY-2602. Held by hand: released with Flamur's yes (decisions
--- 105-109, 2026-11-24) after the before-counts in the PR.
+-- 105-109, and Depadma on 2026-11-24) after the before-counts in the PR.
 --
 -- Archives the hotel accounts Flamur approved on the VAY-2602 list and retires their hotels, so they
 -- leave Vayada Admin and nobody signs in to them again. Nothing is deleted: memberships, links,
 -- bookings, payments, Stripe accounts and audit rows stay, and staff can restore a hotel. Accounts are
 -- matched by id, never by name:
--- * 21 named on the list by their WorkOS organisation: 17 sign-ups never used again and 4 old Vayada
---   tests (two of them with test bookings, one with a Stripe test account that stays untouched);
+-- * 22 named on the list by their WorkOS organisation: 17 sign-ups never used again, 4 old Vayada
+--   tests (two of them with test bookings, one with a Stripe test account that stays untouched) and
+--   Timo's Depadma account;
 -- * the 70 August leftovers: active hotel accounts created in August 2026 whose WorkOS organisation
 --   is none of the 43 that WorkOS Production held on 2026-11-24 (59 release smoke hotels and 11 early
 --   test sign-ups; nobody can sign in to them).
--- Every other account stays, among them the 14 kept accounts, one outside sign-up and Depadma. The
+-- Every other account stays, among them the 14 kept accounts and one outside sign-up. The
 -- WorkOS organisations and users are removed by hand afterwards (VAY-2602 step c), not here.
 -- A named account archived before this runs (a WorkOS deletion archives it) is fine: its hotels are
 -- still retired. Leftovers may only have become fewer. Any other surprise stops the migration, and with
@@ -31,7 +32,9 @@ INSERT INTO vay2602_named (workos_org_id) VALUES
   ('org_01M4BDCP8QA3YX7C121F9CNSPS'), ('org_01M4H88YWW1F1W1TCYSRHGY3ND'),
   -- The 4 old Vayada tests (decision 106).
   ('org_01KZQPR9FWP6Q4WAKQR8D0MN52'), ('org_01KZY2QXGPX8PPDXZAHWG0ATBA'), ('org_01KZY9HV858JJS6NG89Y1HC3HW'),
-  ('org_01M5EYG361MJS6T0AQH4RA64XN');
+  ('org_01M5EYG361MJS6T0AQH4RA64XN'),
+  -- Timo's Depadma account (Flamur, 2026-11-24).
+  ('org_01M6Q2VNAACPQADPC4F6V85WFB');
 
 -- The 43 organisations WorkOS Production held on 2026-11-24.
 CREATE TEMPORARY TABLE vay2602_workos (workos_org_id TEXT PRIMARY KEY) ON COMMIT DROP;
@@ -101,7 +104,7 @@ BEGIN
   IF NOT (SELECT present FROM vay2602_production) THEN
     RETURN;
   END IF;
-  IF (SELECT count(*) FROM vay2602_accounts WHERE named) <> 21 THEN
+  IF (SELECT count(*) FROM vay2602_accounts WHERE named) <> 22 THEN
     RAISE EXCEPTION 'VAY-2602: a named account is not an active or archived hotel account';
   END IF;
   IF (SELECT count(*) FROM vay2602_accounts WHERE NOT named) > 70 THEN
