@@ -530,7 +530,6 @@
   "dashboard.bookingPage.offlineBanner.fixNow": "Fix now",
   "dashboard.tracking.title": "Page view tracking not detected.",
   "dashboard.tracking.detail": "Bookings are recorded, but visitors and conversion may be incomplete.",
-  "dashboard.tracking.checkSetup": "Check setup",
   "dashboard.bookingPage.publishing.detail": "We're putting your booking page online. This takes a few seconds. You can leave this page.",
   "dashboard.bookingPage.publishing.stalled": "This is taking longer than usual. You can leave this page and check again later.",
   "dashboard.bookingPage.ready.detail": "Everything is ready. Publish it so guests can book.",

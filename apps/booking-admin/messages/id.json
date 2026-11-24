@@ -530,7 +530,6 @@
   "dashboard.bookingPage.offlineBanner.fixNow": "Perbaiki sekarang",
   "dashboard.tracking.title": "Pelacakan tampilan halaman tidak terdeteksi.",
   "dashboard.tracking.detail": "Pemesanan tercatat, tetapi pengunjung dan konversi mungkin tidak lengkap.",
-  "dashboard.tracking.checkSetup": "Periksa pengaturan",
   "dashboard.bookingPage.publishing.detail": "Kami sedang menayangkan halaman pemesanan Anda. Ini memerlukan beberapa detik. Anda dapat meninggalkan halaman ini.",
   "dashboard.bookingPage.publishing.stalled": "Ini memakan waktu lebih lama dari biasanya. Anda dapat meninggalkan halaman ini dan memeriksanya nanti.",
   "dashboard.bookingPage.ready.detail": "Semuanya siap. Terbitkan agar tamu dapat memesan.",

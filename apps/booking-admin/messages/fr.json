@@ -530,7 +530,6 @@
   "dashboard.bookingPage.offlineBanner.fixNow": "Corriger maintenant",
   "dashboard.tracking.title": "Suivi des pages vues non détecté.",
   "dashboard.tracking.detail": "Les réservations sont enregistrées, mais les visiteurs et la conversion peuvent être incomplets.",
-  "dashboard.tracking.checkSetup": "Vérifier la configuration",
   "dashboard.bookingPage.publishing.detail": "Nous mettons votre page de réservation en ligne. Cela prend quelques secondes. Vous pouvez quitter cette page.",
   "dashboard.bookingPage.publishing.stalled": "Cela prend plus de temps que d'habitude. Vous pouvez quitter cette page et vérifier plus tard.",
   "dashboard.bookingPage.ready.detail": "Tout est prêt. Publiez-la pour que les clients puissent réserver.",

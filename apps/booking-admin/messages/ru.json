@@ -530,7 +530,6 @@
   "dashboard.bookingPage.offlineBanner.fixNow": "Исправить",
   "dashboard.tracking.title": "Учёт просмотров страницы не обнаружен.",
   "dashboard.tracking.detail": "Бронирования записываются, но данные о посетителях и конверсии могут быть неполными.",
-  "dashboard.tracking.checkSetup": "Проверить настройку",
   "dashboard.bookingPage.publishing.detail": "Мы публикуем вашу страницу бронирования. Это займёт несколько секунд. Можно покинуть эту страницу.",
   "dashboard.bookingPage.publishing.stalled": "Это занимает больше времени, чем обычно. Можно покинуть страницу и проверить позже.",
   "dashboard.bookingPage.ready.detail": "Всё готово. Опубликуйте страницу, чтобы гости могли бронировать.",

@@ -42,8 +42,9 @@ test("bookings on the booking page without page views show the amber banner (VAY
     "Bookings are recorded, but visitors and conversion may be incomplete.",
   );
   await expect(line).toHaveCSS("background-color", "rgb(255, 250, 235)");
-  const link = line.getByRole("link", { name: "Check setup →" });
-  await expect(link).toHaveAttribute("href", "/design-studio?tab=domain");
+  // Text only (decision 113): no hotel setting turns page views on.
+  await expect(line.getByRole("link")).toHaveCount(0);
+  await expect(line).not.toContainText("Check setup");
   // Above the cards, under the page's header.
   const bannerBox = (await line.boundingBox())!;
   const cardBox = (await page
@@ -91,12 +92,10 @@ test("on a small phone the banner wraps without scrolling sideways", async ({ pa
   await expect(line).toBeVisible();
   const main = page.locator("main");
   expect(await main.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
-  const link = (await line.getByRole("link").boundingBox())!;
+  // The text wraps inside the banner and takes its width.
   const box = (await line.boundingBox())!;
-  expect(link.x + link.width).toBeLessThanOrEqual(box.x + box.width);
-  // The link goes under the text rather than squeezing it into a narrow column.
   const text = (await line.locator("p").boundingBox())!;
-  expect(link.y).toBeGreaterThanOrEqual(text.y + text.height - 1);
+  expect(text.x + text.width).toBeLessThanOrEqual(box.x + box.width);
   expect(text.width).toBeGreaterThan(200);
   await line.screenshot({ path: testInfo.outputPath("tracking-banner-360.png") });
 });
