@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { watchPageHealth } from "../support/pageHealth";
 import {
@@ -181,6 +181,16 @@ async function mockPricedVilla(page: Page) {
         roomTypeId: VILLA,
         roomId: ROOM,
         roomNumber: "Paddy Villa",
+        // What she booked each night (VAY-2576): €76 + €81 + €86 is her €243.
+        nightly: [
+          ["2026-11-03", "76.00"],
+          ["2026-11-04", "81.00"],
+          ["2026-11-05", "86.00"],
+        ].map(([serviceDate, amountDecimal]) => ({
+          serviceDate,
+          applied: { amountDecimal, currency: "EUR" },
+          evidenceQuality: "exact",
+        })),
       },
     ],
   };
@@ -205,6 +215,23 @@ async function mockPricedVilla(page: Page) {
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2`, (route) =>
     route.fulfill({ json: publication }),
   );
+}
+
+/** VAY-2576: "Show nightly rates" lists each booked night, then the total, and hides them again. */
+async function expectNightlyRates(popover: Locator) {
+  const show = popover.getByRole("button", { name: "Show nightly rates" });
+  await expect(show).toHaveAttribute("aria-expanded", "false");
+  await expect(popover.getByRole("listitem")).toHaveCount(0);
+  await show.click();
+  const hide = popover.getByRole("button", { name: "Hide nightly rates" });
+  await expect(hide).toHaveAttribute("aria-expanded", "true");
+  await expect(popover.getByRole("listitem")).toHaveText([
+    /^Tue, Nov 3\s*€76$/,
+    /^Wed, Nov 4\s*€81$/,
+    /^Thu, Nov 5\s*€86$/,
+  ]);
+  await expect(popover).toContainText("Total · 3 nights€243");
+  await expect(popover).not.toContainText("Fees and extras");
 }
 
 /** The bottom of night `index` (0 is 28 October) in the villa's row, below any booking bar. */
@@ -341,6 +368,7 @@ test.describe("PMS calendar prices", () => {
       "Ada Lovelace",
       "Direct",
       "€243",
+      "€81 avg",
       "Tue, Nov 3 · from 14:30",
     ]);
     await expect(booking.getByRole("link", { name: "Open reservation" })).toHaveAttribute(
@@ -348,6 +376,9 @@ test.describe("PMS calendar prices", () => {
       "/bookings/guest_booking_ada",
     );
     await page.screenshot({ path: testInfo.outputPath("calendar-booking-popover.png") });
+    // VAY-2576: the nights she booked, one click away, adding up to the booking value.
+    await expectNightlyRates(booking);
+    await page.screenshot({ path: testInfo.outputPath("calendar-booking-popover-nightly.png") });
     // Change room opens the calendar's booking window with its room tools.
     await booking.getByRole("button", { name: "Change room" }).click();
     await expect(booking).toHaveCount(0);
@@ -364,6 +395,24 @@ test.describe("PMS calendar prices", () => {
     await page.screenshot({ path: testInfo.outputPath("calendar-block-popover.png") });
     await blocked.getByRole("button", { name: "Edit" }).click();
     await expect(page.getByText("Blocked Room")).toBeVisible();
+    await assertHealthy();
+  });
+
+  test("shows a booking's price per night in German", async ({ page }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await page.addInitScript(() => localStorage.setItem("admin_language", "de"));
+    await page.goto("/calendar");
+
+    await page.locator('[data-bar="booking"]', { hasText: "Ada Lovelace" }).click();
+    const booking = page.getByRole("dialog", { name: "Ada Lovelace · #Paddy Villa" });
+    await expect(booking).toContainText("Preis pro NachtØ €81");
+    await booking.getByRole("button", { name: "Preise pro Nacht anzeigen" }).click();
+    await expect(
+      booking.getByRole("button", { name: "Preise pro Nacht ausblenden" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    await expect(booking.getByRole("listitem").first()).toHaveText(/^Di\., 3\. Nov\.?\s*€76$/);
+    await expect(booking).toContainText("Gesamt · 3 Nächte€243");
+    await page.screenshot({ path: testInfo.outputPath("calendar-booking-popover-de.png") });
     await assertHealthy();
   });
 });
@@ -479,6 +528,7 @@ test.describe("PMS phone calendar rooms and prices", () => {
       "Ada Lovelace",
       "Direct",
       "€243",
+      "€81 avg",
       "Tue, Nov 3 · from 14:30",
     ]);
     await expect(sheet.getByRole("link", { name: "Open reservation" })).toHaveAttribute(
@@ -486,6 +536,8 @@ test.describe("PMS phone calendar rooms and prices", () => {
       "/bookings/guest_booking_ada",
     );
     await page.screenshot({ path: testInfo.outputPath("phone-booking-sheet.png") });
+    await expectNightlyRates(sheet);
+    await page.screenshot({ path: testInfo.outputPath("phone-booking-sheet-nightly.png") });
     await sheet.getByRole("button", { name: "Change room" }).click();
     await expect(sheet).toHaveCount(0);
     await expect(

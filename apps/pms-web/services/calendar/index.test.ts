@@ -368,6 +368,99 @@ describe("calendarService manual-booking rates", () => {
     ]);
   });
 
+  // VAY-2576: the popover lists the booked price of each night, for the whole booking like its value.
+  it("keeps each night's booked price, all rooms added up, only when every night has one", async () => {
+    const base = mocks.get.getMockImplementation()!;
+    const night = (serviceDate: string, amountDecimal: string | null) => ({
+      serviceDate,
+      applied: amountDecimal === null ? null : { amountDecimal, currency: "EUR" },
+      evidenceQuality: amountDecimal === null ? "missing" : "exact",
+    });
+    const room = (position: number, nightly: unknown[], extra: object = {}) => ({
+      assignmentId: `assignment-${position}`,
+      roomTypeId: "room-type-1",
+      roomId: "room-1",
+      roomNumber: "101",
+      position,
+      channel: "booking.com",
+      nightly,
+      ...extra,
+    });
+    const reservation = (
+      id: string,
+      total: string,
+      assignments: unknown[],
+      extra: object = {},
+    ) => ({
+      guestBookingId: id,
+      bookingReference: id.toUpperCase(),
+      status: "confirmed",
+      source: "channel",
+      stay: { checkIn: "2026-08-20", checkOut: "2026-08-22" },
+      primaryGuest: { displayName: "Ada Lovelace" },
+      pricing: { amountStatus: "recorded", totalAmount: { amountDecimal: total, currency: "EUR" } },
+      assignments,
+      ...extra,
+    });
+    const priced = [night("2026-08-20", "100.0000"), night("2026-08-21", "120.5000")];
+    const stay = { checkIn: "2026-08-20", checkOut: "2026-08-22" };
+    mocks.get.mockImplementation(async (route: string) =>
+      route.includes("/reservations?")
+        ? {
+            items: [
+              reservation("one-room", "250.00", [room(1, priced)]),
+              reservation("missing-night", "250.00", [
+                room(1, [night("2026-08-20", "100.0000"), night("2026-08-21", null)]),
+              ]),
+              // A room an OTA change removed sits above the room count, without prices.
+              reservation(
+                "two-rooms",
+                "500.00",
+                [room(1, priced, { stay }), room(2, priced, { stay }), room(3, [], { stay })],
+                { roomCount: 2 },
+              ),
+              // Two rooms booked, one assigned: its nights aren't the whole booking's.
+              reservation("one-of-two-rooms", "500.00", [room(1, priced, { stay })], {
+                roomCount: 2,
+              }),
+              // The room's stay covers one of the reservation's two nights.
+              reservation(
+                "short-room-stay",
+                "250.00",
+                [room(1, priced, { stay: { checkIn: "2026-08-20", checkOut: "2026-08-21" } })],
+                { roomCount: 1 },
+              ),
+              reservation("no-rooms-yet", "250.00", []),
+            ],
+            pagination: { total: 6, limit: 500, offset: 0 },
+          }
+        : base(route),
+    );
+
+    const result = await calendarService.getCalendarData("2026-08-20", "2026-08-24");
+    const nightsOf = (id: string) =>
+      result.bookings
+        .filter((booking) => booking.id === id)
+        .map(({ stayNights, bookedNights }) => ({ stayNights, bookedNights }));
+
+    const both = [
+      { date: "2026-08-20", amount: 100 },
+      { date: "2026-08-21", amount: 120.5 },
+    ];
+    expect(nightsOf("one-room")).toEqual([{ stayNights: 2, bookedNights: both }]);
+    expect(nightsOf("missing-night")).toEqual([{ stayNights: 2, bookedNights: null }]);
+    expect(nightsOf("two-rooms")[0]).toEqual({
+      stayNights: 2,
+      bookedNights: [
+        { date: "2026-08-20", amount: 200 },
+        { date: "2026-08-21", amount: 241 },
+      ],
+    });
+    expect(nightsOf("one-of-two-rooms")).toEqual([{ stayNights: 2, bookedNights: null }]);
+    expect(nightsOf("short-room-stay")).toEqual([{ stayNights: 2, bookedNights: null }]);
+    expect(nightsOf("no-rooms-yet")).toEqual([{ stayNights: 2, bookedNights: null }]);
+  });
+
   // VAY-2348: a booking waiting for its bank transfer holds rooms before any is assigned.
   it("draws a booking waiting for its bank transfer, one unassigned bar per held room", async () => {
     const base = mocks.get.getMockImplementation()!;
