@@ -92,6 +92,46 @@ describe("in-app change tools (VAY-2518, VAY-2524)", () => {
     expect(await tool!.run({}, call())).toEqual({ ok: true, data: done, waitsForAnswer: false });
   });
 
+  it("asks nothing when the turn is stopped before the change is asked", async () => {
+    const context = await worldContext(WORLD.OWNER, WORLD.ORG_A, BLOCK_RIGHTS);
+    const stop = new AbortController();
+    const propose = vi.fn<AssistantChangeProposer>(async () => PENDING);
+    const [tool] = changeTools({
+      context,
+      // Stop arrives while the call's own context is read.
+      contextFor: async () => {
+        stop.abort();
+        return context;
+      },
+      propose,
+      model: MODEL,
+      actions: [blockInApp],
+    });
+    const outcome = await tool!.run({}, { ...call(), signal: stop.signal });
+    expect(outcome).toMatchObject({ ok: false, error: { code: "stopped" } });
+    // Let the context read finish: still nothing is asked.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(propose).not.toHaveBeenCalled();
+  });
+
+  it("doesn't wait for a slow proposer once the turn is stopped", async () => {
+    const context = await worldContext(WORLD.OWNER, WORLD.ORG_A, BLOCK_RIGHTS);
+    const stop = new AbortController();
+    const [tool] = changeTools({
+      context,
+      contextFor: async () => context,
+      propose: () => {
+        stop.abort();
+        return new Promise(() => {});
+      },
+      model: MODEL,
+      actions: [blockInApp],
+    });
+    const outcome = await tool!.run({}, { ...call(), signal: stop.signal });
+    // No card: the turn ends stopped, not waiting for a Yes.
+    expect(outcome).toMatchObject({ ok: false, error: { code: "stopped" } });
+  });
+
   it("passes a refusal on as the tool's error", async () => {
     const context = await worldContext(WORLD.OWNER, WORLD.ORG_A, BLOCK_RIGHTS);
     const error = { code: "not_allowed", message: "You may not make this change." };
