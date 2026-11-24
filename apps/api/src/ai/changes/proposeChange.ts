@@ -5,7 +5,11 @@
 // regenerated call with the same arguments gets the same operation back (operationStore.ts).
 //
 // Every call writes one AI action log row, whatever its outcome, as reads do (runRouteAction.ts).
-import { delegatedPropertyIds, type RequestContext } from "@vayada/backend-auth";
+import {
+  delegatedPropertyIds,
+  isDelegatedContext,
+  type RequestContext,
+} from "@vayada/backend-auth";
 
 import { isLoggableUuid, type AiActionLog, type AiActionOutcome } from "../actionLog/actionLog.js";
 import { argumentKindsOf } from "../actionLog/argumentKinds.js";
@@ -69,9 +73,10 @@ export function createAiChangeProposer(deps: {
     context: RequestContext,
     request: ProposeChangeRequest,
   ): Promise<ProposeChangeResult> {
-    // The surface comes from the delegation itself, never from the caller.
+    // The surface comes from the delegation itself, never from the caller; a person's own session
+    // with a delegation added on is no tool call.
     const surface = surfaceOf(context);
-    if (!surface || !context.delegation) {
+    if (!surface || !context.delegation || !isDelegatedContext(context)) {
       throw new TypeError("proposeChange needs the tool call's delegated context");
     }
     // A change belongs to its MCP connection or in-app conversation (the card's "still there").
