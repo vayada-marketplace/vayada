@@ -128,6 +128,94 @@ describe.skipIf(!TEST_DATABASE_URL)(
       expect(await auditRows()).toEqual(before);
     });
 
+    it("opens a booking moved by hand on switch day with its old number and the guest's old email (VAY-2599)", async () => {
+      const moved = (reference: string, email: string) =>
+        `Moved from the old system on 2026-11-15 (VAY-2108). Old reference: ${reference}. ` +
+        `Guest email: ${email}. Old payment: unpaid.`;
+      for (const [id, publicReference, note, noteCreatedAt] of [
+        [uuid(20), "PMS-0123456789AB", moved("VAY-7B6160", "Old.Guest@example.test"), "2026-11-15T10:00:00Z"],
+        [uuid(21), "PMS-NOEMAIL00000", moved("VAY-NOMAIL", "-"), "2026-11-15T10:05:00Z"],
+        // The same text, written after the move, opens nothing.
+        [uuid(22), "PMS-LATENOTE0000", moved("VAY-LATE01", "late@example.test"), "2026-11-20T10:00:00Z"],
+      ] as const) {
+        await admin.query(
+          `INSERT INTO booking.guest_bookings
+           (id, property_id, public_reference, source_system, lifecycle_status, check_in, check_out,
+            currency, total_amount, balance_amount)
+         VALUES ($1::uuid, $2::uuid, $3, 'pms', 'confirmed', '2027-01-26', '2027-01-30', 'EUR', 400, 400)`,
+          [id, propertyId, publicReference],
+        );
+        await admin.query(
+          `INSERT INTO booking.booking_guests (guest_booking_id, guest_role, first_name, last_name, email)
+         VALUES ($1::uuid, 'booker', 'Ada', 'Lovelace', 'hotel@example.test')`,
+          [id],
+        );
+        await admin.query(
+          `INSERT INTO pms.booking_notes_private (property_id, guest_booking_id, body, source, created_at)
+         VALUES ($1::uuid, $2::uuid, $3, 'pms', $4::timestamptz)`,
+          [propertyId, id, note, noteCreatedAt],
+        );
+      }
+      const app = buildApp({
+        logger: false,
+        bookingWebPublicNow: () => occurredAt,
+        publicHotelProfileRepository: { findProfileBySlug: async () => null },
+        bookingWebCheckoutAdapter: createAdapter(checkoutPool),
+      });
+      let address = 40;
+      const lookup = (bookingReference: string, guestEmail: string) =>
+        app.inject({
+          method: "POST",
+          url: "/api/booking-web/hotels/vay-1188-hotel/bookings/lookup",
+          // The lookup allows five tries a minute per address.
+          remoteAddress: `198.51.100.${(address += 1)}`,
+          payload: { bookingReference, guestEmail },
+        });
+      try {
+        const found = await lookup("VAY-7B6160", "old.guest@example.test");
+        expect(found.statusCode).toBe(200);
+        // The guest gets the booking under its new number, and a token that opens it.
+        expect(found.json()).toMatchObject({
+          bookingReference: "PMS-0123456789AB",
+          checkIn: "2027-01-26",
+          checkOut: "2027-01-30",
+        });
+        const confirmation = await app.inject({
+          method: "POST",
+          url: "/api/booking-web/hotels/vay-1188-hotel/bookings/confirmation",
+          remoteAddress: "198.51.100.39",
+          payload: {
+            bookingReference: "PMS-0123456789AB",
+            confirmationToken: found.json().confirmationToken,
+          },
+        });
+        expect(confirmation.statusCode).toBe(200);
+        expect(confirmation.json()).toMatchObject({ bookingReference: "PMS-0123456789AB" });
+        // Letter case doesn't matter, as for email today.
+        expect((await lookup("vay-7b6160", "OLD.GUEST@EXAMPLE.TEST")).statusCode).toBe(200);
+        // The new number still needs the booking's own email.
+        expect((await lookup("PMS-0123456789AB", "hotel@example.test")).statusCode).toBe(200);
+
+        for (const [reference, email] of [
+          ["VAY-7B6160", "hotel@example.test"],
+          ["VAY-7B6160", "someone@example.test"],
+          ["VAY-7B6160", "old.guest@example"],
+          ["VAY-7B616", "old.guest@example.test"],
+          ["PMS-0123456789AB", "old.guest@example.test"],
+          ["VAY-NOMAIL", "-"],
+          ["VAY-LATE01", "late@example.test"],
+        ] as const) {
+          expect({ reference, email, status: (await lookup(reference, email)).statusCode }).toEqual({
+            reference,
+            email,
+            status: 404,
+          });
+        }
+      } finally {
+        await app.close();
+      }
+    });
+
     it("returns the booked extras per extra with their days, and none for a booking without (VAY-2408, VAY-2409)", async () => {
       const breakfastId = uuid(6);
       await admin.query(
@@ -374,6 +462,7 @@ describe.skipIf(!TEST_DATABASE_URL)(
              SELECT id FROM booking.guest_bookings WHERE property_id = $1::uuid
            )`,
           "DELETE FROM booking.booking_addon_selections WHERE property_id = $1::uuid",
+          "DELETE FROM pms.booking_notes_private WHERE property_id = $1::uuid",
           "DELETE FROM booking.guest_bookings WHERE property_id = $1::uuid",
           "DELETE FROM booking.checkout_contexts WHERE property_id = $1::uuid",
           "DELETE FROM booking.quote_sessions WHERE property_id = $1::uuid",

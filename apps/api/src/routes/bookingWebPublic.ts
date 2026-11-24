@@ -4016,14 +4016,41 @@ export async function loadTargetBooking(
      ) booked_names ON TRUE
      WHERE b.property_id = $1::uuid
        AND b.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'
-       AND (b.id::text = $2 OR b.public_reference = $2)
        AND (
-         ($3::text IS NOT NULL AND lower(booker.email) = lower($3))
-         OR (
-           $4::text IS NOT NULL
+         (
+           (b.id::text = $2 OR b.public_reference = $2)
            AND (
-             b.booking_metadata ->> 'confirmationTokenHash' = $4
-             OR b.booking_metadata -> 'confirmationTokens' ? $4
+             ($3::text IS NOT NULL AND lower(booker.email) = lower($3))
+             OR (
+               $4::text IS NOT NULL
+               AND (
+                 b.booking_metadata ->> 'confirmationTokenHash' = $4
+                 OR b.booking_metadata -> 'confirmationTokens' ? $4
+               )
+             )
+           )
+         )
+         -- VAY-2599: on 2026-11-15 (VAY-2108) Tiga's and Aether's upcoming direct bookings were
+         -- entered again by hand in the PMS. Each got a new PMS- number and the hotel's own email;
+         -- the guest's old number and old email are only in this private note, written then. The
+         -- guest may open the booking with both, the same proof the old system asked for. A note
+         -- written later (by staff or the assistant) never counts.
+         OR (
+           $2 ~* '^VAY-[A-Z0-9]{6}$'
+           AND $3::text ~ '^[^@[:space:]]+@[^@[:space:]]+$'
+           AND EXISTS (
+             SELECT 1
+             FROM pms.booking_notes_private note
+             WHERE note.property_id = b.property_id
+               AND note.guest_booking_id = b.id
+               AND note.source = 'pms'
+               AND note.created_at >= '2026-11-14T00:00:00Z'
+               AND note.created_at < '2026-11-17T00:00:00Z'
+               AND starts_with(
+                 lower(note.body),
+                 lower('Moved from the old system on 2026-11-15 (VAY-2108). Old reference: '
+                   || $2 || '. Guest email: ' || $3::text || '. ')
+               )
            )
          )
        )
