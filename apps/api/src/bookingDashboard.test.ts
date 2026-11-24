@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
 import {
   createTargetBookingDashboardMetricsReadPort,
+  toGuestInsights,
   type BookingDashboardMetricsReadPool,
 } from "./platform/bookingDashboard.js";
 import type {
@@ -180,6 +181,65 @@ describe("Booking dashboard routes", () => {
       },
       bookingsHidden: false,
     });
+  });
+
+  it("serves guest insights for the period, ages only to people who may read reservations (VAY-2594)", async () => {
+    const readPort = {
+      ...fakeReadPort(),
+      getGuestInsights: async (input: { propertyId: string }) => ({
+        ...emptyGuests(input.propertyId),
+        guestCount: 1,
+        ages: [{ bucket: "35-44" as const, guestCount: 1 }],
+        ageKnownCount: 1,
+      }),
+    };
+    const url = "/api/booking/properties/prop_alpenrose/dashboard/guests";
+    const headers = { authorization: "Bearer valid-token" };
+    const query = { periodStart: "2026-06-01", periodEnd: "2026-06-30" };
+    app = buildDashboardApp({ readPort });
+    const hidden = await injectJson(app, { method: "GET", url, headers, query });
+    expect(hidden.statusCode).toBe(200);
+    expect(hidden.body).toMatchObject({
+      guestInsights: { guestCount: 1, ages: [], ageKnownCount: 0 },
+      agesHidden: true,
+    });
+    const refused = await injectJson(app, { method: "GET", url, headers, query: {} });
+    expect(refused.statusCode).toBe(400);
+    await app.close();
+
+    app = buildDashboardApp({
+      readPort,
+      permissions: ["booking.analytics.read", "booking.reservation.read"],
+    });
+    const shown = await injectJson(app, { method: "GET", url, headers, query });
+    expect(shown.body).toMatchObject({
+      guestInsights: { ages: [{ bucket: "35-44", guestCount: 1 }], ageKnownCount: 1 },
+      agesHidden: false,
+    });
+  });
+
+  it("buckets guests by nationality, adult age at arrival and nights (VAY-2594)", () => {
+    const insights = toGuestInsights("p", [
+      { country: "de", nights: 2, leadDays: 10, age: 36 },
+      { country: "DE", nights: 4, leadDays: 30, age: 17 },
+      { country: "AU", nights: 9, leadDays: 0, age: null },
+      { country: null, nights: 0, leadDays: -3, age: 60 },
+    ]);
+    expect(insights.nationalities).toEqual([
+      { countryCode: "DE", guestCount: 2 },
+      { countryCode: "AU", guestCount: 1 },
+      { countryCode: null, guestCount: 1 },
+    ]);
+    // 17 counts as not given: a mistyped date.
+    expect(insights.ageKnownCount).toBe(2);
+    expect(insights.ages.filter((row) => row.guestCount > 0)).toEqual([
+      { bucket: "35-44", guestCount: 1 },
+      { bucket: "55+", guestCount: 1 },
+    ]);
+    // A same-day stay counts one night; a booking made after arrival has no lead time.
+    expect(insights.stays.map((row) => row.guestCount)).toEqual([2, 1, 0, 1]);
+    expect(insights.averageNights).toBe(4);
+    expect(insights.averageLeadDays).toBe(10);
   });
 
   it("serves bookings by channel for the period and the one before (VAY-2594)", async () => {
@@ -414,6 +474,7 @@ describe("Booking dashboard routes", () => {
           directSources: [],
         }),
         getDashboardDetails: async (input) => emptyDetails(input.propertyId),
+        getGuestInsights: async (input) => emptyGuests(input.propertyId),
         getRevenueDays: async () => null,
         getDayBookings: async () => null,
         async getPageViewTimeline(input) {
@@ -561,6 +622,7 @@ describe("Booking dashboard routes", () => {
         getSparklines: denied,
         getConversionFunnel: denied,
         getChannelMix: denied,
+        getGuestInsights: denied,
         getDashboardDetails: denied,
         getRevenueDays: denied,
         getDayBookings: denied,
@@ -617,10 +679,16 @@ describe("Booking dashboard routes", () => {
         headers,
         query: dashboardStatsQuery,
       }),
+      injectJson(app, {
+        method: "GET",
+        url: "/api/booking/properties/prop_alpenrose/dashboard/guests",
+        headers,
+        query: { periodStart: "2026-06-01", periodEnd: "2026-06-30" },
+      }),
     ]);
 
     expect(responses.map(({ statusCode }) => statusCode)).toEqual([
-      403, 403, 403, 403, 403, 403, 403, 403,
+      403, 403, 403, 403, 403, 403, 403, 403, 403,
     ]);
   });
 
@@ -703,6 +771,7 @@ describe("Booking dashboard routes", () => {
           directSources: [],
         }),
         getDashboardDetails: async (input) => emptyDetails(input.propertyId),
+        getGuestInsights: async (input) => emptyGuests(input.propertyId),
         getRevenueDays: async () => null,
         getDayBookings: async () => null,
         async getPageViewTimeline(input) {
@@ -747,6 +816,7 @@ describe("Booking dashboard routes", () => {
           directSources: [],
         }),
         getDashboardDetails: async (input) => emptyDetails(input.propertyId),
+        getGuestInsights: async (input) => emptyGuests(input.propertyId),
         getRevenueDays: async () => null,
         getDayBookings: async () => null,
         async getPageViewTimeline(input) {
@@ -1278,6 +1348,7 @@ function fakeReadPort(): BookingDashboardMetricsReadPort {
       directSources: [],
     }),
     getDashboardDetails: async (input) => emptyDetails(input.propertyId),
+    getGuestInsights: async (input) => emptyGuests(input.propertyId),
     getRevenueDays: async () => null,
     getDayBookings: async () => null,
     async getPageViewTimeline(input) {
@@ -1395,5 +1466,18 @@ function emptyDetails(propertyId: string) {
     canceledBookingCount: 0,
     topBookings: [],
     recentBookings: [],
+  };
+}
+
+function emptyGuests(propertyId: string) {
+  return {
+    propertyId,
+    guestCount: 0,
+    nationalities: [],
+    ages: [],
+    ageKnownCount: 0,
+    stays: [],
+    averageNights: null,
+    averageLeadDays: null,
   };
 }

@@ -730,6 +730,22 @@ export async function mockBookingAdminShellRoutes(
       },
     }),
   );
+  // Guest insights (VAY-2594): no guests yet.
+  await page.route("**/api/booking/properties/*/dashboard/guests**", (route) =>
+    route.fulfill({
+      json: {
+        guestInsights: {
+          guestCount: 0,
+          nationalities: [],
+          ages: [],
+          ageKnownCount: 0,
+          stays: [],
+          averageNights: null,
+          averageLeadDays: null,
+        },
+      },
+    }),
+  );
   // Bookings by channel (VAY-2594): nothing yet.
   await page.route("**/api/booking/properties/*/dashboard/channels**", (route) =>
     route.fulfill({ json: { channelMix: { channels: [], directSources: [] } } }),

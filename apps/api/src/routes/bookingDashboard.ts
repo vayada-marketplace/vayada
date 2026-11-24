@@ -5,6 +5,7 @@ import type {
   BookingDashboardMetricsReadModel,
   BookingDashboardMetricsReadPort,
   BookingDayBookingsReadModel,
+  BookingGuestInsightsReadModel,
   BookingPageViewTimelineReadModel,
   BookingRevenueDaysReadModel,
   BookingSourceMixReadModel,
@@ -73,6 +74,14 @@ export type BookingDashboardPageViewsResponse = {
   contractVersion: BookingDashboardContractVersion;
   propertyId: string;
   pageViews: BookingPageViewTimelineReadModel;
+};
+
+export type BookingDashboardGuestsResponse = {
+  contractVersion: BookingDashboardContractVersion;
+  propertyId: string;
+  guestInsights: BookingGuestInsightsReadModel;
+  /** Ages come from check-in data: only for people who may read reservations. */
+  agesHidden: boolean;
 };
 
 export type BookingDashboardChannelsResponse = {
@@ -281,6 +290,38 @@ export async function registerBookingDashboardRoutes(
         } satisfies BookingDashboardPageViewsResponse;
       } catch (error) {
         request.log.error({ err: error }, "Booking dashboard page-view read failed");
+        return sendBookingDashboardError(reply, 500, readModelUnavailableError());
+      }
+    },
+  );
+
+  // VAY-2594: guest insights, the guests of the period's bookings in aggregate.
+  app.get<{ Params: BookingDashboardPropertyParams; Querystring: DashboardPeriodQuery }>(
+    "/properties/:propertyId/dashboard/guests",
+    async (request, reply) => {
+      const { propertyId } = request.params;
+      if (!(await enforceBookingDashboardReadPolicy(request, reply, propertyId, options)))
+        return reply;
+      const period = parseSourceMixPeriodQuery(request.query);
+      if (!period.ok) return sendBookingDashboardError(reply, 400, period.error);
+      try {
+        const guestInsights = await metricsReadPort.getGuestInsights({
+          propertyId,
+          ...period.value,
+        });
+        // A short period can narrow an age group to one guest, and the dates of birth come from
+        // check-in: staff with analytics only get no ages, as they get no booking rows.
+        const access = await bookingRowAccess(request, propertyId, options);
+        return {
+          contractVersion: BOOKING_DASHBOARD_CONTRACT_VERSION,
+          propertyId,
+          guestInsights: access.canSeeBookings
+            ? guestInsights
+            : { ...guestInsights, ages: [], ageKnownCount: 0 },
+          agesHidden: !access.canSeeBookings,
+        } satisfies BookingDashboardGuestsResponse;
+      } catch (error) {
+        request.log.error({ err: error }, "Booking dashboard guest insights read failed");
         return sendBookingDashboardError(reply, 500, readModelUnavailableError());
       }
     },

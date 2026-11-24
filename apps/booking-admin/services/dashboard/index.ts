@@ -28,6 +28,19 @@ export interface DashboardStats {
   live_since: string | null;
 }
 
+/** Guest insights (VAY-2594): the guests of the range's bookings, one per booking. */
+export interface GuestInsights {
+  guests: number;
+  nationalities: { country: string | null; guests: number }[];
+  ages: { bucket: string; guests: number }[];
+  age_known: number;
+  /** Ages show only to people who may read reservations. */
+  ages_hidden: boolean;
+  stays: { bucket: string; guests: number }[];
+  average_nights: number | null;
+  average_lead_days: number | null;
+}
+
 /** One channel or direct source: bookings made in the range and in the period before. */
 export interface ChannelCount {
   key: string;
@@ -181,6 +194,19 @@ type TargetDashboardStatsResponse = {
     nextArrivalDate: string | null;
     liveSinceDate: string | null;
   };
+};
+
+type TargetGuestsResponse = {
+  guestInsights: {
+    guestCount: number;
+    nationalities: { countryCode: string | null; guestCount: number }[];
+    ages: { bucket: string; guestCount: number }[];
+    ageKnownCount: number;
+    stays: { bucket: string; guestCount: number }[];
+    averageNights: number | null;
+    averageLeadDays: number | null;
+  };
+  agesHidden?: boolean;
 };
 
 type TargetChannelMixResponse = {
@@ -382,6 +408,28 @@ export const dashboardService = {
       page_views_previous: response.metrics.previous.pageViewCount,
       next_arrival: response.metrics.nextArrivalDate,
       live_since: response.metrics.liveSinceDate,
+    };
+  },
+
+  getGuestInsights: async (range: TimeRange, timeZone: string): Promise<GuestInsights> => {
+    const basePath = requireDashboardBasePath();
+    const query = rangeQuery(range, timeZone);
+    const response = await apiClient.get<TargetGuestsResponse>(
+      `${basePath}/guests?periodStart=${query.currentStart}&periodEnd=${query.currentEnd}`,
+    );
+    const insights = response.guestInsights;
+    return {
+      guests: insights.guestCount,
+      nationalities: insights.nationalities.map((row) => ({
+        country: row.countryCode,
+        guests: row.guestCount,
+      })),
+      ages: insights.ages.map((row) => ({ bucket: row.bucket, guests: row.guestCount })),
+      age_known: insights.ageKnownCount,
+      ages_hidden: response.agesHidden === true,
+      stays: insights.stays.map((row) => ({ bucket: row.bucket, guests: row.guestCount })),
+      average_nights: insights.averageNights,
+      average_lead_days: insights.averageLeadDays,
     };
   },
 

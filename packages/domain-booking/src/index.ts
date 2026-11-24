@@ -176,6 +176,25 @@ export type BookingChannelMixReadModel = {
   directSources: readonly BookingChannelCount[];
 };
 
+/**
+ * Guest insights (VAY-2594): the guests of every channel's bookings made in the period, one per
+ * booking (its primary guest), by nationality, age at arrival and length of stay.
+ */
+export type BookingGuestInsightsReadModel = {
+  propertyId: string;
+  guestCount: number;
+  /** Largest first; a null country when the guest gave none. */
+  nationalities: readonly { countryCode: string | null; guestCount: number }[];
+  /** Ages at arrival, from a date of birth on the guest's profile or check-in. */
+  ages: readonly { bucket: "18-24" | "25-34" | "35-44" | "45-54" | "55+"; guestCount: number }[];
+  /** Guests whose age is known: the base of the ages. */
+  ageKnownCount: number;
+  stays: readonly { bucket: "1-2" | "3-4" | "5-7" | "8+"; guestCount: number }[];
+  averageNights: number | null;
+  /** Days from booking to arrival. */
+  averageLeadDays: number | null;
+};
+
 /** One day of the revenue chart: direct bookings made that day (VAY-2594). */
 export type BookingRevenueDay = {
   /** Property-local calendar date the bookings were made. */
@@ -287,6 +306,11 @@ export type BookingDashboardMetricsReadPort =
       windowEnd: BookingDate;
     }): Promise<BookingPageViewTimelineReadModel | null>;
     getChannelMix(input: BookingDashboardMetricsPeriodInput): Promise<BookingChannelMixReadModel>;
+    getGuestInsights(input: {
+      propertyId: string;
+      periodStart: BookingDate;
+      periodEnd: BookingDate;
+    }): Promise<BookingGuestInsightsReadModel>;
     getDashboardDetails(
       input: BookingDashboardMetricsPeriodInput,
     ): Promise<BookingDashboardDetailsReadModel>;
