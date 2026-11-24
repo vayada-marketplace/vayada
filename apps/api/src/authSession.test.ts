@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BadRequestException } from "@workos-inc/node";
 
 import { buildApp } from "./app.js";
+import { AuthProviderUnavailableError } from "./platform/workosAuthState.js";
 import type {
   AuthKitClient,
   AuthKitSession,
@@ -882,6 +883,134 @@ describe("AuthKit session routes", () => {
     expect(refresh.statusCode).toBe(200);
     expect(refresh.json().csrfToken).toBe(csrfToken);
   });
+
+  // VAY-2604: WorkOS slow or down gets a clear "try again" (503), never a hang or a sign-out.
+  it("answers 'try again' with 503 when WorkOS times out during a password sign-in", async () => {
+    app = buildAuthSessionApp({
+      authKitClient: createAuthKitClient({
+        async authenticateWithPassword() {
+          // The shape @workos-inc/node 10.x throws when its own timeout fires.
+          throw Object.assign(new Error("Request timeout after 4000ms"), {
+            status: 408,
+            error: "Request timeout",
+          });
+        },
+      }),
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/password/login",
+      headers: { origin: "https://admin.localhost" },
+      payload: {
+        email: "f.maliqi@vayada.com",
+        password: "correct-password",
+        surface: "platform-admin",
+      },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.headers["retry-after"]).toBe("5");
+    expect(response.json()).toEqual({
+      state: "auth_unavailable",
+      message: "Signing in is taking longer than usual. Please try again in a moment.",
+    });
+    expect(response.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("answers 503, not 403, when WorkOS is unavailable while the sign-in resolves the account", async () => {
+    app = buildAuthSessionApp({
+      identityRepository: createIdentityRepository({
+        userByProviderUserId: async () => {
+          throw new AuthProviderUnavailableError("timeout");
+        },
+      }),
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/password/login",
+      headers: { origin: "https://admin.localhost" },
+      payload: {
+        email: "f.maliqi@vayada.com",
+        password: "correct-password",
+        surface: "platform-admin",
+      },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({
+      code: "auth_unavailable",
+      state: "auth_unavailable",
+      message: "Signing in is taking longer than usual. Please try again in a moment.",
+    });
+  });
+
+  it.each([
+    ["session refresh", "POST", "/auth/session/refresh"],
+    ["session read", "GET", "/auth/session?surface=platform-admin"],
+  ] as const)(
+    "keeps the session and answers 503 when WorkOS is unavailable during a %s",
+    async (_name, method, url) => {
+      const unavailable = async (): Promise<never> => {
+        throw new AuthProviderUnavailableError("timeout");
+      };
+      let workosDown = false;
+      const healthy = createAuthKitClient();
+      app = buildAuthSessionApp({
+        cookieSecure: true,
+        surfacePolicies: {
+          "platform-admin": {
+            requiredOrganizationKind: "platform",
+            publicOrigin: "https://admin.localhost",
+            firstPartySession: true,
+          },
+        },
+        authKitClient: createAuthKitClient({
+          authenticateSession: (input) =>
+            workosDown ? unavailable() : healthy.authenticateSession(input),
+          refreshSession: (input) => (workosDown ? unavailable() : healthy.refreshSession(input)),
+        }),
+      });
+      const login = await app.inject({
+        method: "POST",
+        url: "/auth/password/login",
+        headers: { origin: "https://admin.localhost" },
+        payload: {
+          email: "f.maliqi@vayada.com",
+          password: "correct-password",
+          surface: "platform-admin",
+        },
+      });
+      expect(login.statusCode).toBe(200);
+      workosDown = true;
+
+      const response = await app.inject({
+        method,
+        url,
+        headers: {
+          cookie: [
+            cookieHeader(login, "vayada_fp_workos_session"),
+            cookieHeader(login, "vayada_fp_auth_csrf"),
+          ].join("; "),
+          origin: "https://admin.localhost",
+          "x-vayada-csrf": login.json().csrfToken as string,
+        },
+        ...(method === "POST" ? { payload: { surface: "platform-admin" } } : {}),
+      });
+
+      expect(response.statusCode).toBe(503);
+      expect(response.headers["retry-after"]).toBe("5");
+      expect(response.headers["access-control-allow-origin"]).toBe("https://admin.localhost");
+      expect(response.json()).toMatchObject({
+        code: "auth_unavailable",
+        state: "auth_unavailable",
+        message: "Signing in is taking longer than usual. Please try again in a moment.",
+      });
+      // No cookie is cleared: once WorkOS answers again the person is still signed in.
+      expect(response.headers["set-cookie"]).toBeUndefined();
+    },
+  );
 
   it("preserves cross-origin cookie attributes in compatibility mode", async () => {
     app = buildAuthSessionApp({ cookieSecure: true, cookieDomain: ".localhost" });

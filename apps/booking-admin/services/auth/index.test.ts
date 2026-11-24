@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AuthStateError,
   authService,
+  isSignInTemporarilyUnavailable,
   clearPendingEmailVerification,
   getPendingEmailVerification,
   storePendingEmailVerification,
@@ -402,6 +403,97 @@ function mockBrowserStorage(): void {
   vi.stubGlobal("window", { localStorage: storage, sessionStorage: storage });
   clearPendingEmailVerification();
 }
+
+// VAY-2604: WorkOS slow or down (or the sign-in gateway timing out) is "try again", not "signed out".
+describe("sign-in temporarily unavailable", () => {
+  afterEach(() => {
+    clearAuthData();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    [
+      "WorkOS is slow or down",
+      503,
+      {
+        state: "auth_unavailable",
+        message: "Signing in is taking longer than usual. Please try again in a moment.",
+      },
+    ],
+    ["the sign-in gateway timed out", 504, { error: "auth_gateway_upstream_timeout" }],
+  ])("keeps what this browser remembers when %s", async (_name, status, body) => {
+    const storage = memoryStorage();
+    vi.stubGlobal("localStorage", storage);
+    vi.stubGlobal("window", { localStorage: storage });
+    localStorage.setItem("userEmail", "owner@example.test");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(body, status)),
+    );
+
+    await expect(authService.ensureSession()).resolves.toBe(false);
+    expect(localStorage.getItem("userEmail")).toBe("owner@example.test");
+  });
+
+  it("still forgets the sign-in when the session is really over", async () => {
+    const storage = memoryStorage();
+    vi.stubGlobal("localStorage", storage);
+    vi.stubGlobal("window", { localStorage: storage });
+    localStorage.setItem("userEmail", "owner@example.test");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ error: "invalid_session" }, 401)),
+    );
+
+    await expect(authService.ensureSession()).resolves.toBe(false);
+    expect(localStorage.getItem("userEmail")).toBeNull();
+  });
+
+  it("tells temporary failures apart from answers about the account", async () => {
+    const answer = async (body: unknown, status: number) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => jsonResponse(body, status)),
+      );
+      return authService
+        .login({ email: "owner@example.test", password: "secret-password" })
+        .catch((error: unknown) => error);
+    };
+
+    expect(
+      isSignInTemporarilyUnavailable(
+        await answer({ state: "auth_unavailable", message: "Try again." }, 503),
+      ),
+    ).toBe(true);
+    expect(isSignInTemporarilyUnavailable(await answer({ error: "upstream" }, 502))).toBe(true);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Failed to fetch");
+      }),
+    );
+    expect(
+      isSignInTemporarilyUnavailable(
+        await authService
+          .login({ email: "owner@example.test", password: "secret-password" })
+          .catch((error: unknown) => error),
+      ),
+    ).toBe(true);
+    // A bug in our own code is not "try again".
+    expect(isSignInTemporarilyUnavailable(new TypeError("x is not a function"))).toBe(false);
+    expect(
+      isSignInTemporarilyUnavailable(
+        await answer({ state: "invalid_credentials", message: "Wrong password." }, 401),
+      ),
+    ).toBe(false);
+    expect(
+      isSignInTemporarilyUnavailable(
+        await answer({ state: "auth_failed", message: "Authentication failed." }, 502),
+      ),
+    ).toBe(false);
+  });
+});
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>();

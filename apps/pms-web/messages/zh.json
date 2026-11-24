@@ -84,6 +84,7 @@
   "auth.login.accountSuspended": "您的账户已被暂停，请联系支持团队。",
   "auth.login.validationError": "验证错误。",
   "auth.login.unexpectedError": "发生意外错误，请重试。",
+  "auth.login.signInUnavailable": "登录耗时比平时更长，请稍后重试。",
   "auth.login.sessionExpiredBanner": "您的会话已过期，请重新登录。",
   "auth.login.signOut": "退出登录",
   "auth.login.hotelWorkspaceRequired": "此账户尚未关联任何酒店。如果您是受酒店邀请的，请打开邀请邮件或请对方重新发送。",

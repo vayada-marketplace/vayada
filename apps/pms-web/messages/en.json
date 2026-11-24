@@ -85,6 +85,7 @@
   "auth.login.accountSuspended": "Your account has been suspended. Please contact support.",
   "auth.login.validationError": "Validation error.",
   "auth.login.unexpectedError": "An unexpected error occurred. Please try again.",
+  "auth.login.signInUnavailable": "Signing in is taking longer than usual. Please try again in a moment.",
   "auth.login.sessionExpiredBanner": "Your session has expired. Please sign in again.",
   "auth.login.signOut": "Sign Out",
   "auth.login.formTitle": "Sign in to vayada",

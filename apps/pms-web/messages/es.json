@@ -85,6 +85,7 @@
   "auth.login.accountSuspended": "Su cuenta ha sido suspendida. Por favor, contacte a soporte.",
   "auth.login.validationError": "Error de validacion.",
   "auth.login.unexpectedError": "Ocurrio un error inesperado. Por favor, intente nuevamente.",
+  "auth.login.signInUnavailable": "Iniciar sesión está tardando más de lo habitual. Por favor, inténtelo de nuevo en un momento.",
   "auth.login.sessionExpiredBanner": "Su sesion ha expirado. Por favor, inicie sesion nuevamente.",
   "auth.login.signOut": "Cerrar sesion",
   "auth.login.hotelWorkspaceRequired": "Esta cuenta todavía no está vinculada a ningún hotel. Si un hotel le invitó, abra el correo de invitación o pídale que se lo vuelva a enviar.",

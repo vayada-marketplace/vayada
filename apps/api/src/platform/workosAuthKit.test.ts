@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createWorkOSAuthKitClient } from "./workosAuthKit.js";
+import {
+  createWorkOSAuthKitClient,
+  WORKOS_SIGN_IN_MAX_RETRIES,
+  WORKOS_SIGN_IN_TIMEOUT_MS,
+} from "./workosAuthKit.js";
+import { AuthProviderUnavailableError } from "./workosAuthState.js";
 
 const workosMocks = vi.hoisted(() => ({
   WorkOS: vi.fn(),
@@ -395,6 +400,118 @@ describe("createWorkOSAuthKitClient", () => {
     });
 
     await expect(client.refreshSession({ sealedSession: "stale-session" })).resolves.toBeNull();
+  });
+
+  // VAY-2604: a slow WorkOS must answer "try again" quickly and never end a session.
+  it("gives sign-in and session calls a short timeout and keeps account writes on the SDK defaults", async () => {
+    const clients: Array<{ options: unknown; userManagement: Record<string, unknown> }> = [];
+    workosMocks.WorkOS.mockImplementation(function WorkOS(_apiKey: string, options: unknown) {
+      const client = {
+        options,
+        userManagement: {
+          authenticateWithPassword: vi.fn(async () => {
+            throw new Error("stop here");
+          }),
+          createPasswordReset: vi.fn(async () => undefined),
+        },
+      };
+      clients.push(client);
+      return client;
+    });
+
+    const client = createWorkOSAuthKitClient({
+      apiKey: "sk_test",
+      clientId: "client_test",
+      cookiePassword: "a".repeat(32),
+    });
+
+    expect(clients.map(({ options }) => options)).toEqual([
+      { clientId: "client_test" },
+      {
+        clientId: "client_test",
+        timeout: WORKOS_SIGN_IN_TIMEOUT_MS,
+        maxRetries: WORKOS_SIGN_IN_MAX_RETRIES,
+      },
+    ]);
+    const [writes, signIn] = clients;
+    await expect(
+      client.authenticateWithPassword({ email: "a@example.test", password: "secret" }),
+    ).rejects.toThrow("stop here");
+    expect(signIn!.userManagement.authenticateWithPassword).toHaveBeenCalledOnce();
+    expect(writes!.userManagement.authenticateWithPassword).not.toHaveBeenCalled();
+    await client.createPasswordReset({ email: "a@example.test" });
+    expect(writes!.userManagement.createPasswordReset).toHaveBeenCalledOnce();
+    expect(signIn!.userManagement.createPasswordReset).not.toHaveBeenCalled();
+    // One call with its one retry (SDK backoff at most ~1.7 s) still answers inside the PMS gateway's 10 s.
+    expect(WORKOS_SIGN_IN_TIMEOUT_MS * (WORKOS_SIGN_IN_MAX_RETRIES + 1) + 1_700).toBeLessThan(
+      10_000,
+    );
+  });
+
+  it.each(["timeout", "server_error", "network_error", "rate_limit_exceeded"] as const)(
+    "keeps the session when WorkOS refresh fails with retryable %s",
+    async (reason) => {
+      workosMocks.WorkOS.mockImplementation(function WorkOS() {
+        return { userManagement: { loadSealedSession: workosMocks.loadSealedSession } };
+      });
+      workosMocks.loadSealedSession.mockReturnValue({ refresh: workosMocks.refresh });
+      workosMocks.refresh.mockResolvedValue({ authenticated: false, reason, retryable: true });
+
+      const client = createWorkOSAuthKitClient({
+        apiKey: "sk_test",
+        clientId: "client_test",
+        cookiePassword: "a".repeat(32),
+      });
+
+      await expect(client.refreshSession({ sealedSession: "live-session" })).rejects.toMatchObject({
+        name: "AuthProviderUnavailableError",
+        reason,
+      });
+    },
+  );
+
+  it("still ends a session WorkOS says is over", async () => {
+    workosMocks.WorkOS.mockImplementation(function WorkOS() {
+      return { userManagement: { loadSealedSession: workosMocks.loadSealedSession } };
+    });
+    workosMocks.loadSealedSession.mockReturnValue({ refresh: workosMocks.refresh });
+    workosMocks.refresh.mockResolvedValue({
+      authenticated: false,
+      reason: "invalid_grant",
+      retryable: false,
+    });
+
+    const client = createWorkOSAuthKitClient({
+      apiKey: "sk_test",
+      clientId: "client_test",
+      cookiePassword: "a".repeat(32),
+    });
+
+    await expect(client.refreshSession({ sealedSession: "ended-session" })).resolves.toBeNull();
+  });
+
+  it("reports WorkOS as unavailable when its signing keys time out", async () => {
+    workosMocks.WorkOS.mockImplementation(function WorkOS() {
+      return { userManagement: { loadSealedSession: workosMocks.loadSealedSession } };
+    });
+    workosMocks.loadSealedSession.mockReturnValue({
+      authenticate: workosMocks.authenticate,
+      refresh: workosMocks.refresh,
+    });
+    workosMocks.authenticate.mockRejectedValue(
+      Object.assign(new Error("request timed out"), { code: "ERR_JWKS_TIMEOUT" }),
+    );
+
+    const client = createWorkOSAuthKitClient({
+      apiKey: "sk_test",
+      clientId: "client_test",
+      cookiePassword: "a".repeat(32),
+    });
+
+    await expect(
+      client.authenticateSession({ sealedSession: "live-session" }),
+    ).rejects.toBeInstanceOf(AuthProviderUnavailableError);
+    expect(workosMocks.refresh).not.toHaveBeenCalled();
   });
 
   it("updates both structured and display names", async () => {

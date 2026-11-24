@@ -2,6 +2,18 @@ import { WorkOS } from "@workos-inc/node";
 
 import type { AuthKitClient, AuthKitInvitation, AuthKitSession } from "../routes/authSession.js";
 import type { MembershipStatus } from "@vayada/backend-auth";
+import { AuthProviderUnavailableError, isWorkOSUnavailableError } from "./workosAuthState.js";
+
+/**
+ * VAY-2604: sign-in and session calls get their own WorkOS client with a short timeout. The SDK
+ * default (60 s, 3 retries) kept sign-ins hanging for minutes in the WorkOS incident of 2026-11-24,
+ * while the PMS gateway gives up after 10 s. Normal calls take 0.2-0.6 s. One retry stays, so a
+ * reply that arrives late is fetched again under the same idempotency key instead of being lost;
+ * with the SDK's backoff (at most ~1.7 s) one call answers within ~7.7 s.
+ * Account writes (create user, reset password, organizations) keep the SDK defaults.
+ */
+export const WORKOS_SIGN_IN_TIMEOUT_MS = 3_000;
+export const WORKOS_SIGN_IN_MAX_RETRIES = 1;
 
 type WorkOSAuthKitClientConfig = {
   apiKey: string;
@@ -13,16 +25,21 @@ export function createWorkOSAuthKitClient(config: WorkOSAuthKitClientConfig): Au
   const workos = new WorkOS(config.apiKey, {
     clientId: config.clientId,
   });
+  const signIn = new WorkOS(config.apiKey, {
+    clientId: config.clientId,
+    timeout: WORKOS_SIGN_IN_TIMEOUT_MS,
+    maxRetries: WORKOS_SIGN_IN_MAX_RETRIES,
+  });
 
   async function refreshSealedSession(input: {
     sealedSession: string;
     organizationId?: string;
   }): Promise<AuthKitSession | null> {
     let refreshed: Awaited<
-      ReturnType<ReturnType<typeof workos.userManagement.loadSealedSession>["refresh"]>
+      ReturnType<ReturnType<typeof signIn.userManagement.loadSealedSession>["refresh"]>
     >;
     try {
-      const loaded = workos.userManagement.loadSealedSession({
+      const loaded = signIn.userManagement.loadSealedSession({
         sessionData: input.sealedSession,
         cookiePassword: config.cookiePassword,
       });
@@ -32,8 +49,13 @@ export function createWorkOSAuthKitClient(config: WorkOSAuthKitClientConfig): Au
       });
     } catch (error) {
       if (isInvalidSealedSessionError(error) || isExpiredSealedSessionError(error)) return null;
+      if (isWorkOSUnavailableError(error))
+        throw new AuthProviderUnavailableError("refresh_failed", { cause: error });
       throw error;
     }
+    // WorkOS timing out, rate-limiting or failing is not an ended session: keep the cookie (VAY-2604).
+    if (!refreshed.authenticated && refreshed.retryable)
+      throw new AuthProviderUnavailableError(refreshed.reason, { cause: refreshed.error });
     if (!refreshed.authenticated || !refreshed.sealedSession || !refreshed.session) return null;
     const accessToken =
       "accessToken" in refreshed && typeof refreshed.accessToken === "string"
@@ -58,7 +80,7 @@ export function createWorkOSAuthKitClient(config: WorkOSAuthKitClientConfig): Au
     },
 
     async authenticateWithCode(input) {
-      const response = await workos.userManagement.authenticateWithCode({
+      const response = await signIn.userManagement.authenticateWithCode({
         code: input.code,
         clientId: config.clientId,
         ipAddress: input.ipAddress,
@@ -72,7 +94,7 @@ export function createWorkOSAuthKitClient(config: WorkOSAuthKitClientConfig): Au
     },
 
     async authenticateWithPassword(input) {
-      const response = await workos.userManagement.authenticateWithPassword({
+      const response = await signIn.userManagement.authenticateWithPassword({
         email: input.email,
         password: input.password,
         ...(input.invitationToken ? { invitationToken: input.invitationToken } : {}),
@@ -88,7 +110,7 @@ export function createWorkOSAuthKitClient(config: WorkOSAuthKitClientConfig): Au
     },
 
     async authenticateWithOrganizationSelection(input) {
-      const response = await workos.userManagement.authenticateWithOrganizationSelection({
+      const response = await signIn.userManagement.authenticateWithOrganizationSelection({
         organizationId: input.organizationId,
         pendingAuthenticationToken: input.pendingAuthenticationToken,
         clientId: config.clientId,
@@ -103,7 +125,7 @@ export function createWorkOSAuthKitClient(config: WorkOSAuthKitClientConfig): Au
     },
 
     async authenticateWithEmailVerification(input) {
-      const response = await workos.userManagement.authenticateWithEmailVerification({
+      const response = await signIn.userManagement.authenticateWithEmailVerification({
         pendingAuthenticationToken: input.pendingAuthenticationToken,
         code: input.code,
         clientId: config.clientId,
@@ -200,18 +222,21 @@ export function createWorkOSAuthKitClient(config: WorkOSAuthKitClientConfig): Au
     },
 
     async authenticateSession(input) {
-      const loaded = workos.userManagement.loadSealedSession({
+      const loaded = signIn.userManagement.loadSealedSession({
         sessionData: input.sealedSession,
         cookiePassword: config.cookiePassword,
       });
       let response: Awaited<
-        ReturnType<ReturnType<typeof workos.userManagement.loadSealedSession>["authenticate"]>
+        ReturnType<ReturnType<typeof signIn.userManagement.loadSealedSession>["authenticate"]>
       >;
       try {
         response = await loaded.authenticate();
       } catch (error) {
         if (isExpiredSealedSessionError(error)) return refreshSealedSession(input);
         if (isInvalidSealedSessionError(error)) return null;
+        // The signing keys couldn't be fetched in time (VAY-2604).
+        if (isWorkOSUnavailableError(error))
+          throw new AuthProviderUnavailableError("session_keys_unavailable", { cause: error });
         throw error;
       }
       if (!response.authenticated) {
@@ -226,7 +251,7 @@ export function createWorkOSAuthKitClient(config: WorkOSAuthKitClientConfig): Au
     async isSessionActive(input) {
       let after: string | undefined;
       do {
-        const sessions = await workos.userManagement.listSessions(input.workosUserId, {
+        const sessions = await signIn.userManagement.listSessions(input.workosUserId, {
           limit: 100,
           ...(after ? { after } : {}),
         });

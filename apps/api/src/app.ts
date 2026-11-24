@@ -107,6 +107,11 @@ import type { AiProvider } from "./ai/provider/aiProvider.js";
 import { routeKey } from "./ai/provider/catalog.js";
 import { registerAssistantRoutes } from "./routes/assistant.js";
 import { registerAuthSessionRoutes } from "./routes/authSession.js";
+import {
+  AuthProviderUnavailableError,
+  authUnavailableResponse,
+} from "./platform/workosAuthState.js";
+import { workosErrorDiagnostics } from "./platform/workosErrorDiagnostics.js";
 import type { BookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
 import type { BookingCustomDomainVerifier } from "./domains/bookingCustomDomainVerification.js";
 import { registerBookingRoutes, type BookingRoutesOptions } from "./routes/booking.js";
@@ -558,6 +563,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
 
 /** How long a "busy, try again" answer asks the client to wait. */
 const BUSY_RETRY_AFTER_SECONDS = 3;
+const AUTH_UNAVAILABLE_RETRY_AFTER_SECONDS = 5;
 
 /** The API's answers for database trouble; everything else goes to Fastify's default handler. */
 export function handleApiError(error: FastifyError, request: FastifyRequest, reply: FastifyReply) {
@@ -572,6 +578,23 @@ export function handleApiError(error: FastifyError, request: FastifyRequest, rep
       code: "busy_try_again",
       retryAfterSeconds: BUSY_RETRY_AFTER_SECONDS,
     });
+  }
+  // WorkOS timed out or is down while checking a session (VAY-2604): "try again", never "signed out".
+  if (error instanceof AuthProviderUnavailableError) {
+    request.log.warn(
+      { reason: error.reason, workos: workosErrorDiagnostics(error.cause) },
+      "WorkOS unavailable during a session check",
+    );
+    return reply
+      .status(503)
+      .header("cache-control", "private, no-store")
+      .header("retry-after", String(AUTH_UNAVAILABLE_RETRY_AFTER_SECONDS))
+      .send({
+        statusCode: 503,
+        error: "Service Unavailable",
+        code: "auth_unavailable",
+        ...authUnavailableResponse(),
+      });
   }
   if (!isPostgresUnavailableError(error)) return reply.send(error);
   request.log.warn({ err: error }, "PostgreSQL connection unavailable");

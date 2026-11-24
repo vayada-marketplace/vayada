@@ -21,6 +21,7 @@
   "auth.login.errorSuspended": "Your account has been suspended. Please contact support.",
   "auth.login.errorValidation": "Validation error.",
   "auth.login.errorUnexpected": "An unexpected error occurred. Please try again.",
+  "auth.login.signInUnavailable": "Signing in is taking longer than usual. Please try again in a moment.",
   "auth.login.errorSessionExpired": "Your session has expired. Please sign in again.",
   "auth.login.hotelWorkspaceRequired": "This account isn't connected to a hotel yet. If a hotel invited you, open the invitation email or ask them to send it again.",
   "auth.login.setUpHotel": "Set up your hotel",
