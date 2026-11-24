@@ -3939,7 +3939,10 @@ const runBookingEmailDelivery = () => {
   activeBookingEmailDelivery = runBookingEmailDeliveryJobs(
     targetDatabaseUrl,
     bookingEmailDelivery,
-    { bankTransfers: bankTransferBookings },
+    {
+      bankTransfers: bankTransferBookings,
+      pmsWebOrigin: config.authSession?.authSurfaceOrigins["pms-web"],
+    },
   )
     .then((result) => {
       if (result.failed > 0) {
