@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import type { PropertyAccessRepository } from "@vayada/backend-authorization";
+import { hasPermission, type PropertyAccessRepository } from "@vayada/backend-authorization";
 import type { BookingHostActions, HostActionRequest } from "../domains/bookingHostActions.js";
 import { enforcePmsPropertyRoutePolicy } from "./pmsPropertyPolicy.js";
 import { writePmsOperationsCorsHeaders } from "./pmsOperations.js";
@@ -18,6 +18,9 @@ export async function registerBookingHostActionRoutes(
   },
 ) {
   const actors = new WeakMap<FastifyRequest, string>();
+  // VAY-2099: staff who can accept a request (pms.reservation.update) but not cancel bookings may
+  // still reject a "hotel confirms" request; the action checks the booking (requestsOnly).
+  const requestsOnly = new WeakMap<FastifyRequest, boolean>();
   const path = "/properties/:propertyId/reservations/:guestBookingId/host-actions";
   const params = {
     type: "object",
@@ -42,6 +45,7 @@ export async function registerBookingHostActionRoutes(
       options.propertyAccessRepository,
     );
     actors.set(request, context.actor.internalUserId);
+    requestsOnly.set(request, !hasPermission(context, "pms.reservation.cancel"));
   });
   for (const suffix of ["preview", "apply", "card-refund-retry"])
     app.options(`${path}/${suffix}`, async (_, reply) => reply.code(204).send());
@@ -67,7 +71,8 @@ export async function registerBookingHostActionRoutes(
     },
     async (request, reply) => {
       const body = request.body;
-      if (body.action !== "edit_dates")
+      const rejectRequestOnly = body.action === "reject" && requestsOnly.get(request) === true;
+      if (body.action !== "edit_dates" && !rejectRequestOnly)
         await enforcePmsPropertyRoutePolicy(
           request,
           {
@@ -85,18 +90,19 @@ export async function registerBookingHostActionRoutes(
         return reply.code(400).send({ message: "Stay dates are required only for date editing." });
       if (body.cancellationKind && body.action !== "cancel")
         return reply.code(400).send({ message: "A cancellation kind applies only to cancelling." });
-      return options.actions.preview(
-        {
-          propertyId: request.params.propertyId,
-          bookingId: request.params.guestBookingId,
-          actorUserId: actors.get(request)!,
-        },
-        {
-          ...body,
-          reason: body.reason.trim(),
-          guestMessage: body.guestMessage?.replace(/\r\n?/g, "\n").trim() || undefined,
-        },
-      );
+      const scope = {
+        propertyId: request.params.propertyId,
+        bookingId: request.params.guestBookingId,
+        actorUserId: actors.get(request)!,
+      };
+      const action = {
+        ...body,
+        reason: body.reason.trim(),
+        guestMessage: body.guestMessage?.replace(/\r\n?/g, "\n").trim() || undefined,
+      };
+      return rejectRequestOnly
+        ? options.actions.preview(scope, action, { requestsOnly: true })
+        : options.actions.preview(scope, action);
     },
   );
   app.post<{ Params: Params; Body: { previewId: string; idempotencyKey: string } }>(
@@ -127,7 +133,8 @@ export async function registerBookingHostActionRoutes(
           code: "stale_preview",
           message: "Preview unavailable. Preview this action again.",
         });
-      if (action !== "edit_dates")
+      const rejectRequestOnly = action === "reject" && requestsOnly.get(request) === true;
+      if (action !== "edit_dates" && !rejectRequestOnly)
         await enforcePmsPropertyRoutePolicy(
           request,
           {
@@ -137,11 +144,12 @@ export async function registerBookingHostActionRoutes(
           },
           options.propertyAccessRepository,
         );
-      return options.actions.apply(
-        scope,
-        request.body.previewId.toLowerCase(),
-        request.body.idempotencyKey,
-      );
+      const previewId = request.body.previewId.toLowerCase();
+      return rejectRequestOnly
+        ? options.actions.apply(scope, previewId, request.body.idempotencyKey, {
+            requestsOnly: true,
+          })
+        : options.actions.apply(scope, previewId, request.body.idempotencyKey);
     },
   );
   // VAY-2205: a cancelled stay's card refund failed at Stripe; staff ask again, same amount.

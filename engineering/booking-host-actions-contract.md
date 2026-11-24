@@ -71,7 +71,11 @@ provider reconciliation on retry; database rollback cannot undo a provider call.
 
 Routes require `pms.reservation.update`, active entitlement, and property linkage.
 Reject/cancel previews and applies additionally require `pms.reservation.cancel`;
-apply checks the persisted action before executing the command. The actor and property come from authenticated
+apply checks the persisted action before executing the command. One exception
+(VAY-2099): staff without `pms.reservation.cancel`, who can still accept a request,
+may reject a "hotel confirms" request. The action checks the booking at preview and
+again at apply. Declining a bank transfer or PayPal booking that waits for its
+payment still needs `pms.reservation.cancel`, and gets the same 403 as before. The actor and property come from authenticated
 context and route scope. A guessed preview ID cannot cross either boundary.
 
 ## Review stack and validation
