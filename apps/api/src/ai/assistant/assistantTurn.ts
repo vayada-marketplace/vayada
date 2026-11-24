@@ -67,6 +67,33 @@ export type AssistantTool = {
   ): Promise<ToolOutcome>;
 };
 
+/** A tool's answer once the turn is stopped (Stop, the time limit or the shutdown cut). */
+export const STOPPED: ToolOutcome = {
+  ok: false,
+  error: { code: "stopped", message: "Stopped while this was running; its answer was not used." },
+};
+
+/**
+ * The tool's work, or STOPPED as soon as the turn is stopped: the turn doesn't wait for it. Work
+ * already under way may still finish. Not started at all when the turn is already stopped.
+ */
+export function unlessStopped(
+  signal: AbortSignal,
+  work: () => Promise<ToolOutcome>,
+): Promise<ToolOutcome> {
+  if (signal.aborted) return Promise.resolve(STOPPED);
+  return new Promise((resolve, reject) => {
+    const stop = () => resolve(STOPPED);
+    signal.addEventListener("abort", stop, { once: true });
+    // Through then(), so a work function that throws before returning a promise still rejects.
+    Promise.resolve()
+      .then(work)
+      .then(resolve, reject)
+      // The call's signal lives until the turn's time limit: don't keep a listener per call on it.
+      .finally(() => signal.removeEventListener("abort", stop));
+  });
+}
+
 export type TurnEndEvent = { type: "end"; status: TurnEnd["status"]; reason: string | null };
 export type RefusedEvent = {
   type: "refused";

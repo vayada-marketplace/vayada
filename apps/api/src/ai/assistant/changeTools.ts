@@ -8,7 +8,7 @@ import { z } from "zod";
 
 import type { ChangeAction } from "../actions/defineChangeAction.js";
 import { CHANGE_ACTIONS, surfaceOf } from "../actions/registry.js";
-import type { AssistantTool } from "./assistantTurn.js";
+import { STOPPED, unlessStopped, type AssistantTool, type ToolOutcome } from "./assistantTurn.js";
 
 /** What the in-app assistant sends the proposer (VAY-2524's ProposeChangeRequest). */
 export type InAppChangeRequest = {
@@ -79,18 +79,30 @@ export function changeTools(options: {
       // Not sent to the model (only the description and input are); the proposer's result.
       outputSchema: { type: "object" },
     },
-    run: async (input, call) => {
-      const result = await options.propose(await options.contextFor(call.toolCallId), {
-        action: action.key,
-        arguments: input,
-        client: "in_app_assistant",
-        requestScope: call.turnId,
-        externalCallId: call.toolCallId,
-        model: options.model,
-      });
-      if (!result.ok) return { ok: false, error: result.error };
-      // Unchanged, so the panel finds its pendingActionId; a new change waits for the Yes.
-      return { ok: true, data: result, waitsForAnswer: result.status === "pending" };
-    },
+    // Stop ends the call as it does a read's. A change the proposer records after Stop gets no
+    // card in this turn; asking for the same change again in this chat brings back that card
+    // until it expires.
+    run: (input, call) => unlessStopped(call.signal, () => ask(action, input, call)),
   }));
+
+  async function ask(
+    action: ChangeAction,
+    input: unknown,
+    call: { toolCallId: string; signal: AbortSignal; turnId: string },
+  ): Promise<ToolOutcome> {
+    const context = await options.contextFor(call.toolCallId);
+    // Stopped while the context was read: nothing is asked.
+    if (call.signal.aborted) return STOPPED;
+    const result = await options.propose(context, {
+      action: action.key,
+      arguments: input,
+      client: "in_app_assistant",
+      requestScope: call.turnId,
+      externalCallId: call.toolCallId,
+      model: options.model,
+    });
+    if (!result.ok) return { ok: false, error: result.error };
+    // Unchanged, so the panel finds its pendingActionId; a new change waits for the Yes.
+    return { ok: true, data: result, waitsForAnswer: result.status === "pending" };
+  }
 }

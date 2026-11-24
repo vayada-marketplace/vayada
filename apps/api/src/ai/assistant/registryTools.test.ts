@@ -159,6 +159,48 @@ describe("who may use the assistant for a property (VAY-2518, the production che
     expect(outcome).toMatchObject({ ok: false, error: { code: "stopped" } });
     await slowApp.close();
   });
+  it("doesn't call the route when the turn is stopped while the context is read", async () => {
+    const stop = new AbortController();
+    const context = await worldContext(WORLD.OWNER, WORLD.ORG_A, ROOMS_ONLY);
+    const log = memoryAiActionLog();
+    const [tool] = registryTools(app, {
+      context,
+      contextFor: async () => {
+        stop.abort();
+        return context;
+      },
+      log,
+      model: MODEL,
+    });
+    const outcome = await tool!.run(rooms.input(WORLD.P1), {
+      toolCallId: "toolu_05",
+      signal: stop.signal,
+      turnId: "turn-1",
+    });
+    expect(outcome).toMatchObject({ ok: false, error: { code: "stopped" } });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(log.rows).toEqual([]);
+  });
+
+  it("doesn't wait for a slow context read when the turn is stopped", async () => {
+    const stop = new AbortController();
+    const context = await worldContext(WORLD.OWNER, WORLD.ORG_A, ROOMS_ONLY);
+    const [tool] = registryTools(app, {
+      context,
+      contextFor: () => {
+        stop.abort();
+        return new Promise<RequestContext>(() => {});
+      },
+      log: memoryAiActionLog(),
+      model: MODEL,
+    });
+    const outcome = await tool!.run(rooms.input(WORLD.P1), {
+      toolCallId: "toolu_04",
+      signal: stop.signal,
+      turnId: "turn-1",
+    });
+    expect(outcome).toMatchObject({ ok: false, error: { code: "stopped" } });
+  });
 });
 
 describe("change tools in the production check (VAY-2518 with VAY-2524)", () => {

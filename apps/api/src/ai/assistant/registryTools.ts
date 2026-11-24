@@ -15,7 +15,7 @@ import type { AiActionLog } from "../actionLog/actionLog.js";
 import { listActionsFor, toolDefinition } from "../actions/registry.js";
 import { runRouteAction } from "../actions/runRouteAction.js";
 import type { AssistantToolsFor } from "./assistantRuntime.js";
-import type { AssistantTool, ToolOutcome } from "./assistantTurn.js";
+import { STOPPED, unlessStopped, type AssistantTool } from "./assistantTurn.js";
 import type { ChangeAction } from "../actions/defineChangeAction.js";
 import { changeTools, type AssistantChangeProposer } from "./changeTools.js";
 
@@ -38,41 +38,21 @@ export function registryTools(
 ): AssistantTool[] {
   return listActionsFor(options.context).map((action) => ({
     definition: toolDefinition(action),
-    run: async (input, call) => {
-      const result = runRouteAction(app, await options.contextFor(call.toolCallId), action, input, {
-        log: options.log,
-        client: "in_app_assistant",
-        externalCallId: call.toolCallId,
-        model: options.model,
-      });
-      // Stop and the shutdown cut don't wait for a slow route (only reads run as tools today;
-      // the route still finishes and logs its row).
-      return Promise.race([result, abandoned(call.signal)]);
-    },
+    // Stop and the shutdown cut wait neither for the context read nor for a slow route (a route
+    // already started still finishes and logs its row).
+    run: (input, call) =>
+      unlessStopped(call.signal, async () => {
+        const context = await options.contextFor(call.toolCallId);
+        // Stopped while the context was read: the route isn't called.
+        if (call.signal.aborted) return STOPPED;
+        return runRouteAction(app, context, action, input, {
+          log: options.log,
+          client: "in_app_assistant",
+          externalCallId: call.toolCallId,
+          model: options.model,
+        });
+      }),
   }));
-}
-
-/** `providerIdentity.impersonated` (VAY-2524 follow-up, #4225); absent before it lands. */
-export function isImpersonated(session: RequestContext): boolean {
-  const identity = session.actor.providerIdentity as
-    | (typeof session.actor.providerIdentity & { impersonated?: true })
-    | undefined;
-  return identity?.impersonated === true;
-}
-
-function abandoned(signal: AbortSignal): Promise<ToolOutcome> {
-  return new Promise((resolve) => {
-    const answer = () =>
-      resolve({
-        ok: false,
-        error: {
-          code: "stopped",
-          message: "Stopped while this was running; its answer was not used.",
-        },
-      });
-    if (signal.aborted) answer();
-    else signal.addEventListener("abort", answer, { once: true });
-  });
 }
 
 /**
@@ -120,9 +100,9 @@ export function delegatedAssistantTools(
     if (!delegatedPropertyIds(context).includes(propertyId)) return undefined;
     const model = options.model();
     const reads = registryTools(app, { context, contextFor: delegate, log: options.log, model });
-    // Staff signed in as the person (WorkOS impersonation, flagged by VAY-2524's follow-up) only
-    // read: a change they asked for would wait in the person's chat as if the person had asked.
-    if (!options.propose || isImpersonated(session)) return reads;
+    // Staff signed in as the person (WorkOS impersonation) only read: a change they asked for
+    // would wait in the person's chat as if the person had asked.
+    if (!options.propose || session.actor.providerIdentity.impersonated) return reads;
     return [
       ...reads,
       ...changeTools({

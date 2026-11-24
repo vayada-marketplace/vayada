@@ -409,7 +409,10 @@ import { createAiChangesRuntime } from "./ai/changes/runtime.js";
 import { createPgAiBudgetAdmin } from "./ai/usage/budgetAdmin.js";
 import { createPgAiBudget } from "./ai/usage/budgetGate.js";
 import { createPgAiActionLog } from "./ai/actionLog/actionLog.js";
-import { createPgConversationStore } from "./ai/assistant/conversationStore.js";
+import {
+  createPgConversationStore,
+  type ConversationStore,
+} from "./ai/assistant/conversationStore.js";
 import { createAiProvider, enabledAiProvidersFromEnv } from "./ai/provider/aiProvider.js";
 import { createAiSpendAlert } from "./ai/usage/spendAlert.js";
 import {
@@ -497,8 +500,10 @@ const aiChanges =
           ),
           aiEnabled: async (organizationId) =>
             (await budget.monthStatus(organizationId)).limitMicroUsd > 0,
-          // The assistant's chats, built below and read when a change is answered.
-          chats: () => assistant?.store,
+          // The assistant's chats, built below and read when a change is answered. The return type
+          // is written out: the assistant gets this runtime's proposer, so TypeScript can't infer
+          // the assistant's type and this one's from each other.
+          chats: (): Pick<ConversationStore, "exists"> | undefined => assistant?.store,
           allowedOrigins: config.authSession?.authAllowedOrigins ?? [],
           backgroundWorkersEnabled: config.backgroundWorkersEnabled,
         });
@@ -533,6 +538,9 @@ const assistant =
           );
           return rows[0]?.timezone;
         },
+        // With AI_CHANGES_ENABLED too, the assistant may ask for changes (VAY-2524): the person's
+        // Yes on vayada's card makes them. No change action is offered in the app yet.
+        ...(aiChanges ? { propose: aiChanges.proposeChange } : {}),
       }
     : undefined;
 

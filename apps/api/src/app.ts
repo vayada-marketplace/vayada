@@ -100,6 +100,7 @@ import { registerAiActivityRoutes } from "./routes/aiActivity.js";
 import type { AiActivityStore } from "./ai/actionLog/aiActivity.js";
 import type { AiActionLog } from "./ai/actionLog/actionLog.js";
 import { createAssistantRuntime } from "./ai/assistant/assistantRuntime.js";
+import type { AssistantChangeProposer } from "./ai/assistant/changeTools.js";
 import type { ConversationStore } from "./ai/assistant/conversationStore.js";
 import { delegatedAssistantTools } from "./ai/assistant/registryTools.js";
 import type { AiProvider } from "./ai/provider/aiProvider.js";
@@ -478,6 +479,11 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
     actionLog: AiActionLog;
     /** The property's IANA time zone, for the assistant's "today". */
     timeZoneOf?: (propertyId: string) => Promise<string | null | undefined>;
+    /**
+     * VAY-2524's proposer, only with AI_CHANGES_ENABLED: the assistant may ask for changes (the
+     * person's Yes on vayada's card makes them). Without it the assistant only reads.
+     */
+    propose?: AssistantChangeProposer;
   };
   hotelAccountInviteCodeRepository?: HotelAccountInviteCodeRepository;
   hotelAccountInvites?: Omit<HotelAccountInviteRoutesOptions, "trackCommandRepository">;
@@ -698,7 +704,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   if (options.assistant && !(options.auth && authorizationResolver)) {
     app.log.warn("The in-app assistant needs auth: its routes are not mounted");
   } else if (options.assistant && options.auth && authorizationResolver) {
-    const { store, provider, actionLog, timeZoneOf } = options.assistant;
+    const { store, provider, actionLog, timeZoneOf, propose } = options.assistant;
     const runtime = createAssistantRuntime({
       store,
       provider,
@@ -711,6 +717,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
           const route = provider.routeFor("assistant_chat");
           return route ? routeKey(route) : null;
         },
+        ...(propose ? { propose } : {}),
       }),
       log: app.log,
     });
