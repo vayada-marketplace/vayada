@@ -1757,6 +1757,7 @@ jobs:
             src/platform/authSessionHandoffs.integration.test.ts \
             src/platform/hotelMediaResolver.integration.test.ts \
             src/platform/platformMediaRepository.integration.test.ts \
+            src/platformAdminArchivedAccountHotels.integration.test.ts \
             src/preparedHotelImportRepository.integration.test.ts \
             src/propertySetupLifecycleStatusRepository.integration.test.ts
 

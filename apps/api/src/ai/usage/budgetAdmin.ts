@@ -27,7 +27,7 @@ export type AiBudgetOverview = {
   defaultMonthlyLimitMicroUsd: number;
   /** vayada's whole AI spend this month, every account (also vayada's own model tests). */
   totalUsedMicroUsd: number;
-  /** Every hotel account, the biggest spender first. */
+  /** Every hotel account except archived ones (VAY-2602), the biggest spender first. */
   accounts: AiAccountBudget[];
 };
 
@@ -86,7 +86,10 @@ export function createPgAiBudgetAdmin(config: {
        FROM identity.organizations account
        LEFT JOIN platform.ai_budgets budget ON budget.organization_id = account.id
        LEFT JOIN used ON used.organization_id = account.id
-       WHERE account.kind = 'hotel_group' AND ($2::uuid IS NULL OR account.id = $2::uuid)
+       WHERE account.kind = 'hotel_group'
+         -- VAY-2602: the list leaves out archived accounts (closed sign-ups and smoke runs);
+         -- one account asked for by id is still read whatever its status.
+         AND (($2::uuid IS NULL AND account.status <> 'archived') OR account.id = $2::uuid)
        ORDER BY COALESCE(used.used, 0) DESC, account.name, account.id`,
       [month, organizationId],
     );

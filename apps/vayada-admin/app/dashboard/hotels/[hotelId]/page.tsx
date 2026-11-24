@@ -28,8 +28,9 @@ export default function HotelConfigPage() {
       .then((hotels) => {
         const found = hotels.find((h) => h.id === hotelId);
         if (found) setHotel(found);
-        // The list holds every property, test data included: a hotel missing from it doesn't
-        // exist, as with a mistyped or pasted link (VAY-2295).
+        // The list holds every property, test data included, except hotels whose accounts are all
+        // closed (archived) and that no longer sell (VAY-2602). A hotel missing from it doesn't exist
+        // or belongs to a closed account, as with a mistyped or pasted link (VAY-2295).
         else setMissing(true);
       })
       .catch(() => {})
@@ -114,7 +115,8 @@ export default function HotelConfigPage() {
         <div className="px-4 sm:px-6 lg:px-8 py-6">
           <div className="max-w-3xl rounded-lg border border-gray-200 bg-white p-5 text-sm text-gray-600">
             <p>
-              There&apos;s no hotel at this link. Check the link, or open the hotel from the list.
+              There&apos;s no hotel at this link. Hotels of closed accounts are hidden. Check the
+              link, or open the hotel from the list.
             </p>
             <button
               type="button"
