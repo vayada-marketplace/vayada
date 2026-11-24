@@ -62,6 +62,9 @@ export function memoryConversationStore(options: { start?: StartTurnResult } = {
     async list() {
       throw new Error("not used by the loop");
     },
+    async exists() {
+      throw new Error("not used by the loop");
+    },
   };
   return {
     store,

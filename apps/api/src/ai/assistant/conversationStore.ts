@@ -120,6 +120,14 @@ export type ConversationStore = {
     contractSha256: string,
     page: { limit: number; before?: { lastActivityAt: string; id: string } },
   ): Promise<ConversationSummary[]>;
+  /**
+   * Whether the conversation still exists and is this person's: the same user, account and
+   * property, in either app (VAY-2524's operations don't store the app, and a conversation id is
+   * unique anyway). False once it was deleted (30 days after its last activity), for anyone
+   * else's and for an id that is no conversation id. A read-only conversation still exists. For
+   * VAY-2524: an answer to an AI change must belong to a chat the person can still open.
+   */
+  exists(owner: Omit<ConversationOwner, "app">, conversationId: string): Promise<boolean>;
 };
 
 /** A message or a sequence of messages that would make the history unusable for replay. */
@@ -525,6 +533,17 @@ export function createPgConversationStore(config: { pool: pg.Pool }): Conversati
         createdAt: row.created_at,
         lastActivityAt: row.last_activity_at,
       }));
+    },
+
+    async exists(owner, conversationId) {
+      if (!UUID.test(conversationId)) return false;
+      const { rowCount } = await pool.query(
+        `SELECT 1 FROM platform.ai_conversations
+          WHERE id = $1::uuid AND organization_id = $2::uuid AND property_id = $3::uuid
+            AND user_id = $4::uuid`,
+        [conversationId, owner.organizationId, owner.propertyId, owner.userId],
+      );
+      return rowCount === 1;
     },
   };
 }
