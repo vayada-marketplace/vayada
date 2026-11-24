@@ -588,7 +588,7 @@ function ratePredicates(
 }
 
 /** Today on the stay's calendar; in UTC without a valid time zone, as its page does. */
-function stayToday(timezone: string | null | undefined, at: number): string {
+export function stayToday(timezone: string | null | undefined, at: number): string {
   const instant = new Date(at);
   return (
     (timezone ? propertyLocalDate(instant, timezone) : null) ??
@@ -598,7 +598,7 @@ function stayToday(timezone: string | null | undefined, at: number): string {
 
 /** Which rates may be booked together, one group per way of paying: rates paid the same way
  * (full, or the same deposit), and one way to pay they all accept. */
-function paymentGroups(offered: StayOffers): ((offer: Offer) => boolean)[] {
+export function paymentGroups(offered: StayOffers): ((offer: Offer) => boolean)[] {
   const terms = new Map(
     offered.rooms.flatMap((room) =>
       room.offers.map((offer) => [
@@ -630,12 +630,13 @@ function paymentGroups(offered: StayOffers): ((offer: Offer) => boolean)[] {
 }
 
 /** The stay's offers cut to the rates that found a window free, or to their room types. */
-function narrow(
-  offered: StayOffers,
+export function narrow<T extends StayOffers>(
+  offered: T,
   offers: FreeWindow["offers"],
   wholeTypes: boolean,
-): StayOffers {
+): T {
   return {
+    ...offered,
     rooms: offered.rooms.flatMap((room) => {
       const kept = room.offers.filter((offer) =>
         offers.some(
@@ -646,7 +647,7 @@ function narrow(
       );
       return kept.length ? [{ ...room, offers: kept }] : [];
     }),
-  };
+  } as T;
 }
 
 const lowest = (prices: (Priced | null)[]) =>
