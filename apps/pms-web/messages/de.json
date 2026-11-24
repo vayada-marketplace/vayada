@@ -3320,8 +3320,6 @@
   "channels.connection": "Channex-Verbindung",
   "channels.providerProperty": "Anbieter-Unterkunft {id}",
   "channels.connectBeforeProvisioning": "Verbinden Sie diese Unterkunft, bevor Sie Kanäle bereitstellen.",
-  "channels.disableConnection": "Verbindung deaktivieren",
-  "channels.enableConnection": "Verbindung aktivieren",
   "channels.openSettings": "Kanaleinstellungen öffnen",
   "channels.mappings": "Zuordnungen",
   "channels.mappingsDescription": "Anbieter-IDs, die mit dem PMS-Inventar verknüpft sind.",

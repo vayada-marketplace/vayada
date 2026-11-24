@@ -31,8 +31,6 @@ describe("target PMS Channex client", () => {
   });
 
   it.each([
-    ["enable", channexService.enable],
-    ["disable", channexService.disable],
     ["provision", channexService.provision],
     ["sync_ari", channexService.syncAri],
     ["sync_bookings", channexService.syncBookings],

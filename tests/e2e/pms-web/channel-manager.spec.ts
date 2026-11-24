@@ -8,25 +8,6 @@ import {
 import { watchPageHealth } from "../support/pageHealth";
 
 test.beforeEach(async ({ page }) => {
-  const token = "a".repeat(64);
-  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2`, (route) =>
-    route.fulfill({ json: {
-      currency: "EUR", revision: 1, stale: false,
-      ownerReferences: { finance: `finance.pricing.v2:${token}` },
-      sources: { room: `pms.pricing.rooms.v2:${token}`, terms: `booking.pricing.terms.v2:${token}`, finance: `finance.pricing.source.v2:${token}` },
-      rooms: [{
-        version: "pricing.v2", propertyId: PMS_WEB_PROPERTY_ID, roomTypeId: PMS_WEB_PROPERTY_ID,
-        revision: 1, currency: "EUR", capacity: { total: 2, adults: 2, children: 0 },
-        children: { adultFromAge: 12, bands: [{ fromAge: 0, throughAge: 11, nightlyMinor: "0", countsTowardCapacity: true }] },
-        offers: [{
-          id: "flex", termsRevision: "61000000-0000-4000-8000-000000000002",
-          meal: { kind: "room_only", charge: { kind: "room", amountMinor: "0" } },
-          price: { kind: "independent", calendar: { base: { mode: "flat", amountMinor: "10000" }, months: [], seasons: [], weekdays: [], dates: [] } },
-          restrictions: { kind: "own", rules: { minArrivalNights: 1, maxStayNights: null, closedToArrival: false, closedToDeparture: false, stopSell: false }, seasons: [], dates: [] },
-        }],
-      }],
-    } }),
-  );
   await page.route("**/api/identity/staff/self-access", (route) =>
     route.fulfill({
       json: {
@@ -52,7 +33,6 @@ test("shows guarded target state and disables observe-only controls", async ({
   await expect(page.getByText("disconnected", { exact: true })).toBeVisible();
   await expect(page.getByText(/observe-only mode/i)).toBeVisible();
   await expect(page.getByText("No provider mappings yet.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Enable connection" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Provision" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Open channel settings" })).toBeDisabled();
   await assertHealthy();
@@ -82,6 +62,10 @@ test("does not allow stale markup edits while disconnected", async ({ page }, te
 
   await expect(page.getByRole("spinbutton")).toBeDisabled();
   await expect(page.getByRole("button", { name: "Save markups" })).toBeDisabled();
+  // VAY-2606: even with every capability live, a hotel can't create a Channex property here.
+  await expect(page.getByRole("button", { name: "Enable connection" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Channel configuration preview" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Request Channex setup" })).toHaveCount(0);
   await assertHealthy();
 });
 
@@ -150,6 +134,8 @@ test("runs a durable sync and shows connected channel management", async ({ page
   await expect(page.getByText("Alpine Suite")).toBeVisible();
   await expect(page.getByText("Booking.com", { exact: true })).toBeVisible();
   await expect(page.getByRole("spinbutton")).toHaveValue("12");
+  // VAY-2606: connect and disconnect wait for their own ticket.
+  await expect(page.getByRole("button", { name: "Disable connection" })).toHaveCount(0);
 
   await page.getByRole("spinbutton").fill("13");
   await page.getByRole("button", { name: "Save markups" }).click();
