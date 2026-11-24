@@ -2302,6 +2302,9 @@ export function createTargetBookingWebCheckoutAdapter(
           property.propertyId,
           reference,
           requireGuestEmail(request.guestEmail),
+          null,
+          // VAY-2599: only this rate-limited lookup takes an old number (see loadTargetBooking).
+          true,
         );
         const confirmation = await issueTargetBookingConfirmationToken(
           client,
@@ -3901,6 +3904,7 @@ export async function loadTargetBooking(
   referenceOrId: string,
   guestEmail: string | null,
   confirmationTokenHash: string | null = null,
+  acceptMovedReference = false,
 ): Promise<TargetBookingRow> {
   const result = await pool.query<TargetBookingRow>(
     `SELECT
@@ -4033,10 +4037,12 @@ export async function loadTargetBooking(
          -- VAY-2599: on 2026-11-15 (VAY-2108) Tiga's and Aether's upcoming direct bookings were
          -- entered again by hand in the PMS. Each got a new PMS- number and the hotel's own email;
          -- the guest's old number and old email are only in this private note, written then. The
-         -- guest may open the booking with both, the same proof the old system asked for. A note
-         -- written later (by staff or the assistant) never counts.
+         -- guest may open the booking with both in Find your booking (rate limited), the same
+         -- proof the old system asked for. A note written or edited later (by staff or the
+         -- assistant) never counts.
          OR (
-           $2 ~* '^VAY-[A-Z0-9]{6}$'
+           $5::boolean
+           AND $2 ~* '^VAY-[A-Z0-9]{6}$'
            AND $3::text ~ '^[^@[:space:]]+@[^@[:space:]]+$'
            AND EXISTS (
              SELECT 1
@@ -4046,6 +4052,7 @@ export async function loadTargetBooking(
                AND note.source = 'pms'
                AND note.created_at >= '2026-11-14T00:00:00Z'
                AND note.created_at < '2026-11-17T00:00:00Z'
+               AND note.edited_at IS NULL
                AND starts_with(
                  lower(note.body),
                  lower('Moved from the old system on 2026-11-15 (VAY-2108). Old reference: '
@@ -4055,7 +4062,7 @@ export async function loadTargetBooking(
          )
        )
      LIMIT 1`,
-    [propertyId, referenceOrId, guestEmail, confirmationTokenHash],
+    [propertyId, referenceOrId, guestEmail, confirmationTokenHash, acceptMovedReference],
   );
   const booking = result.rows[0];
   if (!booking) {

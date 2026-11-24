@@ -132,28 +132,71 @@ describe.skipIf(!TEST_DATABASE_URL)(
       const moved = (reference: string, email: string) =>
         `Moved from the old system on 2026-11-15 (VAY-2108). Old reference: ${reference}. ` +
         `Guest email: ${email}. Old payment: unpaid.`;
-      for (const [id, publicReference, note, noteCreatedAt] of [
-        [uuid(20), "PMS-0123456789AB", moved("VAY-7B6160", "Old.Guest@example.test"), "2026-11-15T10:00:00Z"],
-        [uuid(21), "PMS-NOEMAIL00000", moved("VAY-NOMAIL", "-"), "2026-11-15T10:05:00Z"],
-        // The same text, written after the move, opens nothing.
-        [uuid(22), "PMS-LATENOTE0000", moved("VAY-LATE01", "late@example.test"), "2026-11-20T10:00:00Z"],
-      ] as const) {
+      // [id, new number, note, note written at, note source, note edited at]
+      const bookings: [number, string, string, string, string, string | null][] = [
+        [
+          20,
+          "PMS-0123456789AB",
+          moved("VAY-7B6160", "Old.Guest@example.test"),
+          "2026-11-15T10:00Z",
+          "pms",
+          null,
+        ],
+        [21, "PMS-NOEMAIL00000", moved("VAY-NOMAIL", "-"), "2026-11-15T10:05Z", "pms", null],
+        // The same text opens nothing when written before or after the move, by the system,
+        // or edited since.
+        [
+          22,
+          "PMS-LATENOTE0000",
+          moved("VAY-LATE01", "late@example.test"),
+          "2026-11-20T10:00Z",
+          "pms",
+          null,
+        ],
+        [
+          23,
+          "PMS-EARLYNOTE000",
+          moved("VAY-EARLY1", "early@example.test"),
+          "2026-11-13T10:00Z",
+          "pms",
+          null,
+        ],
+        [
+          24,
+          "PMS-SYSTEMNOTE00",
+          moved("VAY-SYSTM1", "system@example.test"),
+          "2026-11-15T10:10Z",
+          "system",
+          null,
+        ],
+        [
+          25,
+          "PMS-EDITEDNOTE00",
+          moved("VAY-EDITD1", "edited@example.test"),
+          "2026-11-15T10:15Z",
+          "pms",
+          "2026-11-20T10:00Z",
+        ],
+      ];
+      for (const [suffix, publicReference, note, createdAt, source, editedAt] of bookings) {
         await admin.query(
           `INSERT INTO booking.guest_bookings
-           (id, property_id, public_reference, source_system, lifecycle_status, check_in, check_out,
+           (id, property_id, public_reference, lifecycle_status, check_in, check_out,
             currency, total_amount, balance_amount)
-         VALUES ($1::uuid, $2::uuid, $3, 'pms', 'confirmed', '2027-01-26', '2027-01-30', 'EUR', 400, 400)`,
-          [id, propertyId, publicReference],
+         VALUES ($1::uuid, $2::uuid, $3, 'confirmed', '2027-01-26', '2027-01-30', 'EUR', 400, 400)`,
+          [uuid(suffix), propertyId, publicReference],
         );
         await admin.query(
           `INSERT INTO booking.booking_guests (guest_booking_id, guest_role, first_name, last_name, email)
          VALUES ($1::uuid, 'booker', 'Ada', 'Lovelace', 'hotel@example.test')`,
-          [id],
+          [uuid(suffix)],
         );
         await admin.query(
-          `INSERT INTO pms.booking_notes_private (property_id, guest_booking_id, body, source, created_at)
-         VALUES ($1::uuid, $2::uuid, $3, 'pms', $4::timestamptz)`,
-          [propertyId, id, note, noteCreatedAt],
+          `INSERT INTO pms.booking_notes_private
+           (property_id, guest_booking_id, body, source, created_at, edited_at, edited_by_display_name)
+         VALUES ($1::uuid, $2::uuid, $3, $4, $5::timestamptz, $6::timestamptz,
+                 CASE WHEN $6::timestamptz IS NULL THEN NULL ELSE 'Staff' END)`,
+          [propertyId, uuid(suffix), note, source, createdAt, editedAt],
         );
       }
       const app = buildApp({
@@ -204,13 +247,28 @@ describe.skipIf(!TEST_DATABASE_URL)(
           ["PMS-0123456789AB", "old.guest@example.test"],
           ["VAY-NOMAIL", "-"],
           ["VAY-LATE01", "late@example.test"],
+          ["VAY-EARLY1", "early@example.test"],
+          ["VAY-SYSTM1", "system@example.test"],
+          ["VAY-EDITD1", "edited@example.test"],
         ] as const) {
-          expect({ reference, email, status: (await lookup(reference, email)).statusCode }).toEqual({
-            reference,
-            email,
-            status: 404,
-          });
+          expect({ reference, email, status: (await lookup(reference, email)).statusCode }).toEqual(
+            {
+              reference,
+              email,
+              status: 404,
+            },
+          );
         }
+
+        // Only the rate-limited lookup takes the old number: other guest routes don't.
+        const status = (reference: string, email: string) =>
+          app.inject({
+            method: "GET",
+            url: `/api/booking-web/hotels/vay-1188-hotel/bookings/status?${new URLSearchParams({ reference, email })}`,
+            remoteAddress: "198.51.100.38",
+          });
+        expect((await status("PMS-0123456789AB", "hotel@example.test")).statusCode).toBe(200);
+        expect((await status("VAY-7B6160", "old.guest@example.test")).statusCode).toBe(404);
       } finally {
         await app.close();
       }
