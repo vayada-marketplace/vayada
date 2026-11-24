@@ -1194,6 +1194,15 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      # 0555 (VAY-2602) in its own database: migrate to 0554, seed, trip each gate, then apply.
+      - name: Verify the unused hotel accounts archive
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace @vayada/backend-migration run test --
+          src/unusedHotelAccountsArchiveMigration.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Verify the Marketplace shared value cleanup
         if: matrix.shard == 'hotel-setup'
         run: >-
