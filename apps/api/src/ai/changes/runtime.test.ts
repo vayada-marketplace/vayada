@@ -1,5 +1,6 @@
-// How the API wires AI changes (VAY-2524): nothing without AI_CHANGES_ENABLED, no MCP change answered
-// before MCP connections can be checked, and the executor only once the app exists.
+// How the API wires AI changes (VAY-2524): nothing without AI_CHANGES_ENABLED, an in-app change
+// answered only while its chat is there, no MCP change answered before MCP connections can be
+// checked, and the executor only once the app exists.
 import { randomUUID } from "node:crypto";
 
 import Fastify from "fastify";
@@ -13,14 +14,58 @@ import {
   worldIdentity,
 } from "../actions/actionTestWorld.fixtures.js";
 import type { AiOperation } from "../executor/operationStore.js";
-import { createAiChangesRuntime, interimChannelActive } from "./runtime.js";
+import { createAiChangesRuntime } from "./runtime.js";
+
+type RuntimeConfig = Parameters<typeof createAiChangesRuntime>[0];
+
+const runtimeConfig = (overrides: Partial<RuntimeConfig> = {}): RuntimeConfig => ({
+  // Nothing listens here: a store call fails at once, which shows it was made.
+  connectionString: "postgresql://127.0.0.1:1/unused_test",
+  identity: worldIdentity,
+  authorizationResolver: worldAuthorization([]).resolver,
+  aiEnabled: async () => true,
+  chatExists: async () => true,
+  allowedOrigins: [],
+  backgroundWorkersEnabled: false,
+  ...overrides,
+});
 
 describe("AI changes in the API (VAY-2524)", () => {
-  it("counts an in-app conversation as still there and an MCP connection never, for now", async () => {
-    const inApp = { surface: "in_app", conversationId: WORLD.CONVERSATION } as AiOperation;
-    const mcp = { surface: "mcp", connectionId: WORLD.CONVERSATION } as AiOperation;
-    expect(await interimChannelActive(inApp)).toBe(true);
-    expect(await interimChannelActive(mcp)).toBe(false);
+  it("answers an in-app change only while its chat is there and the person's; MCP never yet", async () => {
+    const asked: unknown[] = [];
+    const gone = randomUUID();
+    const runtime = createAiChangesRuntime(
+      runtimeConfig({
+        chatExists: async (owner, conversationId) => {
+          asked.push([owner, conversationId]);
+          if (conversationId === WORLD.CONVERSATION) return true;
+          if (conversationId === gone) return false;
+          throw new Error("chat store query failed (57P01)");
+        },
+      }),
+    );
+    const owner = { organizationId: WORLD.ORG_A, propertyId: WORLD.P1, userId: WORLD.OWNER };
+    const inApp = (conversationId: string) =>
+      ({ ...owner, surface: "in_app", connectionId: null, conversationId }) as AiOperation;
+    expect(await runtime.routes.channelActive(inApp(WORLD.CONVERSATION))).toBe(true);
+    expect(await runtime.routes.channelActive(inApp(gone))).toBe(false);
+    // A check that can't answer isn't a "gone": the route answers "try again" and closes nothing.
+    await expect(runtime.routes.channelActive(inApp(randomUUID()))).rejects.toThrow(
+      "chat store query failed",
+    );
+    // The chat is checked against the change's own account, property and person.
+    expect(asked.slice(0, 2)).toEqual([
+      [owner, WORLD.CONVERSATION],
+      [owner, gone],
+    ]);
+    const mcp = {
+      ...owner,
+      surface: "mcp",
+      connectionId: WORLD.CONVERSATION,
+      conversationId: null,
+    } as AiOperation;
+    expect(await runtime.routes.channelActive(mcp)).toBe(false);
+    expect(asked).toHaveLength(3);
   });
 
   it("mounts no Yes/No routes without the setting", async () => {
@@ -38,16 +83,9 @@ describe("AI changes in the API (VAY-2524)", () => {
   });
 
   it("runs no change before the app exists, then hands every Yes to the one executor", async () => {
-    const runtime = createAiChangesRuntime({
-      // Nothing listens here: a store call fails at once, which shows it was made.
-      connectionString: "postgresql://127.0.0.1:1/unused_test",
-      identity: worldIdentity,
-      authorizationResolver: worldAuthorization([]).resolver,
-      aiEnabled: async () => true,
-      allowedOrigins: ["https://pms.example.test"],
-      backgroundWorkersEnabled: false,
-    });
-    expect(runtime.routes.channelActive).toBe(interimChannelActive);
+    const runtime = createAiChangesRuntime(
+      runtimeConfig({ allowedOrigins: ["https://pms.example.test"] }),
+    );
     expect(runtime.routes.allowedOrigins).toEqual(["https://pms.example.test"]);
     expect(() => runtime.routes.startAndRun(randomUUID())).toThrow("AI changes are not started");
 
@@ -61,15 +99,8 @@ describe("AI changes in the API (VAY-2524)", () => {
   });
 
   it("hands the assistant how to ask for a change, on its own action log; none is offered yet", async () => {
-    const runtime = createAiChangesRuntime({
-      // Nothing listens here: the ask's log row fails at once, which shows it was written here.
-      connectionString: "postgresql://127.0.0.1:1/unused_test",
-      identity: worldIdentity,
-      authorizationResolver: worldAuthorization([]).resolver,
-      aiEnabled: async () => true,
-      allowedOrigins: [],
-      backgroundWorkersEnabled: false,
-    });
+    // The ask's log row fails at once: nothing listens at the database address.
+    const runtime = createAiChangesRuntime(runtimeConfig());
     const lines: string[] = [];
     const app = Fastify({
       logger: { level: "error", stream: { write: (line: string) => void lines.push(line) } },
@@ -92,15 +123,8 @@ describe("AI changes in the API (VAY-2524)", () => {
   });
 
   it("needs a database to keep its changes in", () => {
-    expect(() =>
-      createAiChangesRuntime({
-        connectionString: " ",
-        identity: worldIdentity,
-        authorizationResolver: worldAuthorization([]).resolver,
-        aiEnabled: async () => true,
-        allowedOrigins: [],
-        backgroundWorkersEnabled: false,
-      }),
-    ).toThrow("AI changes connectionString must not be empty");
+    expect(() => createAiChangesRuntime(runtimeConfig({ connectionString: " " }))).toThrow(
+      "AI changes connectionString must not be empty",
+    );
   });
 });

@@ -546,7 +546,10 @@ ask me again"). A second click, another tab or a resumed turn joins the same run
   travel in the Authorization header, which another site can't send, so a CSRF cookie adds
   nothing. Same user and selected account; the person's permissions and property now; AI on for
   the account (budget above 0, else closed `ai_switched_off`); the conversation or connection still
-  there (else `revoked`; until VAY-2518 and VAY-2528 bring them, MCP never and in-app always); and
+  there (else `revoked`): an in-app change needs its chat, still the person's (VAY-2518's
+  `conversationStore.exists`; with the assistant off there is no chat), and no MCP change can be
+  answered until VAY-2528 checks connections. A check that can't answer is a 503, not a
+  `revoked`; and
   the card's digest unchanged (else closed `changed`). Then the one executor runs it; a double
   click or a second tab joins the run. A person's edit meanwhile is refused by the route's own
   revision check and shows as "changed".

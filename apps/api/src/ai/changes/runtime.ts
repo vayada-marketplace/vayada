@@ -10,19 +10,10 @@ import pg from "pg";
 
 import { createPgAiActionLog } from "../actionLog/actionLog.js";
 import { createAiChangeExecutor, type AiChangeExecutor } from "../executor/executor.js";
-import { createPgAiOperationStore, type AiOperation } from "../executor/operationStore.js";
+import { createPgAiOperationStore } from "../executor/operationStore.js";
 import { startAiChangeRecoveryWorker } from "../executor/recoveryWorker.js";
 import type { PendingActionRouteOptions } from "./pendingActions.js";
 import { createAiChangeProposer } from "./proposeChange.js";
-
-/**
- * Until conversations (VAY-2518) and MCP connections (VAY-2528) exist, an in-app conversation
- * always counts as still there and an MCP connection never does: no MCP change can be answered
- * before its connection can be checked. Their own checks replace this when they land.
- */
-export async function interimChannelActive(operation: AiOperation): Promise<boolean> {
-  return operation.surface === "in_app";
-}
 
 export function createAiChangesRuntime(config: {
   connectionString: string;
@@ -30,6 +21,14 @@ export function createAiChangesRuntime(config: {
   authorizationResolver: AuthorizationResolver;
   /** AI is on for the account: its monthly budget is above 0. */
   aiEnabled(organizationId: string): Promise<boolean>;
+  /**
+   * The in-app chat still exists and is the person's (VAY-2518's conversationStore.exists).
+   * Without the assistant there is no chat, so no in-app change can be answered.
+   */
+  chatExists(
+    owner: { organizationId: string; propertyId: string; userId: string },
+    conversationId: string,
+  ): Promise<boolean>;
   allowedOrigins: readonly string[];
   /** The recovery job runs only where background workers do. */
   backgroundWorkersEnabled: boolean;
@@ -69,7 +68,19 @@ export function createAiChangesRuntime(config: {
         return executor.startAndRun(operationId);
       },
       aiEnabled: config.aiEnabled,
-      channelActive: interimChannelActive,
+      // An in-app change needs its chat. No MCP change can be answered before its connection can
+      // be checked (VAY-2528).
+      channelActive: async (operation) =>
+        operation.surface === "in_app" && operation.conversationId
+          ? config.chatExists(
+              {
+                organizationId: operation.organizationId,
+                propertyId: operation.propertyId,
+                userId: operation.userId,
+              },
+              operation.conversationId,
+            )
+          : false,
       allowedOrigins: config.allowedOrigins,
     } satisfies Omit<PendingActionRouteOptions, "root">,
 

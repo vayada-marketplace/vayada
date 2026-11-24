@@ -134,7 +134,8 @@ async function setUp(
   options: {
     permissions?: PermissionKey[];
     aiOn?: boolean;
-    channelActive?: boolean;
+    /** "fails": the check itself can't answer (its database is down). */
+    channelActive?: boolean | "fails";
     reader?: CardReader;
     afterRun?: (row: AiOperation) => AiOperation;
     /** Instead of aiOn: may also change rows, as another tab would meanwhile. */
@@ -179,7 +180,10 @@ async function setUp(
       return ran;
     },
     aiEnabled: async () => (options.aiEnabled ? options.aiEnabled(rows) : (options.aiOn ?? true)),
-    channelActive: async () => options.channelActive ?? true,
+    channelActive: async () => {
+      if (options.channelActive === "fails") throw new Error("chat store query failed (57P01)");
+      return options.channelActive ?? true;
+    },
     allowedOrigins: [ORIGIN],
     reader: () => options.reader ?? readerOf(),
     now: () => NOW,
@@ -373,7 +377,7 @@ describe("answering AI changes (VAY-2524)", () => {
     expect(rows.get(op.id)).toMatchObject({ status: "closed", closeReason: "expired" });
   });
 
-  it("closes the question when AI is off for the account or the AI's connection is gone", async () => {
+  it("closes the question when AI is off for the account or the AI's chat or connection is gone", async () => {
     const off = operation();
     const first = await setUp([off], { aiOn: false });
     expect((await first.get(off.id)).json()).toMatchObject({ state: "stopped" });
@@ -388,6 +392,16 @@ describe("answering AI changes (VAY-2524)", () => {
     expect(yes.json()).toMatchObject({ code: "revoked", pendingAction: { state: "stopped" } });
     expect(second.rows.get(mcp.id)).toMatchObject({ closeReason: "revoked" });
     expect(second.starts).toEqual([]);
+    await app!.close();
+    app = undefined;
+
+    // The in-app chat that asked was deleted (30 days without activity): the same.
+    const inApp = operation();
+    const third = await setUp([inApp], { channelActive: false });
+    const late = await third.answer(inApp.id, { answer: "yes", cardSha256: "a".repeat(64) });
+    expect(late.json()).toMatchObject({ code: "revoked", pendingAction: { state: "stopped" } });
+    expect(third.rows.get(inApp.id)).toMatchObject({ closeReason: "revoked" });
+    expect(third.starts).toEqual([]);
   });
 
   it("refuses a Yes the person's rights no longer allow, leaving the question open", async () => {
@@ -490,6 +504,16 @@ describe("answering AI changes (VAY-2524)", () => {
     expect(look.statusCode).toBe(503);
     expect(look.json()).toMatchObject({ code: "unavailable" });
     expect(JSON.stringify(look.json())).not.toContain("57014");
+    await app!.close();
+    app = undefined;
+    // The chat check can't answer: try again, and the question stays open.
+    const unsure = await setUp([op], { channelActive: "fails" });
+    expect((await unsure.get(op.id)).json()).toMatchObject({ code: "unavailable" });
+    const again = await unsure.answer(op.id, { answer: "yes", cardSha256: "a".repeat(64) });
+    expect(again.statusCode).toBe(503);
+    expect(again.json()).toMatchObject({ code: "unavailable" });
+    expect(unsure.rows.get(op.id)!.status).toBe("pending");
+    expect(unsure.starts).toEqual([]);
   });
 
   it("tells each way a change ended", () => {

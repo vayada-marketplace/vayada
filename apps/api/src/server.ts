@@ -477,7 +477,7 @@ const aiBudgetAdmin = createPgAiBudgetAdmin({
 const apiAuth = buildAuthOptions(config.auth);
 // VAY-2524: AI changes (Ask first): the record of every change, the one executor, its recovery job
 // and the person's Yes/No routes. Off unless AI_CHANGES_ENABLED; an account without an AI budget
-// can't answer a change either.
+// can't answer a change either, nor anyone whose chat that asked is gone.
 const aiChanges =
   config.aiChangesEnabled && apiAuth
     ? (() => {
@@ -495,6 +495,10 @@ const aiChanges =
           ),
           aiEnabled: async (organizationId) =>
             (await budget.monthStatus(organizationId)).limitMicroUsd > 0,
+          // The assistant's chats (built below, read at answer time). With the assistant off
+          // there is no chat, so no in-app change can be answered.
+          chatExists: (owner, conversationId) =>
+            assistant ? assistant.store.exists(owner, conversationId) : Promise.resolve(false),
           allowedOrigins: config.authSession?.authAllowedOrigins ?? [],
           backgroundWorkersEnabled: config.backgroundWorkersEnabled,
         });
