@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/AssistantPanel.tsx",
     "./assistantApi": "./src/assistantApi.ts",
-    "./assistantMessages": "./src/assistantMessages.ts"
+    "./assistantMessages": "./src/assistantMessages.ts",
+    "./OneTapChange": "./src/OneTapChange.tsx"
   },
   "scripts": {
     "test": "vitest run",
