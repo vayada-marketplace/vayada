@@ -333,6 +333,13 @@ describe("@vayada/domain-booking dashboard metrics read model contract", () => {
         directSources: [],
       }),
       getDashboardDetails: async (input) => emptyDetails(input.propertyId),
+      getGuestInsights: async (input) => emptyGuests(input.propertyId),
+      getTrackingCheck: async (input) => ({
+        propertyId: input.propertyId,
+        bookingPageBookingCount: 0,
+        pageViewCount: 0,
+        trackingMissing: false,
+      }),
       getRevenueDays: async () => null,
       getDayBookings: async () => null,
       async getPageViewTimeline(input) {
@@ -367,6 +374,13 @@ describe("@vayada/domain-booking dashboard metrics read model contract", () => {
         directSources: [],
       }),
       getDashboardDetails: async (input) => emptyDetails(input.propertyId),
+      getGuestInsights: async (input) => emptyGuests(input.propertyId),
+      getTrackingCheck: async (input) => ({
+        propertyId: input.propertyId,
+        bookingPageBookingCount: 0,
+        pageViewCount: 0,
+        trackingMissing: false,
+      }),
       getRevenueDays: async () => null,
       getDayBookings: async () => null,
       getPageViewTimeline: async (input) => fakePageViews(input.propertyId),
@@ -397,6 +411,13 @@ describe("@vayada/domain-booking dashboard metrics read model contract", () => {
         directSources: [],
       }),
       getDashboardDetails: async (input) => emptyDetails(input.propertyId),
+      getGuestInsights: async (input) => emptyGuests(input.propertyId),
+      getTrackingCheck: async (input) => ({
+        propertyId: input.propertyId,
+        bookingPageBookingCount: 0,
+        pageViewCount: 0,
+        trackingMissing: false,
+      }),
       getRevenueDays: async () => null,
       getDayBookings: async () => null,
       getPageViewTimeline: async (input) => fakePageViews(input.propertyId),
@@ -627,5 +648,18 @@ function emptyDetails(propertyId: string) {
     canceledBookingCount: 0,
     topBookings: [],
     recentBookings: [],
+  };
+}
+
+function emptyGuests(propertyId: string) {
+  return {
+    propertyId,
+    guestCount: 0,
+    nationalities: [],
+    ages: [],
+    ageKnownCount: 0,
+    stays: [],
+    averageNights: null,
+    averageLeadDays: null,
   };
 }
