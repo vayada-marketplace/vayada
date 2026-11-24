@@ -3306,7 +3306,7 @@
   "channels.connection": "Channex connection",
   "channels.connected": "connected",
   "channels.providerProperty": "Provider property {id}",
-  "channels.connectBeforeProvisioning": "Connect this property before provisioning channels.",
+  "channels.connectBeforeProvisioning": "This property isn't connected to Channex yet.",
   "channels.openSettings": "Open channel settings",
   "channels.mappings": "Mappings",
   "channels.mappingsDescription": "Provider IDs linked to target PMS inventory.",

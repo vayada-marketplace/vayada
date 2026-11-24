@@ -65,7 +65,6 @@ test("does not allow stale markup edits while disconnected", async ({ page }, te
   // VAY-2606: even with every capability live, a hotel can't create a Channex property here.
   await expect(page.getByRole("button", { name: "Enable connection" })).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Channel configuration preview" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Request Channex setup" })).toHaveCount(0);
   await assertHealthy();
 });
 

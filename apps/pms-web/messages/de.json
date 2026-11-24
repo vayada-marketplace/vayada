@@ -3319,7 +3319,7 @@
   "channels.observeOnly": "Einige Bedienelemente sind während der Umstellung schreibgeschützt. Ihr aktueller Zustand ist sichtbar, Änderungen bleiben jedoch deaktiviert, bis die Funktion freigegeben ist.",
   "channels.connection": "Channex-Verbindung",
   "channels.providerProperty": "Anbieter-Unterkunft {id}",
-  "channels.connectBeforeProvisioning": "Verbinden Sie diese Unterkunft, bevor Sie Kanäle bereitstellen.",
+  "channels.connectBeforeProvisioning": "Diese Unterkunft ist noch nicht mit Channex verbunden.",
   "channels.openSettings": "Kanaleinstellungen öffnen",
   "channels.mappings": "Zuordnungen",
   "channels.mappingsDescription": "Anbieter-IDs, die mit dem PMS-Inventar verknüpft sind.",

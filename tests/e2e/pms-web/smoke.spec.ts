@@ -321,7 +321,7 @@ test.describe("pms-web smoke", () => {
   test("loads migrated PMS operations surfaces without legacy helper calls", async ({
     page,
   }, testInfo) => {
-    // A property without v2 pricing answers 404, which the offer preview treats as "not set up".
+    // A property without v2 pricing answers 404.
     const assertHealthy = watchPageHealth(page, testInfo, {
       expectedMissingUrls: [/\/pricing-v2$/],
     });
@@ -1184,7 +1184,7 @@ test.describe("pms-web smoke", () => {
 });
 
 // Reads the operations walk's pages gained after it was written: the prepared-import panel on
-// Rooms, the v2 pricing offer preview, and the Financials dashboard with its public profile.
+// Rooms, v2 pricing, and the Financials dashboard with its public profile.
 async function mockOperationsWalkReads(page: Page) {
   await page.route(`**/api/hotel-setup/properties/${PMS_WEB_PROPERTY_ID}/import`, (route) =>
     route.fulfill({ json: { import: null } }),
