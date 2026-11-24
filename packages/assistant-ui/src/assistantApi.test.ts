@@ -3,6 +3,7 @@ import {
   AssistantRequestError,
   AssistantUnavailableError,
   createAssistantApi,
+  PendingActionRefusedError,
   readEvents,
   type AssistantEvent,
   type AssistantHttp,
@@ -200,6 +201,29 @@ describe("createAssistantApi", () => {
     await expect(api.pendingAction("p1")).resolves.toEqual(view);
     expect(get).toHaveBeenCalledWith("/api/ai/pending-actions/p1");
     await expect(api.pendingAction("p2")).resolves.toBeUndefined();
+  });
+
+  it("says why a change can't be seen at all (403): another account's, or someone else's", async () => {
+    const refusal = (code?: string) =>
+      Object.assign(httpError(403), code ? { data: { code, message: "x" } } : {});
+    const get = vi
+      .fn()
+      .mockRejectedValueOnce(refusal("other_account"))
+      .mockRejectedValueOnce(refusal("not_your_change"))
+      .mockRejectedValueOnce(refusal("first_party_only"))
+      .mockRejectedValueOnce(refusal()) as AssistantHttp["get"];
+    const api = createAssistantApi(fakeHttp({ get }));
+    for (const code of ["other_account", "not_your_change"]) {
+      const error = await api.pendingAction("p1").catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(PendingActionRefusedError);
+      expect((error as PendingActionRefusedError).code).toBe(code);
+    }
+    // Any other refusal stays a failed read, tried again.
+    for (let n = 0; n < 2; n++) {
+      const error = await api.pendingAction("p1").catch((caught: unknown) => caught);
+      expect(error).not.toBeInstanceOf(PendingActionRefusedError);
+      expect(error).toMatchObject({ status: 403 });
+    }
   });
 
   it("sends a Yes bound to the card shown, a No without it", async () => {

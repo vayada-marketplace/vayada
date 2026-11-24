@@ -127,6 +127,8 @@ export type ChangeCard = {
 export type PendingActionView = {
   id: string;
   state: PendingActionState;
+  /** The hotel the change is for. */
+  propertyId: string;
   /** While it waits: the answer is due by then. */
   answerBy: string | null;
   answeredAt: string | null;
@@ -136,6 +138,18 @@ export type PendingActionView = {
   /** Sent back with the Yes: it binds the Yes to this card. Only while it waits. */
   cardSha256: string | null;
 };
+
+/**
+ * The person may not see this change at all: another of their accounts' (`other_account`), or
+ * another person's (`not_your_change`). Final: reading it again changes nothing. Any other refusal
+ * stays a failed read, tried again.
+ */
+export class PendingActionRefusedError extends Error {
+  constructor(readonly code: "other_account" | "not_your_change") {
+    super(`The change can't be shown here (${code})`);
+    this.name = "PendingActionRefusedError";
+  }
+}
 
 /**
  * The change as it is now, from a refused answer: 409 (answered elsewhere, expired, changed since)
@@ -189,6 +203,10 @@ export function createAssistantApi(http: AssistantHttp) {
         );
       } catch (error) {
         if (statusOf(error) === 404) return undefined;
+        const code = (error as { data?: { code?: unknown } } | null)?.data?.code;
+        if (statusOf(error) === 403 && (code === "other_account" || code === "not_your_change")) {
+          throw new PendingActionRefusedError(code);
+        }
         throw error;
       }
     },

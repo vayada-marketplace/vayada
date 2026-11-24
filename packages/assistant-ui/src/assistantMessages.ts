@@ -86,6 +86,10 @@ export type ChangeMessages = {
   askAgain: string;
   loading: string;
   unavailable: string;
+  /** Read refused: the change is another of the person's accounts'. */
+  otherAccount: string;
+  /** Read refused: someone else's change. */
+  notYours: string;
   gone: string;
   answerFailed: string;
   answerUnknown: string;
@@ -195,6 +199,9 @@ export const assistantEnglish: AssistantMessages = {
     askAgain: "Ask again",
     loading: "Loading the change...",
     unavailable: "This change can't be shown right now.",
+    otherAccount:
+      "This change belongs to another of your vayada accounts. Switch to that account to answer it.",
+    notYours: "Only the person the AI asked can answer this change.",
     gone: "Something this change names is gone or hidden from you now, so it can't be answered here.",
     answerFailed: "Your answer didn't get through. Nothing changed. Try again.",
     answerUnknown:
@@ -309,6 +316,9 @@ export const assistantGerman: AssistantMessages = {
     askAgain: "Nochmal fragen",
     loading: "Die Änderung wird geladen...",
     unavailable: "Diese Änderung kann gerade nicht angezeigt werden.",
+    otherAccount:
+      "Diese Änderung gehört zu einem anderen Ihrer vayada-Konten. Wechseln Sie zu diesem Konto, um sie zu beantworten.",
+    notYours: "Nur die Person, die die KI gefragt hat, kann diese Änderung beantworten.",
     gone: "Etwas, das diese Änderung nennt, ist weg oder für Sie nicht mehr sichtbar, daher kann sie hier nicht beantwortet werden.",
     answerFailed:
       "Ihre Antwort ist nicht angekommen. Es wurde nichts geändert. Versuchen Sie es nochmal.",

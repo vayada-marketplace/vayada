@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowPathIcon,
   CheckIcon,
@@ -14,7 +14,12 @@ import {
 } from "@heroicons/react/24/outline";
 import { PlainText, toPlainText } from "@vayada/web-security/plain-text";
 
-import type { AssistantApi, PendingActionState, PendingActionView } from "./assistantApi";
+import {
+  PendingActionRefusedError,
+  type AssistantApi,
+  type PendingActionState,
+  type PendingActionView,
+} from "./assistantApi";
 import { dateLocale, fill, type ChangeMessages } from "./assistantMessages";
 
 /**
@@ -73,6 +78,8 @@ export function ChangeCard({
 }) {
   const [view, setView] = useState<CardStatus>(undefined);
   const [readFailed, setReadFailed] = useState(false);
+  /** The person may not see this change (another account's, someone else's): final. */
+  const [refused, setRefused] = useState<PendingActionRefusedError["code"] | null>(null);
   const [busy, setBusy] = useState(false);
   /** After an answer that didn't come back: "not_sent" (it still waits) or "unknown". */
   const [answerProblem, setAnswerProblem] = useState<"not_sent" | "unknown" | null>(null);
@@ -89,9 +96,17 @@ export function ChangeCard({
       if (mine !== latest.current) return undefined;
       setView((current) => (next === null && current ? current : next));
       setReadFailed(false);
+      setRefused(null);
       return next;
-    } catch {
+    } catch (error) {
       if (mine !== latest.current) return undefined;
+      // Not this person's to see: say why, and don't ask again.
+      if (error instanceof PendingActionRefusedError) {
+        setRefused(error.code);
+        setView(null);
+        setReadFailed(false);
+        return null;
+      }
       // Keep what is shown; read again shortly.
       setView((current) => current ?? null);
       setReadFailed(true);
@@ -103,7 +118,9 @@ export function ChangeCard({
     void read();
   }, [read]);
 
-  useEffect(() => {
+  // Before the screen is drawn, so the page can hide a card before its buttons ever show (the
+  // one-tap page hides another hotel's).
+  useBeforePaint(() => {
     onView(id, view);
   }, [id, view, onView]);
   useEffect(() => () => onView(id, undefined), [id, onView]);
@@ -151,7 +168,25 @@ export function ChangeCard({
   };
 
   if (view === undefined) return <Quiet text={m.loading} />;
-  if (view === null) return <Quiet text={m.unavailable} />;
+  if (view === null) {
+    const why =
+      refused === "other_account"
+        ? m.otherAccount
+        : refused === "not_your_change"
+          ? m.notYours
+          : m.unavailable;
+    return (
+      <>
+        <Quiet text={why} />
+        {/* An answer whose reply was lost, and the card can't be read now. */}
+        {answerProblem && (
+          <p className="mt-2 text-[13px] text-red-700" role="alert">
+            {m.answerUnknown}
+          </p>
+        )}
+      </>
+    );
+  }
 
   const card = view.card;
   if (view.state === "needs_answer" || view.state === "running") {
@@ -288,6 +323,9 @@ export function ChangeCard({
     </section>
   );
 }
+
+/** useLayoutEffect in the browser; on a server render (none today) the plain effect, silently. */
+const useBeforePaint = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 function Quiet({ text }: { text: string }) {
   return (
