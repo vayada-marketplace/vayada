@@ -26,6 +26,8 @@ type BookingDashboardMetricsRow = {
   propertyFound: boolean;
   revenueAmount: string | null;
   bookingCount: string;
+  conversionBookingCount: string;
+  pageViewsCountedFrom: string | Date | null;
   unverifiedBookingCount: string;
   otherCurrencyBookingCount: string;
   roomNightCount: string | null;
@@ -143,8 +145,8 @@ export function createTargetBookingDashboardMetricsReadPort(config: {
 
       return {
         propertyId: input.propertyId,
-        current: toRevenueStats(current, totalPageViews(currentPageViews.rows)),
-        previous: toRevenueStats(previous, totalPageViews(previousPageViews.rows)),
+        current: toRevenueStats(current, currentPageViews.rows),
+        previous: toRevenueStats(previous, previousPageViews.rows),
         nextArrivalDate: toDateString(current.nextArrivalDate),
         liveSinceDate: toDateString(current.liveSinceDate),
       } satisfies BookingDashboardMetricsReadModel;
@@ -283,6 +285,36 @@ function propertyCurrencyCte(): string {
   )`;
 }
 
+// VAY-2594: the dashboard dates a booking by the day it was made, in the property's time zone, not
+// by check-in. A booking imported from the channel manager was made before the import, so it is
+// dated by the channel manager's time when that is earlier. The mapping keeps the time of the
+// latest change only, so a booking changed after its import keeps the import date.
+function datedBookingsCte(): string {
+  return `property_zone AS (
+    SELECT COALESCE(zone.name, 'UTC') AS time_zone
+    FROM scoped_property scoped
+    LEFT JOIN hotel_catalog.property_locations location ON location.property_id = scoped.property_id
+    LEFT JOIN pg_timezone_names zone ON zone.name = location.timezone
+  ),
+  dated_bookings AS (
+    SELECT booking.*,
+      (LEAST(booking.created_at, channex.first_seen_at) AT TIME ZONE (SELECT time_zone FROM property_zone))::date
+        AS booked_on
+    FROM booking.guest_bookings booking
+    JOIN scoped_property scoped ON scoped.property_id = booking.property_id
+    LEFT JOIN LATERAL (
+      SELECT MIN((mapping.mapping_metadata ->> 'providerInsertedAt')::timestamptz) AS first_seen_at
+      FROM pms.channel_booking_mappings mapping
+      WHERE mapping.guest_booking_id = booking.id
+        AND mapping.property_id = booking.property_id
+        -- Only well-formed times, so one odd value can't fail the whole dashboard.
+        AND mapping.mapping_metadata ->> 'providerInsertedAt'
+          ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?(Z|[+-][0-9]{2}:?[0-9]{2})$'
+    ) channex ON TRUE
+    WHERE booking.lifecycle_status IN ('confirmed', 'completed')
+  )`;
+}
+
 const VERIFIED_AMOUNT = `booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'`;
 const COUNTED_AMOUNT = `${VERIFIED_AMOUNT} AND booking.currency::text = (SELECT currency FROM property_currency)`;
 const OTHER_CURRENCY = `${VERIFIED_AMOUNT} AND booking.currency::text <> (SELECT currency FROM property_currency)`;
@@ -290,15 +322,24 @@ const OTHER_CURRENCY = `${VERIFIED_AMOUNT} AND booking.currency::text <> (SELECT
 function dashboardMetricsSql(): string {
   return `${bookingScopedPropertyCte()},
   ${propertyCurrencyCte()},
-  scoped_bookings AS (
-    SELECT booking.*
-    FROM booking.guest_bookings booking
-    JOIN scoped_property scoped ON scoped.property_id = booking.property_id
-    WHERE booking.lifecycle_status IN ('confirmed', 'completed')
+  ${datedBookingsCte()},
+  -- VAY-2592: the booking page counts every page view from its first anonymous one on; before,
+  -- only visits of guests who allowed analytics. The conversion rate uses only the days since.
+  page_views_counted AS (
+    SELECT (MIN(first_view.occurred_at) AT TIME ZONE (SELECT time_zone FROM property_zone))::date
+      AS counted_from
+    FROM distribution.booking_web_events first_view
+    JOIN scoped_property scoped ON scoped.property_id = first_view.property_id
+    WHERE first_view.event_type = 'page_view'
   )
   SELECT
     COALESCE(SUM(booking.total_amount) FILTER (WHERE ${COUNTED_AMOUNT}), 0)::text AS "revenueAmount",
     COUNT(*)::text AS "bookingCount",
+    COUNT(*) FILTER (
+      WHERE booking.direct_booking_source = 'booking_engine'
+        AND booking.booked_on >= (SELECT counted_from FROM page_views_counted)
+    )::text AS "conversionBookingCount",
+    (SELECT counted_from::text FROM page_views_counted) AS "pageViewsCountedFrom",
     COUNT(*) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' = 'unverified')::text AS "unverifiedBookingCount",
     COUNT(*) FILTER (WHERE ${OTHER_CURRENCY})::text AS "otherCurrencyBookingCount",
     COALESCE(
@@ -308,22 +349,24 @@ function dashboardMetricsSql(): string {
     (SELECT currency FROM property_currency) AS currency,
     (
       SELECT MIN(upcoming.check_in)::text
-      FROM scoped_bookings upcoming
+      FROM dated_bookings upcoming
       WHERE upcoming.check_in >= CURRENT_DATE
     ) AS "nextArrivalDate",
     (
       SELECT MIN(live.check_in)::text
-      FROM scoped_bookings live
+      FROM dated_bookings live
     ) AS "liveSinceDate",
     EXISTS (SELECT 1 FROM scoped_property) AS "propertyFound"
-  FROM scoped_bookings booking
-  WHERE booking.check_in >= $2::date
-    AND booking.check_in <= $3::date`;
+  FROM dated_bookings booking
+  WHERE booking.booking_channel = 'direct'
+    AND booking.booked_on >= $2::date
+    AND booking.booked_on <= $3::date`;
 }
 
 function sourceMixSql(): string {
   return `${bookingScopedPropertyCte()},
-  ${propertyCurrencyCte()}
+  ${propertyCurrencyCte()},
+  ${datedBookingsCte()}
   SELECT
     COALESCE(
       NULLIF(booking.booking_metadata ->> 'channel', ''),
@@ -335,11 +378,9 @@ function sourceMixSql(): string {
     COUNT(*) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' = 'unverified')::text AS "unverifiedBookingCount",
     COUNT(*) FILTER (WHERE ${OTHER_CURRENCY})::text AS "otherCurrencyBookingCount",
     (SELECT currency FROM property_currency) AS currency
-  FROM booking.guest_bookings booking
-  JOIN scoped_property scoped ON scoped.property_id = booking.property_id
-  WHERE booking.lifecycle_status IN ('confirmed', 'completed')
-    AND booking.check_in >= $2::date
-    AND booking.check_in <= $3::date
+  FROM dated_bookings booking
+  WHERE booking.booked_on >= $2::date
+    AND booking.booked_on <= $3::date
   GROUP BY COALESCE(
     NULLIF(booking.booking_metadata ->> 'channel', ''),
     NULLIF(booking.source_system, ''),
@@ -351,6 +392,7 @@ function sourceMixSql(): string {
 function sparklineSql(): string {
   return `${bookingScopedPropertyCte()},
   ${propertyCurrencyCte()},
+  ${datedBookingsCte()},
   -- One bucket per day up to 31 days; longer windows split into 31 contiguous buckets.
   sizing AS (
     SELECT $3::date - $2::date + 1 AS window_days, LEAST($3::date - $2::date + 1, 31) AS bucket_count
@@ -378,11 +420,10 @@ function sparklineSql(): string {
     (SELECT currency FROM property_currency) AS currency
   FROM buckets bucket
   JOIN scoped_property scoped ON TRUE
-  LEFT JOIN booking.guest_bookings booking
-    ON booking.property_id = scoped.property_id
-   AND booking.lifecycle_status IN ('confirmed', 'completed')
-   AND booking.check_in >= bucket.bucket_start
-   AND booking.check_in <= bucket.bucket_end
+  LEFT JOIN dated_bookings booking
+    ON booking.booking_channel = 'direct'
+   AND booking.booked_on >= bucket.bucket_start
+   AND booking.booked_on <= bucket.bucket_end
   GROUP BY bucket.bucket_start, bucket.bucket_end
   ORDER BY bucket.bucket_start`;
 }
@@ -430,12 +471,16 @@ function pageViewBucketsSql(): string {
 
 function toRevenueStats(
   row: BookingDashboardMetricsRow,
-  pageViewCount: number,
+  pageViews: BookingPageViewBucketRow[],
 ): BookingDashboardMetricsReadModel["current"] {
   const currency = row.currency ?? "USD";
+  const countedFrom = toDateString(row.pageViewsCountedFrom);
+  const pageViewCount = totalPageViews(pageViews);
   return {
     totalRevenue: money(numeric(row.revenueAmount), currency),
     bookingCount: Number(row.bookingCount),
+    conversionBookingCount: Number(row.conversionBookingCount ?? 0),
+    conversionPageViewCount: countedFrom ? totalPageViews(pageViews, countedFrom) : 0,
     unverifiedBookingCount: Number(row.unverifiedBookingCount ?? 0),
     otherCurrencyBookingCount: Number(row.otherCurrencyBookingCount ?? 0),
     avgNightlyRate: averageNightlyRate(row, currency),

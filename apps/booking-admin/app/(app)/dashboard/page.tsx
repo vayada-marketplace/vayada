@@ -66,8 +66,6 @@ export default function DashboardPage() {
   const [sources, setSources] = useState<BookingsBySource | null>(null);
   const [funnelError, setFunnelError] = useState(false);
   const [funnel, setFunnel] = useState<ConversionFunnel | null>(null);
-  // The period right before, for the conversion card's change (VAY-2594).
-  const [previousFunnel, setPreviousFunnel] = useState<ConversionFunnel | null>(null);
   const [sparklines, setSparklines] = useState<Sparklines | null>(null);
   const [propertyTimeZone, setPropertyTimeZone] = useState<string | null>(null);
   const [hotelName, setHotelName] = useState("");
@@ -95,24 +93,20 @@ export default function DashboardPage() {
     setStats(null);
     setSources(null);
     setFunnel(null);
-    setPreviousFunnel(null);
     setFunnelError(false);
     setSparklines(null);
-    const [statsData, sourcesData, funnelData, sparklinesData, previousFunnelData] =
-      await Promise.allSettled([
-        dashboardService.getStats(range, timeZone),
-        dashboardService.getBookingsBySource(range, timeZone),
-        dashboardService.getConversionFunnel(range, timeZone),
-        dashboardService.getSparklines(range, timeZone),
-        dashboardService.getConversionFunnel(range, timeZone, "previous"),
-      ]);
+    const [statsData, sourcesData, funnelData, sparklinesData] = await Promise.allSettled([
+      dashboardService.getStats(range, timeZone),
+      dashboardService.getBookingsBySource(range, timeZone),
+      dashboardService.getConversionFunnel(range, timeZone),
+      dashboardService.getSparklines(range, timeZone),
+    ]);
     if (sequence !== fetchSequence.current) return;
     if (statsData.status === "fulfilled") setStats(statsData.value);
     if (sourcesData.status === "fulfilled") setSources(sourcesData.value);
     if (funnelData.status === "fulfilled") setFunnel(funnelData.value);
     else setFunnelError(true);
     if (sparklinesData.status === "fulfilled") setSparklines(sparklinesData.value);
-    if (previousFunnelData.status === "fulfilled") setPreviousFunnel(previousFunnelData.value);
     setLoading(false);
   }, []);
 
@@ -123,7 +117,6 @@ export default function DashboardPage() {
       setStats(null);
       setSources(null);
       setFunnel(null);
-      setPreviousFunnel(null);
       setSparklines(null);
       setLoading(false);
       return;
@@ -137,7 +130,6 @@ export default function DashboardPage() {
     setStats(null);
     setSources(null);
     setFunnel(null);
-    setPreviousFunnel(null);
     setFunnelError(false);
     setSparklines(null);
     setDashboardRange(range);
@@ -191,10 +183,15 @@ export default function DashboardPage() {
     stats && !incompleteAmounts
       ? compareSummary(Math.round(stats.revenue), Math.round(stats.revenue_previous))
       : null;
-  // Confirmed bookings ÷ visitors, from this period's funnel and the one before.
-  const conversion = funnel ? conversionRate(funnel.steps) : null;
-  const conversionComparison = funnel
-    ? compareConversion(conversion, previousFunnel ? conversionRate(previousFunnel.steps) : null)
+  // Booking page bookings ÷ page views, now and in the period before (VAY-2594).
+  const conversion = stats
+    ? conversionRate(stats.conversion_bookings, stats.conversion_page_views)
+    : null;
+  const conversionComparison = stats
+    ? compareConversion(
+        conversion,
+        conversionRate(stats.conversion_bookings_previous, stats.conversion_page_views_previous),
+      )
     : null;
 
   return (

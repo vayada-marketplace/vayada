@@ -41,6 +41,8 @@ describe("dashboardService target route adapter", () => {
             current: {
               totalRevenue: { amountDecimal: "3600.00", currency: "EUR" },
               bookingCount: 10,
+              conversionBookingCount: 4,
+              conversionPageViewCount: 20,
               unverifiedBookingCount: 2,
               otherCurrencyBookingCount: 1,
               avgNightlyRate: { amountDecimal: "120.00", currency: "EUR" },
@@ -75,6 +77,11 @@ describe("dashboardService target route adapter", () => {
       other_currency_bookings: 1,
       other_currency_bookings_previous: 0,
       bookings_previous: 8,
+      conversion_bookings: 4,
+      conversion_page_views: 20,
+      // Not sent: no rate, rather than 0%.
+      conversion_bookings_previous: null,
+      conversion_page_views_previous: null,
       page_views: 28,
       page_views_previous: 21,
       next_arrival: "2026-07-04",
@@ -223,19 +230,6 @@ describe("dashboardService target route adapter", () => {
 
     expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain(
       "periodStart=2026-03-18&periodEnd=2026-06-15&previousPeriodStart=2025-12-18&previousPeriodEnd=2026-03-17",
-    );
-  });
-
-  it("loads the previous period's funnel for the conversion comparison (VAY-2594)", async () => {
-    vi.setSystemTime(new Date("2026-06-14T23:30:00.000Z"));
-    const funnel = { steps: [], paymentMethods: [], biggestDrop: null };
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => Response.json({ funnel })),
-    );
-    await dashboardService.getConversionFunnel("week", "Pacific/Auckland", "previous");
-    expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain(
-      "/conversion-funnel?windowStart=2026-06-02&windowEnd=2026-06-08",
     );
   });
 

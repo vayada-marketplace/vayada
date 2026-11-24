@@ -7,14 +7,11 @@ import {
 const days = (start: string | null, end: string | null) =>
   (Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000;
 
-type Numbers = { revenue: string; bookings: number; views: number; visits: number; booked: number };
-const NOW: Numbers = { revenue: "1240.00", bookings: 4, views: 82, visits: 82, booked: 4 };
-const BEFORE: Numbers = { revenue: "1050.00", bookings: 3, views: 94, visits: 94, booked: 3 };
-const NOTHING: Numbers = { revenue: "0.00", bookings: 0, views: 0, visits: 0, booked: 0 };
-
-// The mocked property's time zone (defaultBookingAdminPropertySettings).
-const propertyToday = () =>
-  new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" }).format(new Date());
+// bookings are direct bookings; booked are those made on the booking page (the conversion's).
+type Numbers = { revenue: string; bookings: number; views: number; booked: number };
+const NOW: Numbers = { revenue: "1240.00", bookings: 4, views: 82, booked: 4 };
+const BEFORE: Numbers = { revenue: "1050.00", bookings: 3, views: 94, booked: 3 };
+const NOTHING: Numbers = { revenue: "0.00", bookings: 0, views: 0, booked: 0 };
 
 /** Stats, sparklines and funnel for the cards; `set` swaps what the next reads answer. */
 async function mockCards(page: Page) {
@@ -26,6 +23,8 @@ async function mockCards(page: Page) {
     const metrics = (n: Numbers) => ({
       totalRevenue: money(n.revenue),
       bookingCount: n.bookings,
+      conversionBookingCount: n.booked,
+      conversionPageViewCount: n.views,
       avgNightlyRate: money("0.00"),
       pageViewCount: n.views,
     });
@@ -56,20 +55,17 @@ async function mockCards(page: Page) {
       },
     });
   });
-  // The dashboard reads the funnel twice: the range (ending today) and the period right before.
   await page.route("**/dashboard/conversion-funnel?**", (route) => {
-    const url = new URL(route.request().url());
-    reads.funnel.push(url);
-    const n =
-      url.searchParams.get("windowEnd") === propertyToday() ? numbers.current : numbers.previous;
+    reads.funnel.push(new URL(route.request().url()));
+    const n = numbers.current;
     return route.fulfill({
       json: {
         funnel: {
           // previousCount is the step before, as the API sends it, not the previous period.
           steps: [
-            ["page_visit", n.visits, n.visits],
-            ["rate_selected", Math.round(n.visits / 2), n.visits],
-            ["booking_completed", n.booked, Math.round(n.visits / 2)],
+            ["page_visit", n.views, n.views],
+            ["rate_selected", Math.round(n.views / 2), n.views],
+            ["booking_completed", n.booked, Math.round(n.views / 2)],
           ].map(([stage, count, previousCount]) => ({
             stage,
             count,
@@ -115,7 +111,7 @@ test("opens on the last 30 days with four cards, each changing relative to the p
   }
   await expect(page.getByText(/Avg\. Nightly Rate/i)).toHaveCount(0);
   await expect(main.getByText("€1,240")).toBeVisible();
-  // 4 bookings of 82 visitors; before, 3 of 94.
+  // 4 booking page bookings of 82 page views; before, 3 of 94.
   await expect(main.getByText("4.88%", { exact: true })).toBeVisible();
 
   // Always a relative change, green up and red down; never points or amounts.
@@ -139,10 +135,10 @@ test("opens on the last 30 days with four cards, each changing relative to the p
   expect(days(stats.get("periodStart"), stats.get("periodEnd"))).toBe(29);
   expect(days(stats.get("previousPeriodEnd"), stats.get("periodStart"))).toBe(1);
   expect(days(stats.get("previousPeriodStart"), stats.get("previousPeriodEnd"))).toBe(29);
-  // The funnel for the range and for the 30 days before, for the conversion change.
+  // The conversion card comes from the stats; the funnel is read for the range only.
   const funnelWindows = reads.funnel.map((url) => url.searchParams.get("windowStart"));
   expect(funnelWindows).toContain(stats.get("periodStart"));
-  expect(funnelWindows).toContain(stats.get("previousPeriodStart"));
+  expect(funnelWindows).not.toContain(stats.get("previousPeriodStart"));
   await page.screenshot({ path: testInfo.outputPath("dashboard-30-days-1440.png") });
 });
 
@@ -190,20 +186,13 @@ test("Today compares with yesterday and 90 days with the 90 days before (VAY-259
   const quarter = reads.stats.at(-1)!.searchParams;
   expect(days(quarter.get("previousPeriodEnd"), quarter.get("periodStart"))).toBe(1);
   expect(days(quarter.get("previousPeriodStart"), quarter.get("previousPeriodEnd"))).toBe(89);
-  // The funnel reads the same 90 days and the 90 before, which the API now allows.
+  // The funnel reads the same 90 days, which the API allows.
   await expect
     .poll(() =>
       reads.funnel.some(
         (url) =>
           url.searchParams.get("windowStart") === quarter.get("periodStart") &&
           days(url.searchParams.get("windowStart"), url.searchParams.get("windowEnd")) === 89,
-      ),
-    )
-    .toBe(true);
-  await expect
-    .poll(() =>
-      reads.funnel.some(
-        (url) => url.searchParams.get("windowStart") === quarter.get("previousPeriodStart"),
       ),
     )
     .toBe(true);
@@ -219,10 +208,14 @@ test("says no data, no change and up from nothing in grey or green", async ({ pa
   await expect(main.locator('svg path[stroke="#D1D5DB"]')).toHaveCount(4);
   await page.screenshot({ path: testInfo.outputPath("dashboard-empty-1440.png") });
 
-  cards.set({ current: NOW, previous: { ...NOTHING, bookings: 4, visits: 82, booked: 4 } });
+  // Before: the same bookings, no revenue and no page views, so no conversion rate to compare.
+  cards.set({ current: NOW, previous: { ...NOTHING, bookings: 4, booked: 4 } });
   await page.getByRole("button", { name: "7 days", exact: true }).click();
   await expect(main.getByText("↑ from 0 in prev. period")).toHaveCount(2);
-  await expect(main.getByText("± 0% vs prev. period")).toHaveCount(2);
+  await expect(main.getByText("± 0% vs prev. period")).toHaveCount(1);
+  await expect(main.getByText("4.88%", { exact: true })).toBeVisible();
+  // Revenue, bookings and page views have a change line; the conversion card has none.
+  await expect(main.getByText(/prev\. period|No data yet/)).toHaveCount(3);
 });
 
 test("cards wrap on a phone without scrolling sideways", async ({ page }, testInfo) => {

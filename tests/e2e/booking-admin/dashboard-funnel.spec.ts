@@ -5,12 +5,6 @@ import {
   mockBookingAdminShellRoutes,
 } from "../support/bookingAdminMocks";
 
-// The dashboard also reads the funnel for the period before, for the conversion card's change
-// (VAY-2594); these specs follow the range's own read, which ends today in the property's zone.
-const ENDS_TODAY = (url: string) =>
-  new URL(url).searchParams.get("windowEnd") ===
-  new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" }).format(new Date());
-
 test("shows inline drop-offs, the card branch, CSV export and recomputes all time tabs", async ({
   page,
 }, testInfo) => {
@@ -20,7 +14,7 @@ test("shows inline drop-offs, the card branch, CSV export and recomputes all tim
   const windows: string[] = [];
   let empty = false;
   await page.route("**/dashboard/conversion-funnel?**", (route) => {
-    if (ENDS_TODAY(route.request().url())) windows.push(route.request().url());
+    windows.push(route.request().url());
     return route.fulfill({
       json: {
         funnel: {
@@ -116,8 +110,7 @@ test("the funnel options and the page tabs share one time range", async ({ page 
   await mockBookingAdminShellRoutes(page);
   const windowStarts: string[] = [];
   await page.route("**/dashboard/conversion-funnel?**", (route) => {
-    if (ENDS_TODAY(route.request().url()))
-      windowStarts.push(new URL(route.request().url()).searchParams.get("windowStart") ?? "");
+    windowStarts.push(new URL(route.request().url()).searchParams.get("windowStart") ?? "");
     return route.fulfill({
       json: {
         funnel: {

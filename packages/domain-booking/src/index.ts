@@ -55,9 +55,21 @@ export type BookingMoney = PmsMoney;
 // TypeScript Booking code never opens PMS_DATABASE_URL directly (C04 in the
 // booking-pms-coupling-audit).
 
+/**
+ * Direct bookings (booking page and the hotel's own, from the PMS) made in the period, dated by the
+ * day the guest booked in the property's time zone (VAY-2594). Bookings from booking sites are in
+ * the source mix only.
+ */
 export type BookingRevenueStats = {
   totalRevenue: BookingMoney;
   bookingCount: number;
+  /**
+   * The conversion rate's two sides: bookings made on the booking page ÷ its page views. Both count
+   * only the days since the booking page counts every page view (VAY-2592); before that, page views
+   * were only visits of guests who allowed analytics. Both are 0 before that day.
+   */
+  conversionBookingCount?: number;
+  conversionPageViewCount?: number;
   /** Bookings excluded from monetary metrics because their amounts are unverified. */
   unverifiedBookingCount?: number;
   /** Bookings excluded from monetary metrics because they are in another currency than the property's (VAY-2390). */
@@ -79,6 +91,7 @@ export type BookingSourceMixItem = {
   revenueSharePercent: number;
 };
 
+/** Every channel's bookings made in the period, by booking date (VAY-2594). */
 export type BookingSourceMixReadModel = {
   propertyId: string;
   periodStart: BookingDate;
@@ -87,6 +100,7 @@ export type BookingSourceMixReadModel = {
   items: readonly BookingSourceMixItem[];
 };
 
+/** Direct bookings by booking date, as in BookingRevenueStats. */
 export type BookingSparklinePoint = {
   /** Start of the bucket (inclusive) */
   bucketStart: BookingDate;

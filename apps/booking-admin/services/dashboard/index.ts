@@ -8,11 +8,20 @@ export interface DashboardStats {
   revenue_previous: number;
   unverified_bookings: number;
   unverified_bookings_previous: number;
-  /** Bookings in another currency, such as from an OTA: counted, but not in revenue or rates. */
+  /** Bookings in another currency than the property's: counted, but not in revenue or rates. */
   other_currency_bookings: number;
   other_currency_bookings_previous: number;
+  /** Direct bookings made in the range (booking page and the hotel's own), by booking date. */
   bookings: number;
   bookings_previous: number;
+  /**
+   * The conversion rate's sides (VAY-2594): booking page bookings and page views, both only since
+   * the page counts every view. Null when the API doesn't send them.
+   */
+  conversion_bookings: number | null;
+  conversion_bookings_previous: number | null;
+  conversion_page_views: number | null;
+  conversion_page_views_previous: number | null;
   page_views: number;
   page_views_previous: number;
   next_arrival: string | null;
@@ -102,6 +111,8 @@ type TargetDashboardStatsResponse = {
     current: {
       totalRevenue: Money;
       bookingCount: number;
+      conversionBookingCount?: number;
+      conversionPageViewCount?: number;
       unverifiedBookingCount?: number;
       otherCurrencyBookingCount?: number;
       avgNightlyRate: Money;
@@ -110,6 +121,8 @@ type TargetDashboardStatsResponse = {
     previous: {
       totalRevenue: Money;
       bookingCount: number;
+      conversionBookingCount?: number;
+      conversionPageViewCount?: number;
       unverifiedBookingCount?: number;
       otherCurrencyBookingCount?: number;
       avgNightlyRate: Money;
@@ -239,6 +252,10 @@ export const dashboardService = {
       other_currency_bookings_previous: response.metrics.previous.otherCurrencyBookingCount ?? 0,
       bookings: response.metrics.current.bookingCount,
       bookings_previous: response.metrics.previous.bookingCount,
+      conversion_bookings: response.metrics.current.conversionBookingCount ?? null,
+      conversion_bookings_previous: response.metrics.previous.conversionBookingCount ?? null,
+      conversion_page_views: response.metrics.current.conversionPageViewCount ?? null,
+      conversion_page_views_previous: response.metrics.previous.conversionPageViewCount ?? null,
       page_views: response.metrics.current.pageViewCount,
       page_views_previous: response.metrics.previous.pageViewCount,
       next_arrival: response.metrics.nextArrivalDate,
@@ -264,31 +281,19 @@ export const dashboardService = {
     };
   },
 
-  /**
-   * The funnel for the range, or for the period right before it: the funnel's previousCount is
-   * the step before, not the previous period (VAY-2594 compares conversion between periods).
-   */
-  getConversionFunnel: async (
-    range: TimeRange,
-    timeZone: string,
-    period: "current" | "previous" = "current",
-  ): Promise<ConversionFunnel> => {
+  getConversionFunnel: async (range: TimeRange, timeZone: string): Promise<ConversionFunnel> => {
     const basePath = requireDashboardBasePath();
     const query = rangeQuery(range, timeZone);
-    const [start, end] =
-      period === "current"
-        ? [query.currentStart, query.currentEnd]
-        : [query.previousStart, query.previousEnd];
     const response = await apiClient.get<{ funnel: ConversionFunnel }>(
-      `${basePath}/conversion-funnel?windowStart=${start}&windowEnd=${end}`,
+      `${basePath}/conversion-funnel?windowStart=${query.currentStart}&windowEnd=${query.currentEnd}`,
     );
     return response.funnel;
   },
 
   getSparklines: async (range: TimeRange, timeZone: string): Promise<Sparklines> => {
     const basePath = requireDashboardBasePath();
-    // Booking metrics are dated by check-in, so a single day has no intraday trend:
-    // Today's sparkline shows the 7 days ending today as context.
+    // Points are days, so a single day has no trend: Today's sparkline shows the 7 days ending
+    // today as context.
     const query = rangeQuery(range === "today" ? "week" : range, timeZone);
     const response = await apiClient.get<TargetSparklinesResponse>(
       `${basePath}/sparklines?windowStart=${query.currentStart}&windowEnd=${query.currentEnd}`,
