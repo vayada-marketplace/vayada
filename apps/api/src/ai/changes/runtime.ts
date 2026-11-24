@@ -6,6 +6,7 @@ import { randomBytes } from "node:crypto";
 
 import type { AuthorizationResolver, IdentityRepository } from "@vayada/backend-auth";
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
+import pg from "pg";
 
 import { createPgAiActionLog } from "../actionLog/actionLog.js";
 import { createAiChangeExecutor, type AiChangeExecutor } from "../executor/executor.js";
@@ -33,8 +34,18 @@ export function createAiChangesRuntime(config: {
   /** The recovery job runs only where background workers do. */
   backgroundWorkersEnabled: boolean;
 }) {
-  const store = createPgAiOperationStore({ connectionString: config.connectionString, max: 4 });
-  const log = createPgAiActionLog({ connectionString: config.connectionString, max: 2 });
+  if (!config.connectionString.trim())
+    throw new Error("AI changes connectionString must not be empty");
+  // A chat turn waits on these: a connection that can't be had in 5 s fails the call, as the
+  // other AI pools do.
+  const pool = (max: number) =>
+    new pg.Pool({ connectionString: config.connectionString, max, connectionTimeoutMillis: 5_000 });
+  const storePool = pool(4);
+  const store = createPgAiOperationStore({
+    connectionString: config.connectionString,
+    pool: storePool,
+  });
+  const log = createPgAiActionLog({ connectionString: config.connectionString, pool: pool(2) });
   // This API task, as leases name it.
   const holder = `api-${process.pid}-${randomBytes(4).toString("hex")}`;
   let executor: AiChangeExecutor | undefined;
@@ -86,7 +97,7 @@ export function createAiChangesRuntime(config: {
       });
       app.addHook("onClose", async () => {
         await worker?.close();
-        await store.end();
+        await storePool.end();
         await log.close();
       });
     },

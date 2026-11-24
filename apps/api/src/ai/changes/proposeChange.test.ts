@@ -248,7 +248,7 @@ describe("an AI asking for a change (VAY-2524)", () => {
   });
 
   it("needs the tool call's own delegated context", async () => {
-    const { propose } = setUp();
+    const { propose, proposed } = setUp();
     const context = await worldContext(OWNER, ORG_A, CALENDAR);
     await expect(
       propose({ ...context, delegation: undefined }, { action: "x", arguments: {}, client: "x" }),
@@ -259,5 +259,21 @@ describe("an AI asking for a change (VAY-2524)", () => {
         { action: "room_block_create@1", arguments: args(), client: "x" },
       ),
     ).rejects.toThrow(TypeError);
+    // The person's own session with a delegation added on: not a tool call.
+    for (const own of [
+      { ...context, audit: { ...context.audit, source: "web" as const } },
+      {
+        ...context,
+        actor: {
+          ...context.actor,
+          providerIdentity: { ...context.actor.providerIdentity, sessionId: "session_1" },
+        },
+      },
+    ]) {
+      await expect(
+        propose(own, { action: "room_block_create@1", arguments: args(), client: "x" }),
+      ).rejects.toThrow("proposeChange needs the tool call's delegated context");
+    }
+    expect(proposed).toEqual([]);
   });
 });

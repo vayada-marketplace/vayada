@@ -2,7 +2,6 @@
 // before MCP connections can be checked, and the executor only once the app exists.
 import { randomUUID } from "node:crypto";
 
-import type { RequestContext } from "@vayada/backend-auth";
 import Fastify from "fastify";
 import { describe, expect, it } from "vitest";
 
@@ -61,8 +60,9 @@ describe("AI changes in the API (VAY-2524)", () => {
     await expect(app.close()).resolves.toBeUndefined();
   });
 
-  it("hands the assistant how to ask for a change; none is offered in the app yet", async () => {
+  it("hands the assistant how to ask for a change, on its own action log; none is offered yet", async () => {
     const runtime = createAiChangesRuntime({
+      // Nothing listens here: the ask's log row fails at once, which shows it was written here.
       connectionString: "postgresql://127.0.0.1:1/unused_test",
       identity: worldIdentity,
       authorizationResolver: worldAuthorization([]).resolver,
@@ -70,7 +70,10 @@ describe("AI changes in the API (VAY-2524)", () => {
       allowedOrigins: [],
       backgroundWorkersEnabled: false,
     });
-    const app = Fastify({ logger: false });
+    const lines: string[] = [];
+    const app = Fastify({
+      logger: { level: "error", stream: { write: (line: string) => void lines.push(line) } },
+    });
     runtime.start(app);
     const context = await worldContext(WORLD.OWNER, WORLD.ORG_A, ["pms.calendar.manage"]);
     await expect(
@@ -83,19 +86,21 @@ describe("AI changes in the API (VAY-2524)", () => {
       ok: false,
       error: { code: "unknown_action", message: "This change is not available here." },
     });
-    // Only with the tool call's own delegated context.
-    const person: RequestContext = {
-      ...context,
-      delegation: undefined,
-      audit: { ...context.audit, source: "web" },
-    };
-    await expect(
-      runtime.proposeChange(person, {
-        action: "room_block_create@1",
-        arguments: {},
-        client: "in_app_assistant",
-      }),
-    ).rejects.toThrow("proposeChange needs the tool call's delegated context");
+    // The row it could not write reaches the app's log; the answer still stands.
+    expect(lines.map((line) => JSON.parse(line).msg)).toEqual(["AI action log row not written"]);
     await app.close();
+  });
+
+  it("needs a database to keep its changes in", () => {
+    expect(() =>
+      createAiChangesRuntime({
+        connectionString: " ",
+        identity: worldIdentity,
+        authorizationResolver: worldAuthorization([]).resolver,
+        aiEnabled: async () => true,
+        allowedOrigins: [],
+        backgroundWorkersEnabled: false,
+      }),
+    ).toThrow("AI changes connectionString must not be empty");
   });
 });
