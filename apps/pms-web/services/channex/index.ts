@@ -218,8 +218,6 @@ export const channexService = {
     );
   },
 
-  enable: () => command("enable"),
-  disable: () => command("disable"),
   provision: () => command("provision"),
   syncAri: () => command("sync_ari"),
   syncBookings: () => command("sync_bookings"),
