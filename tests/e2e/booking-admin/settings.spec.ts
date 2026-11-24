@@ -1085,6 +1085,53 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await assertHealthy();
   });
 
+  test("opens and saves for a team member who may not read the owner-only hotel profile (VAY-2610)", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingAdminAuthenticatedSession(page);
+    await mockBookingAdminShellRoutes(page, {
+      propertySettings: { ...defaultBookingAdminPropertySettings, property_name: "Alpenrose" },
+    });
+    await mockPublicPhotos(page, 2);
+    const { bookingDesignRequests } = await mockBookingAdminDesignSettings(page);
+    // A Hotel Admin has the Design permissions but not the owner's hotel setup read.
+    const profileReads: string[] = [];
+    await page.route(`**${BOOKING_ADMIN_PROPERTY_PROFILE_PATH}*`, (route) => {
+      profileReads.push(route.request().url());
+      return route.fulfill({
+        status: 403,
+        json: { detail: "Missing required permission: hotel_catalog.setup.read" },
+      });
+    });
+
+    await page.goto("/design-studio?tab=colors");
+    const hex = page.getByRole("textbox", { name: "Primary brand color", exact: true });
+    await expect(hex).toHaveValue("#0077B6");
+    await expect(page.getByText("Failed to load design settings")).toHaveCount(0);
+    await expect(
+      page.getByLabel("Live booking page preview").getByText("Alpenrose").first(),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Tropical Gold" }).click();
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect(page.getByText("Design settings saved successfully")).toBeVisible();
+    expect(bookingDesignRequests.filter(({ method }) => method === "PUT")).toEqual([
+      {
+        method: "PUT",
+        body: { expectedRevision: 1, primaryColor: "#A67D12", fontPairing: "modern-minimalist" },
+      },
+    ]);
+    expect(profileReads).toEqual([]);
+    await page.screenshot({ path: testInfo.outputPath("design-studio-hotel-admin.png") });
+    await assertHealthy();
+  });
+
   for (const width of [1440, 390]) {
     test(`says what keeps the live page from taking a save at ${width}px (VAY-2472)`, async ({
       page,

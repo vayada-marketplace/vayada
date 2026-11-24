@@ -237,16 +237,17 @@ export default function DesignStudioPage() {
     Promise.all([
       settingsService.getDesignSettings(hotelId),
       settingsService.getPropertySettings(hotelId).catch(() => null),
+      // No owner-only hotel profile read: it kept Design Studio from opening for Hotel Admins
+      // (VAY-2610).
       getBookingHotelPropertyLink({ hotelId }).then(async ({ propertyId }) => {
         propertyIdRef.current = propertyId;
         return Promise.all([
-          sharedHotelSetupApi.getPropertyProfile(propertyId),
           sharedHotelSetupApi.getPublicPropertyProfile(propertyId),
           designStudioBookingDesignClient.load(propertyId, { cache: "no-store" }),
         ]);
       }),
     ])
-      .then(([settings, property, [canonicalProfile, publicProfile, design]]) => {
+      .then(([settings, property, [publicProfile, design]]) => {
         applyPublicGallery(publicProfile);
         setPageLanguage(publicProfile.publicProfile.locale || null);
         setHeaderLogo(settings.header_logo || "");
@@ -278,7 +279,8 @@ export default function DesignStudioPage() {
         savedChoicesRef.current = savedChoices;
         setPrimaryColor(savedChoices.primaryColor);
         setSelectedFont(savedChoices.fontPairing);
-        setPropertyName(property?.property_name || canonicalProfile.profile.displayName);
+        // The property settings name is the hotel profile's display name.
+        if (property?.property_name) setPropertyName(property.property_name);
         if (property?.slug) setPropertySlug(property.slug);
         if (property?.default_currency) setDefaultCurrency(property.default_currency);
         if (property?.default_language) setDefaultLanguage(property.default_language);

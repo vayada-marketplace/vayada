@@ -1875,6 +1875,148 @@ describe("shared hotel setup status route", () => {
     });
   });
 
+  // VAY-2610: Design Studio reads the cover, gallery and page language from the public profile.
+  it("lets a Hotel Admin with Design access read the public profile, and nothing owner-only", async () => {
+    const current = publicProfileResponse(4);
+    const getPublicPropertyProfile = vi.fn(async () => current);
+    const getPropertyProfile = vi.fn(async () => {
+      throw new Error("the owner-only hotel profile must not be read");
+    });
+    const updatePublicPropertyProfile = vi.fn(async () => {
+      throw new Error("a Design read must not update the public profile");
+    });
+    app = buildSharedSetupApp({
+      roleKey: "hotel_manager",
+      permissions: ["booking.design.read", "booking.design.manage", "booking.settings.manage"],
+      repository: {
+        ...unusedStatusMethods(),
+        ...unusedPropertyProfileMethods(),
+        getPropertyProfile,
+        getPublicPropertyProfile,
+        updatePublicPropertyProfile,
+      },
+    });
+
+    const readResponse = await injectJson<PublicPropertyProfileResponse>(app, {
+      method: "GET",
+      url: `/api/hotel-setup/properties/${propertyId}/public-profile`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(readResponse.statusCode).toBe(200);
+    expect(readResponse.body).toEqual(current);
+    expect(getPublicPropertyProfile).toHaveBeenCalledWith({ organizationId, propertyId });
+
+    const otherPropertyRead = await injectJson<{ code: string }>(app, {
+      method: "GET",
+      url: `/api/hotel-setup/properties/${secondPropertyId}/public-profile`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(otherPropertyRead.statusCode).toBe(403);
+    expect(otherPropertyRead.body.code).toBe("missing_property_resource_link");
+
+    const profileRead = await app.inject({
+      method: "GET",
+      url: `/api/hotel-setup/properties/${propertyId}/profile`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(profileRead.statusCode).toBe(403);
+    expect(getPropertyProfile).not.toHaveBeenCalled();
+
+    const publicUpdate = await app.inject({
+      method: "PUT",
+      url: `/api/hotel-setup/properties/${propertyId}/public-profile`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: { expectedProfileRevision: 4, patch: { shortDescription: "Not allowed." } },
+    });
+    expect(publicUpdate.statusCode).toBe(403);
+    expect(updatePublicPropertyProfile).not.toHaveBeenCalled();
+    expect(getPublicPropertyProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the Design read of the public profile within the member's properties and Booking access", async () => {
+    const getPublicPropertyProfile = vi.fn(async () => publicProfileResponse(1));
+    const repository = {
+      ...unusedStatusMethods(),
+      ...unusedPropertyProfileMethods(),
+      getPublicPropertyProfile,
+    };
+    const designOnly: PermissionKey[] = ["booking.design.read", "booking.settings.manage"];
+    const linkedResources = [
+      propertyLink(propertyId),
+      propertyLink(secondPropertyId),
+      productLink("booking", "booking_hotel", propertyId),
+      productLink("booking", "booking_hotel", secondPropertyId),
+    ];
+
+    // A member assigned to the second property only.
+    app = buildSharedSetupApp({
+      roleKey: "hotel_manager",
+      permissions: designOnly,
+      linkedResources,
+      repository,
+      propertyAccessRepository: propertyScopeRepository(
+        agencyScope({
+          roleKey: "hotel_manager",
+          mode: "assigned",
+          assignedPropertyIds: [secondPropertyId],
+        }),
+      ),
+    });
+    const outsideScope = await injectJson<{ code: string }>(app, {
+      method: "GET",
+      url: `/api/hotel-setup/properties/${propertyId}/public-profile`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(outsideScope.statusCode).toBe(403);
+    expect(outsideScope.body.code).toBe("missing_property_resource_link");
+    const insideScope = await app.inject({
+      method: "GET",
+      url: `/api/hotel-setup/properties/${secondPropertyId}/public-profile`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(insideScope.statusCode).toBe(200);
+    expect(getPublicPropertyProfile).toHaveBeenCalledTimes(1);
+    await app.close();
+
+    // A member whose Booking access is off loses the booking.* permissions.
+    app = buildSharedSetupApp({
+      roleKey: "hotel_manager",
+      permissions: designOnly,
+      repository,
+      propertyAccessRepository: propertyScopeRepository(
+        agencyScope({ roleKey: "hotel_manager", productAccess: { pms: true, booking: false } }),
+      ),
+    });
+    const bookingOff = await app.inject({
+      method: "GET",
+      url: `/api/hotel-setup/properties/${propertyId}/public-profile`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(bookingOff.statusCode).toBe(403);
+    expect(getPublicPropertyProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the public profile from team members without Design or setup access", async () => {
+    const getPublicPropertyProfile = vi.fn(async () => publicProfileResponse(1));
+    app = buildSharedSetupApp({
+      roleKey: "front_desk",
+      permissions: ["pms.calendar.read", "pms.reservation.read", "booking.settings.read"],
+      repository: {
+        ...unusedStatusMethods(),
+        ...unusedPropertyProfileMethods(),
+        getPublicPropertyProfile,
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/hotel-setup/properties/${propertyId}/public-profile`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(getPublicPropertyProfile).not.toHaveBeenCalled();
+  });
+
   it("maps stale and unapproved public profile media writes to contract errors", async () => {
     const updatePublicPropertyProfile = vi
       .fn()

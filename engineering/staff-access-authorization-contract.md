@@ -62,7 +62,10 @@ Hidden stores no key. The editor stores role differences in existing membership
 every hotel role so authenticated members can load only their effective
 property list. It authorizes `GET /api/hotel-setup/status` but not property
 profiles, property types, or setup commands, which retain their existing
-`hotel_catalog.setup.read` or manage permissions.
+`hotel_catalog.setup.read` or manage permissions. One exception: the public
+profile read (`GET /api/hotel-setup/properties/:propertyId/public-profile`) also
+accepts `booking.design.read`, because Design Studio shows the cover, gallery and
+page language from it (VAY-2610). The private profile stays setup-only.
 
 Product entry accepts any read-level page permission for that product; the PMS
 compatibility key `pms.operations.read` remains accepted. Field-only guest
