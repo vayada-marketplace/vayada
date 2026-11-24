@@ -13,6 +13,7 @@ import {
   startGuestProfileLinkWorker,
   type GuestProfileLinkStore,
 } from "./bookingGuestProfileLinks.js";
+import { editGuestProfile } from "../platform/guestProfileEdits.js";
 import { createPgGuestIdentityRetentionStore } from "./guestIdentityRetention.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
@@ -699,6 +700,293 @@ describe.skipIf(!TEST_DATABASE_URL)("Guest profile links (runtime login)", () =>
     await remark();
     expect(await deferred(ota)).toBe(false);
     expect(await deferred(kept)).toBe(false);
+  });
+
+  // VAY-2601: the hand-made copies of 2026-11-15 (VAY-2108) carry the hotel's own address as the
+  // guest's email and the real one in a private note; migration 0556 moves it to the booker and the
+  // guest record, as a staff edit does, and never changes the notes (VAY-2599 reads them).
+  it("puts the guest's email from the switch-day note on the copy and its guest record (0556)", async () => {
+    const hotel = "reception@hotel.test";
+    const moved = (reference: string, email: string) =>
+      `Moved from the old system on 2026-11-15 (VAY-2108). Old reference: ${reference}. ` +
+      `Guest email: ${email}. Old payment: unpaid.`;
+    const note = (
+      stay: { bookingId: string },
+      body: string,
+      createdAt = "2026-11-15T10:00:00Z",
+      editedAt: string | null = null,
+    ) =>
+      admin.query(
+        `INSERT INTO pms.booking_notes_private
+           (property_id, guest_booking_id, body, source, created_at, edited_at,
+            edited_by_display_name)
+         VALUES ($1::uuid, $2::uuid, $3, 'pms', $4::timestamptz, $5::timestamptz,
+           CASE WHEN $5::timestamptz IS NULL THEN NULL ELSE 'Front desk' END)`,
+        [propertyA, stay.bookingId, body, createdAt, editedAt],
+      );
+    const copy = async (
+      first: string,
+      last: string,
+      noteEmail: string,
+      options: {
+        status?: string;
+        email?: string;
+        createdAt?: string;
+        editedAt?: string;
+        suffix?: string;
+      } = {},
+    ) => {
+      const stay = await book(
+        propertyA,
+        { status: options.status ?? "confirmed" },
+        { first, last, email: options.email ?? hotel },
+      );
+      await note(
+        stay,
+        moved(`VAY-${last.toUpperCase()}`, noteEmail) + (options.suffix ?? ""),
+        options.createdAt,
+        options.editedAt,
+      );
+      return stay;
+    };
+    const nora = await copy("Nora", "Berg", "nora.berg@example.test");
+    const tom = await copy("Tom", "Hale", "Tom.Hale@Example.test");
+    // One guest booked twice: both copies join one guest record, and agree on the email.
+    const ida1 = await copy("Ida", "Moe", "ida@example.test");
+    const ida2 = await copy("Ida", "Moe", "ida@example.test");
+    // Two copies on one guest record that disagree: the bookers change, the record keeps its email.
+    const kai1 = await copy("Kai", "Lenz", "kai@example.test");
+    const kai2 = await copy("Kai", "Lenz", "kai.lenz@example.test");
+    const canceled = await copy("Uwe", "Kern", "uwe@example.test", { status: "canceled" });
+    const corrected = await copy("Pia", "Ott", "pia@example.test", {
+      email: "pia.ott@example.test",
+    });
+    const withoutEmail = await copy("Eva", "Sand", "-");
+    const edited = await copy("Rob", "Falk", "rob@example.test", {
+      editedAt: "2026-11-20T09:00:00Z",
+    });
+    const later = await copy("Lia", "Horn", "lia@example.test", {
+      createdAt: "2026-11-18T09:00:00Z",
+    });
+    // A guest with two copies whose email staff already corrected: both copies share the corrected
+    // email, on one guest record, so it isn't the hotel's address.
+    const ana1 = await copy("Ana", "Roth", "ana.old@example.test");
+    const ana2 = await copy("Ana", "Roth", "ana.old@example.test");
+    // The hotel's address typed in another case and with spaces is still the hotel's address.
+    const mia = await copy("Mia", "Vogt", "mia@example.test", { email: " Reception@Hotel.TEST " });
+    const leo = await copy("Leo", "Brand", "leo@example.test", {
+      suffix: " Guest phone (old system, no country code): 0812345678.",
+    });
+    const ivo = await copy("Ivo", "Kranz", "ivo@localhost");
+    const zoe = await copy("Zoe", "Lang", "zoe@example.test");
+    const desk = await book(propertyA, {}, { first: "Ben", last: "Kopp", email: hotel });
+    await note(desk, "Guest prefers the garden view.");
+    await sweep();
+    const profileOf = async (stay: { guestIds: string[] }) =>
+      (await link(stay.guestIds[0]!)).profileId!;
+    expect(await profileOf(ana2)).toBe(await profileOf(ana1));
+    await editGuestProfile(admin, {
+      guestProfileId: await profileOf(ana1),
+      edit: { email: "ana@example.test" },
+      propertyIds: [propertyA],
+    });
+    // Zoe's guest record already holds another email (say, from a stay that matched by phone).
+    await admin.query("UPDATE booking.guest_profiles SET email = $2 WHERE id = $1::uuid", [
+      await profileOf(zoe),
+      "zoe.lang@example.test",
+    ]);
+    expect(await link(nora.guestIds[0]!)).toMatchObject({ email: hotel, synced: true });
+    const idaProfile = (await link(ida1.guestIds[0]!)).profileId;
+    expect((await link(ida2.guestIds[0]!)).profileId).toBe(idaProfile);
+    expect((await link(kai2.guestIds[0]!)).profileId).toBe(
+      (await link(kai1.guestIds[0]!)).profileId,
+    );
+
+    const notes = () =>
+      admin
+        .query(
+          `SELECT note.id::text, note.body, note.source, note.created_at, note.edited_at
+           FROM pms.booking_notes_private note
+           JOIN booking.guest_bookings booking ON booking.id = note.guest_booking_id
+           WHERE booking.property_id = $1::uuid
+           ORDER BY note.id`,
+          [propertyA],
+        )
+        .then((result) => result.rows);
+    const notesBefore = await notes();
+    expect(notesBefore).toHaveLength(18);
+
+    const sql = await readFile(
+      new URL(
+        "../../../../packages/backend-migration/migrations/0556_booking_switch_day_guest_emails.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const migrate = async () => {
+      const client = await admin.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(sql);
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    };
+    const booker = async (stay: { guestIds: string[] }) => {
+      const row = await link(stay.guestIds[0]!);
+      const booked = await admin.query<{ email: string | null }>(
+        "SELECT email FROM booking.booking_guests WHERE id = $1::uuid",
+        [stay.guestIds[0]!],
+      );
+      return { booking: booked.rows[0]!.email, record: row.email, synced: row.synced };
+    };
+
+    await migrate();
+    expect(await booker(nora)).toEqual({
+      booking: "nora.berg@example.test",
+      record: "nora.berg@example.test",
+      synced: true,
+    });
+    // Written as the note has it.
+    expect(await booker(tom)).toMatchObject({
+      booking: "Tom.Hale@Example.test",
+      record: "Tom.Hale@Example.test",
+    });
+    expect(await booker(ida1)).toMatchObject({
+      booking: "ida@example.test",
+      record: "ida@example.test",
+    });
+    expect(await booker(ida2)).toMatchObject({
+      booking: "ida@example.test",
+      record: "ida@example.test",
+    });
+    expect(await booker(kai1)).toMatchObject({ booking: "kai@example.test", record: hotel });
+    expect(await booker(kai2)).toMatchObject({ booking: "kai.lenz@example.test", record: hotel });
+    // Left alone: a canceled copy, one staff corrected, a note without an email, an edited note, a
+    // note from after the copy day, and a desk booking with the same address but no copy note.
+    expect(await booker(canceled)).toMatchObject({ booking: hotel, record: hotel });
+    expect(await booker(corrected)).toMatchObject({
+      booking: "pia.ott@example.test",
+      record: "pia.ott@example.test",
+    });
+    expect(await booker(withoutEmail)).toMatchObject({ booking: hotel, record: hotel });
+    expect(await booker(edited)).toMatchObject({ booking: hotel, record: hotel });
+    expect(await booker(later)).toMatchObject({ booking: hotel, record: hotel });
+    expect(await booker(desk)).toMatchObject({ booking: hotel, record: hotel });
+    expect(await booker(ana1)).toMatchObject({
+      booking: "ana@example.test",
+      record: "ana@example.test",
+    });
+    expect(await booker(ana2)).toMatchObject({ booking: "ana@example.test" });
+    expect(await booker(mia)).toMatchObject({
+      booking: "mia@example.test",
+      record: "mia@example.test",
+    });
+    expect(await booker(leo)).toMatchObject({
+      booking: "leo@example.test",
+      record: "leo@example.test",
+    });
+    expect(await booker(ivo)).toMatchObject({ booking: hotel, record: hotel });
+    // A guest record that holds another email keeps it; the booker still changes.
+    expect(await booker(zoe)).toMatchObject({
+      booking: "zoe@example.test",
+      record: "zoe.lang@example.test",
+    });
+    // The notes are only read.
+    expect(await notes()).toEqual(notesBefore);
+    // One audit row per changed booker, without the email.
+    const audits = () =>
+      admin
+        .query<{ guestRecordChanged: boolean; hasEmail: boolean }>(
+          `SELECT (redacted_payload ->> 'guestRecordChanged')::boolean AS "guestRecordChanged",
+                  (redacted_payload::text || private_payload::text) ~ '@' AS "hasEmail"
+           FROM platform.product_audit_events
+           WHERE audit_key LIKE 'vay2601-0556:%' AND property_id = $1::uuid
+             AND action = 'pms.booking_guest.switch_day_email_restored'`,
+          [propertyA],
+        )
+        .then((result) => result.rows);
+    const audited = await audits();
+    expect(audited).toHaveLength(9);
+    expect(audited.filter((row) => row.guestRecordChanged)).toHaveLength(6);
+    expect(audited.some((row) => row.hasEmail)).toBe(false);
+
+    // The guest-record job leaves the change as it is, and a second run changes nothing.
+    const changed = [nora, tom, ida1, ida2, kai1, kai2, mia, leo, zoe, ana1, ana2];
+    const after = await Promise.all(changed.map(booker));
+    await sweep();
+    expect(await Promise.all(changed.map(booker))).toEqual(after);
+    await migrate();
+    expect(await Promise.all(changed.map(booker))).toEqual(after);
+    expect(await booker(withoutEmail)).toMatchObject({ booking: hotel, record: hotel });
+    expect(await notes()).toEqual(notesBefore);
+    expect(await audits()).toHaveLength(9);
+
+    // More than the 30 copies made that day, or two shared addresses at one hotel, stops it before
+    // any change. Each made copy has its own guest record.
+    const makeCopies = (client: pg.PoolClient, count: number, email: string, label: string) =>
+      client.query(
+        `WITH made AS (
+           SELECT gen_random_uuid() AS booking_id, gen_random_uuid() AS profile_id, n
+           FROM generate_series(1, $5::int) n
+         ), bookings AS (
+           INSERT INTO booking.guest_bookings
+             (id, property_id, public_reference, source_system, source_booking_id, lifecycle_status,
+              check_in, check_out, adults, currency, total_amount, balance_amount, booking_metadata,
+              booking_channel, direct_booking_source)
+           SELECT booking_id, $1::uuid, $2::text || n, 'pms', $2::text || n, 'confirmed',
+                  '2027-09-01', '2027-09-03', 1, 'EUR', 100, 100, '{}'::jsonb, 'direct', 'walk_in'
+           FROM made
+         ), records AS (
+           INSERT INTO booking.guest_profiles (id, account_id, first_name, last_name, email)
+           SELECT profile_id, $6::uuid, 'Gate', $2::text || n, $3 FROM made
+         ), guests AS (
+           INSERT INTO booking.booking_guests
+             (guest_booking_id, guest_role, first_name, last_name, email, guest_profile_id,
+              guest_profile_link)
+           SELECT booking_id, 'booker', 'Gate', $2::text || n, $3, profile_id, 'created' FROM made
+         )
+         INSERT INTO pms.booking_notes_private
+           (property_id, guest_booking_id, body, source, created_at)
+         SELECT $1::uuid, booking_id, $4, 'pms', '2026-11-15T10:00:00Z' FROM made`,
+        [
+          propertyA,
+          `${PREFIX}${label}-`,
+          email,
+          moved(`VAY-${label.toUpperCase()}`, `${label}@example.test`),
+          count,
+          accountId,
+        ],
+      );
+    const stopsWith = async (
+      message: string,
+      make: (client: pg.PoolClient) => Promise<unknown>,
+    ) => {
+      const client = await admin.connect();
+      try {
+        await client.query("BEGIN");
+        await make(client);
+        await expect(client.query(sql)).rejects.toThrow(message);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    };
+    await stopsWith("VAY-2601: more than the 30 switch-day copies match", (client) =>
+      makeCopies(client, 31, hotel, "gate"),
+    );
+    await stopsWith(
+      "VAY-2601: the copies at one hotel hold more than one shared address",
+      async (client) => {
+        await makeCopies(client, 2, "front@hotel.test", "front");
+        await makeCopies(client, 2, hotel, "back");
+      },
+    );
+    expect(await audits()).toHaveLength(9);
   });
 
   it("linked every row of this suite without a row error", async () => {
