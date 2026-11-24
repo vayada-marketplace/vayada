@@ -683,6 +683,115 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await assertHealthy();
   });
 
+  test("asks for the ownership TXT record and says when the domain belongs to another hotel (VAY-2579)", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingAdminAuthenticatedSession(page);
+    await mockBookingAdminShellRoutes(page);
+    await mockBookingAdminDesignSettings(page);
+    const proofValue = "vayada-domain-verification=0123456789abcdef0123456789abcdef";
+    const stored: BookingAdminCustomDomainFixture = {
+      hotelId: BOOKING_ADMIN_HOTEL_ID,
+      propertyId: BOOKING_ADMIN_PROPERTY_ID,
+      configured: true,
+      domain: "book.alpenrose.example",
+      status: "failed",
+      sslStatus: "failed",
+      dnsRecords: [
+        {
+          type: "CNAME",
+          name: "book.alpenrose.example",
+          value: "custom.booking.vayada.com",
+          status: "failed",
+        },
+        {
+          type: "TXT",
+          name: "_vayada.book.alpenrose.example",
+          value: proofValue,
+          status: "pending",
+        },
+      ],
+      verificationErrors: [],
+      verificationIssue: null,
+      checkedAt: "2026-11-24T10:00:00.000Z",
+      updatedAt: "2026-11-24T10:00:00.000Z",
+    };
+    await page.route(`**${BOOKING_ADMIN_CUSTOM_DOMAIN_PATH}*`, (route) =>
+      // Another hotel has connected the domain this hotel tries next.
+      route.request().method() === "PUT"
+        ? route.fulfill({
+            status: 409,
+            json: {
+              statusCode: 409,
+              code: "conflict",
+              category: "validation",
+              message: "This domain is already connected to another hotel.",
+              details: ["Domain is already connected to another property."],
+            },
+          })
+        : route.fulfill({ json: stored }),
+    );
+    // The page checks an unverified domain when it opens: first another hotel's code is there,
+    // then (after Refresh) no code at all.
+    const answers = ["ownership_record_mismatch", "ownership_record_missing"];
+    await page.route(`**${BOOKING_ADMIN_CUSTOM_DOMAIN_PATH}/check`, (route) =>
+      route.fulfill({
+        json: {
+          ...stored,
+          dnsRecords: [
+            { ...stored.dnsRecords[0], host: "book", status: "failed" },
+            { ...stored.dnsRecords[1], host: "_vayada.book", status: "failed" },
+          ],
+          verificationIssue: {
+            code: answers.shift() ?? "ownership_record_missing",
+            foundTarget: null,
+          },
+          checkedAt: "2026-11-24T10:05:00.000Z",
+        },
+      }),
+    );
+
+    await page.goto("/design-studio");
+    await page.getByRole("button", { name: "Domain" }).click();
+
+    await expect(page.getByText("This domain belongs to another hotel")).toBeVisible();
+    await expect(page.getByText("DNS records for your domain")).toBeVisible();
+    await expect(page.getByText("TXT", { exact: true })).toBeVisible();
+    await expect(page.getByText("_vayada.book", { exact: true })).toBeVisible();
+    await expect(page.getByText(proofValue, { exact: true })).toBeVisible();
+    await expect(page.getByText("custom.booking.vayada.com", { exact: true })).toBeVisible();
+    await expect(page.getByText("Not verified", { exact: true })).toBeVisible();
+    await page.getByText("DNS records for your domain").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath("design-studio-domain-another-hotel.png") });
+
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(
+      page.getByText("Add the TXT record below too, so we know book.alpenrose.example is yours."),
+    ).toBeVisible();
+    await expect(page.getByText("This domain belongs to another hotel")).toHaveCount(0);
+    await page.screenshot({
+      path: testInfo.outputPath("design-studio-domain-ownership-missing.png"),
+    });
+
+    // The browser logs the 409 below as a console error, so the page is checked before it.
+    await assertHealthy();
+
+    await page.getByPlaceholder("booking.yourdomain.com").fill("book.taken.example");
+    await page.getByRole("button", { name: "Connect Domain" }).click();
+    await expect(
+      page.getByText(
+        "This domain is already connected to another hotel on Vayada. If it's yours, please contact Vayada support.",
+      ),
+    ).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("design-studio-domain-taken.png") });
+  });
+
   test("greys out header selectors guests cannot see and keeps the saved choice", async ({
     page,
   }, testInfo) => {

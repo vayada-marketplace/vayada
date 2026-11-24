@@ -1336,6 +1336,18 @@ describe("api config", () => {
     ).toEqual(new Map([["www.booking.hotel.example", "aaaa0000-0000-4000-8000-000000000001"]]));
   });
 
+  it("reads the domain ownership secret and refuses a short one (VAY-2579)", () => {
+    expect(loadConfig({}).bookingCustomDomainProofSecret).toBeUndefined();
+    const secret = "a".repeat(64);
+    expect(
+      loadConfig({ BOOKING_CUSTOM_DOMAIN_PROOF_SECRET: ` ${secret} ` })
+        .bookingCustomDomainProofSecret,
+    ).toBe(secret);
+    expect(() => loadConfig({ BOOKING_CUSTOM_DOMAIN_PROOF_SECRET: "short" })).toThrow(
+      "BOOKING_CUSTOM_DOMAIN_PROOF_SECRET must be at least 32 characters",
+    );
+  });
+
   it("keeps platform media serving inactive by default", () => {
     expect(loadConfig({}).platformMediaServing).toBeUndefined();
   });

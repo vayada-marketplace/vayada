@@ -283,6 +283,8 @@ type BookingCustomDomainDnsRecord = {
   status: "pending" | "verified" | "failed";
   host?: string; // name as typed in the hotel's DNS panel ("booking"), after a check
 };
+// VAY-2579: the CNAME, plus a TXT record `_vayada.<domain>` = `vayada-domain-verification=<code>`
+// when the domain needs an ownership proof. The TXT record's status is set by a check.
 
 type BookingAdminCustomDomainResponse = {
   hotelId: string;
@@ -301,7 +303,9 @@ type BookingAdminCustomDomainResponse = {
       | "certificate_pending"
       | "routing_pending"
       | "hostname_rejected"
-      | "check_unavailable";
+      | "check_unavailable"
+      | "ownership_record_missing" // VAY-2579
+      | "ownership_record_mismatch"; // VAY-2579: another hotel's code is there
     foundTarget: string | null;
   } | null;
   checkedAt: string | null;
@@ -332,6 +336,17 @@ Validation and behavior:
   - Otherwise the hotel's CNAME decides: missing or wrong → `failed` with the reason. If it is right,
     the hostname is registered in Cloudflare (as the old booking-api did) and stays `pending` while
     the certificate is issued. Validation that timed out, expired or lost the CNAME is restarted.
+  - Ownership proof (VAY-2579), with `BOOKING_CUSTOM_DOMAIN_PROOF_SECRET` set: a domain that
+    `BOOKING_CUSTOM_DOMAIN_ROUTES` doesn't route for this property must also have the TXT record
+    `_vayada.<domain>` = `vayada-domain-verification=<code>`. The code is the first 32 hex characters
+    of HMAC-SHA256(secret, `<property id>\n<domain>`), so it never changes for a property and domain;
+    no column stores it. The check reads it after a correct CNAME and before registering the hostname
+    in Cloudflare. An already active hostname (such as an old-system hotel's) needs it too. Without
+    it the check answers `failed` with `ownership_record_missing`, or `ownership_record_mismatch` when
+    only other well-formed codes are there (a mistyped one counts as missing). The secret must never
+    change: every hotel's code would change with it. A proven domain then continues as before (`routing_pending` until
+    platform routes it). Domains routed for the property, and every domain when the secret is unset,
+    need no TXT record.
   - A verified domain is never re-checked.
   - Without Cloudflare settings, or when DNS/Cloudflare fail, it answers `check_unavailable` and
     stores nothing.
@@ -345,6 +360,8 @@ Validation and behavior:
     or removed meanwhile deletes the hostname it just registered. Cloudflare failures are logged
     (status and codes) and the change stands.
   - `vayada.com` hostnames are refused.
+  - `PUT` of a domain another property has saved answers `409` `conflict` (VAY-2579); Booking Admin
+    says the domain is already connected to another hotel.
 
 ## Payment Settings Writes
 

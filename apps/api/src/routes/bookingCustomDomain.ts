@@ -6,7 +6,9 @@ import type { QueryResult, QueryResultRow } from "pg";
 
 import {
   BOOKING_CUSTOM_DOMAIN_CNAME_TARGET,
+  BOOKING_CUSTOM_DOMAIN_PROOF_LABEL,
   type BookingCustomDomainCheckResult,
+  type BookingCustomDomainProofRecord,
   type BookingCustomDomainVerifier,
 } from "../domains/bookingCustomDomainVerification.js";
 import { projectPropertyPublicProfile } from "../platform/propertyPublicProfileProjection.js";
@@ -93,7 +95,7 @@ type BookingHotelParams = {
 };
 
 type BookingCustomDomainError = {
-  statusCode: 401 | 403 | 404 | 422 | 500;
+  statusCode: 401 | 403 | 404 | 409 | 422 | 500;
   code:
     | "unauthenticated"
     | "missing_permission"
@@ -101,6 +103,7 @@ type BookingCustomDomainError = {
     | "inactive_entitlement"
     | "missing_resource_access"
     | "invalid_payload"
+    | "conflict"
     | "not_found"
     | "read_model_unavailable"
     | "write_model_unavailable";
@@ -142,7 +145,8 @@ const TARGET_BOOKING_CUSTOM_DOMAIN_CANONICAL_PROPERTY_CTE = `scoped_property AS 
   WHERE property.id = $1::uuid
 )`;
 
-class BookingCustomDomainConflictError extends Error {
+/** Another property has saved the domain (the hostname is unique). */
+export class BookingCustomDomainConflictError extends Error {
   constructor() {
     super("Domain is already connected to another property.");
     this.name = "BookingCustomDomainConflictError";
@@ -349,6 +353,12 @@ export async function registerBookingCustomDomainRoutes(
   options: BookingCustomDomainRouteOptions = {},
 ): Promise<void> {
   const authorizedPropertyIds = new WeakMap<FastifyRequest, string>();
+  // VAY-2579: the answer names the TXT record that proves the domain, when one is needed.
+  const respond = (state: BookingCustomDomainState) =>
+    toBookingCustomDomainResponse(
+      state,
+      state.domain ? (options.verifier?.proofRecord(state.domain, state.propertyId) ?? null) : null,
+    );
   // A live page shows the verified domain (and booking-web redirects to it), so every change of
   // the verified domain republishes it. Fire and forget, like settings saves; failures are logged.
   const refreshPublicPage = (propertyId: string, request: FastifyRequest) => {
@@ -443,7 +453,7 @@ export async function registerBookingCustomDomainRoutes(
         });
       }
 
-      return toBookingCustomDomainResponse({ ...state, hotelId });
+      return respond({ ...state, hotelId });
     },
   );
 
@@ -468,19 +478,20 @@ export async function registerBookingCustomDomainRoutes(
       // Saving the verified domain again keeps it verified (and on the live page) as it is.
       const previous = await repository.findByPropertyId(propertyId).catch(() => null);
       if (previous?.domain === parsed.value.domain && previous.verificationStatus === "verified") {
-        return toBookingCustomDomainResponse({ ...previous, hotelId });
+        return respond({ ...previous, hotelId });
       }
 
       let state: BookingCustomDomainState | null;
       try {
         state = await repository.upsertForPropertyId(propertyId, parsed.value.domain);
       } catch (error) {
+        // VAY-2579: Booking Admin tells the hotel the domain is another hotel's.
         if (error instanceof BookingCustomDomainConflictError) {
           return sendBookingCustomDomainError(reply, {
-            statusCode: 422,
-            code: "invalid_payload",
+            statusCode: 409,
+            code: "conflict",
             category: "validation",
-            message: "Booking custom-domain payload is invalid.",
+            message: "This domain is already connected to another hotel.",
             details: [error.message],
           });
         }
@@ -509,7 +520,7 @@ export async function registerBookingCustomDomainRoutes(
       if (!previous || previous.verificationStatus === "verified") {
         refreshPublicPage(propertyId, request);
       }
-      return toBookingCustomDomainResponse({ ...state, hotelId });
+      return respond({ ...state, hotelId });
     },
   );
 
@@ -543,7 +554,7 @@ export async function registerBookingCustomDomainRoutes(
       // A verified domain stays verified; there is nothing to check without one.
       const status = toContractStatus(state);
       if ((status !== "pending" && status !== "failed") || !state.domain) {
-        return toBookingCustomDomainResponse({ ...state, hotelId });
+        return respond({ ...state, hotelId });
       }
 
       const domain = state.domain;
@@ -564,7 +575,8 @@ export async function registerBookingCustomDomainRoutes(
       if (result.issue?.code === "routing_pending") {
         // Vayada's turn: platform's next_booking_custom_domains needs "<domain>" for this property.
         request.log.warn(
-          { propertyId, domain },
+          // proven: the hotel's ownership TXT record is there (VAY-2579), so ops may route it.
+          { propertyId, domain, proven: result.proofStatus === "verified" },
           "Custom domain is ready in Cloudflare but not routed to the new booking frontend",
         );
       }
@@ -598,7 +610,7 @@ export async function registerBookingCustomDomainRoutes(
         if (!recorded) {
           await releaseHostname(domain, result.registeredHostnameId, propertyId, request);
           const current = await repository.findByPropertyId(propertyId).catch(() => null);
-          if (current) return toBookingCustomDomainResponse({ ...current, hotelId });
+          if (current) return respond({ ...current, hotelId });
           return sendBookingCustomDomainError(reply, {
             statusCode: 404,
             code: "not_found",
@@ -621,12 +633,23 @@ export async function registerBookingCustomDomainRoutes(
         }
       }
 
-      const response = toBookingCustomDomainResponse({ ...state, hotelId });
+      const response = respond({ ...state, hotelId });
       return {
         ...response,
-        dnsRecords: response.dnsRecords.map((record) =>
-          result.recordHost ? { ...record, host: result.recordHost } : record,
-        ),
+        dnsRecords: response.dnsRecords.map((record): BookingCustomDomainDnsRecord => {
+          const host =
+            result.recordHost && record.type === "TXT"
+              ? `${BOOKING_CUSTOM_DOMAIN_PROOF_LABEL}.${result.recordHost}`
+              : result.recordHost;
+          // The CNAME was right when the check got as far as the TXT record.
+          const checked: Partial<Pick<BookingCustomDomainDnsRecord, "status">> =
+            record.type === "TXT"
+              ? { status: result.proofStatus ?? "pending" }
+              : result.issue?.code.startsWith("ownership_")
+                ? { status: "verified" as const }
+                : {};
+          return { ...record, ...checked, ...(host ? { host } : {}) };
+        }),
         verificationErrors: result.errors.length > 0 ? result.errors : response.verificationErrors,
         verificationIssue: result.issue,
         checkedAt: new Date().toISOString(),
@@ -864,6 +887,7 @@ function parseUpsertBookingCustomDomainBody(
 
 function toBookingCustomDomainResponse(
   state: BookingCustomDomainState,
+  proof: BookingCustomDomainProofRecord | null = null,
 ): BookingCustomDomainResponse {
   const status = toContractStatus(state);
   const configured = status !== "not_configured";
@@ -885,7 +909,18 @@ function toBookingCustomDomainResponse(
             name: domain,
             value: BOOKING_CUSTOM_DOMAIN_CNAME_TARGET,
             status: status === "verified" ? "verified" : status === "failed" ? "failed" : "pending",
-          },
+          } satisfies BookingCustomDomainDnsRecord,
+          // VAY-2579: whether it is there is known only after a check.
+          ...(proof
+            ? [
+                {
+                  type: "TXT",
+                  name: proof.name,
+                  value: proof.value,
+                  status: status === "verified" ? "verified" : "pending",
+                } satisfies BookingCustomDomainDnsRecord,
+              ]
+            : []),
         ]
       : [],
     verificationErrors:

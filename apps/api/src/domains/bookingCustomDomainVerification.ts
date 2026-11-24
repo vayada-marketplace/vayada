@@ -1,7 +1,12 @@
+import { createHmac } from "node:crypto";
 import { Resolver } from "node:dns/promises";
 
 /** Every hotel domain points here; Cloudflare for SaaS serves it (fallback origin → the ALB). */
 export const BOOKING_CUSTOM_DOMAIN_CNAME_TARGET = "custom.booking.vayada.com";
+/** VAY-2579: a hotel proves its domain with a TXT record under this label of the domain. DNS allows
+ * nothing next to a CNAME, so the record can't sit on the domain itself. */
+export const BOOKING_CUSTOM_DOMAIN_PROOF_LABEL = "_vayada";
+export const BOOKING_CUSTOM_DOMAIN_PROOF_PREFIX = "vayada-domain-verification=";
 
 export type BookingCustomDomainIssueCode =
   | "dns_record_missing"
@@ -9,7 +14,13 @@ export type BookingCustomDomainIssueCode =
   | "certificate_pending"
   | "routing_pending"
   | "hostname_rejected"
-  | "check_unavailable";
+  | "check_unavailable"
+  // VAY-2579: the domain's TXT record is missing, or holds another hotel's code.
+  | "ownership_record_missing"
+  | "ownership_record_mismatch";
+
+/** The TXT record that proves a hotel owns its domain (VAY-2579). */
+export type BookingCustomDomainProofRecord = { name: string; value: string };
 
 export type BookingCustomDomainCheckResult = {
   status: "verified" | "pending" | "failed";
@@ -21,10 +32,18 @@ export type BookingCustomDomainCheckResult = {
   /** The Cloudflare hostname this check registered (VAY-2580). The domain row keeps it, so removing
    * the domain deletes that hostname and no other. */
   registeredHostnameId?: string;
+  /** The ownership record's state when this check read it (VAY-2579); absent when it didn't. */
+  proofStatus?: "verified" | "failed";
 };
 
 export type BookingCustomDomainVerifier = {
   check(hostname: string, propertyId: string): Promise<BookingCustomDomainCheckResult>;
+  /**
+   * The TXT record this property must add to prove the hostname is its own (VAY-2579); null when
+   * none is needed: no proof secret configured, or platform already routes the hostname for this
+   * property (ops confirmed those by hand).
+   */
+  proofRecord(hostname: string, propertyId: string): BookingCustomDomainProofRecord | null;
   /**
    * Deletes a Cloudflare hostname that a check registered (`registeredHostnameId`), once its domain
    * is removed or replaced (VAY-2580). "absent" when it was already gone.
@@ -53,6 +72,8 @@ export type CustomDomainDns = {
   /** The hostname's CNAME target, or null when it has none (no record, or no such name). */
   cnameTarget(hostname: string): Promise<string | null>;
   recordHost(hostname: string): Promise<string | null>;
+  /** The name's TXT values (chunks joined); empty when it has none. */
+  txtValues(name: string): Promise<string[]>;
 };
 
 /** A Cloudflare API call that failed; carries only status and error codes, never the token. */
@@ -71,6 +92,7 @@ export class CloudflareCustomHostnameError extends Error {
 // The same SSL settings the old booking-api used: HTTP validation through the hotel's CNAME.
 const SSL_SETTINGS = { method: "http", type: "dv", settings: { min_tls_version: "1.2" } };
 const HOSTNAME_ALREADY_EXISTS = 1406;
+const WELL_FORMED_PROOF = new RegExp(`^${BOOKING_CUSTOM_DOMAIN_PROOF_PREFIX}[0-9a-f]{32}$`);
 const HOSTNAME_NOT_FOUND = 1436;
 // Cloudflare is removing or refusing the hostname: Vayada has to look at it.
 const REJECTED_STATUSES = new Set(["blocked", "deleted", "pending_deletion"]);
@@ -158,7 +180,7 @@ export function createCloudflareCustomHostnames(config: {
 }
 
 export function createCustomDomainDns(
-  resolver: Pick<Resolver, "resolveCname" | "resolveSoa"> = new Resolver({
+  resolver: Pick<Resolver, "resolveCname" | "resolveSoa" | "resolveTxt"> = new Resolver({
     timeout: 2_000,
     tries: 2,
   }),
@@ -188,6 +210,14 @@ export function createCustomDomainDns(
       }
       return null;
     },
+    async txtValues(name) {
+      try {
+        return (await resolver.resolveTxt(name)).map((chunks) => chunks.join(""));
+      } catch (error) {
+        if (isMissingName(error)) return [];
+        throw error;
+      }
+    },
   };
 }
 
@@ -199,15 +229,65 @@ export function createCustomDomainDns(
  * old-system hotel's hostname is already active in Cloudflare). Otherwise the hotel's DNS explains
  * why. The hostname is only registered with Cloudflare once its CNAME is right, so typos and
  * abandoned domains leave nothing behind.
+ *
+ * VAY-2579: with a proof secret, a hostname platform doesn't route for this property must also carry
+ * this property's TXT record (`proofRecord`) before it is registered or counts as ready. An old-system
+ * hotel's hostname is active in Cloudflare already, so it needs the record too.
  */
 export function createBookingCustomDomainVerifier(dependencies: {
   cloudflare: CloudflareCustomHostnames;
   dns: CustomDomainDns;
   /** hostname → the property id it is routed for. */
   routes: ReadonlyMap<string, string>;
+  /** Keys each property's ownership code; without it no TXT record is asked for (today's rule). */
+  proofSecret?: string;
 }): BookingCustomDomainVerifier {
   const active = (custom: CloudflareCustomHostname) =>
     custom.status === "active" && custom.sslStatus === "active";
+  const proofRecord = (hostname: string, propertyId: string) => {
+    const property = propertyId.toLowerCase();
+    if (!dependencies.proofSecret || dependencies.routes.get(hostname) === property) return null;
+    const code = createHmac("sha256", dependencies.proofSecret)
+      .update(`${property}\n${hostname}`)
+      .digest("hex")
+      .slice(0, 32);
+    return {
+      name: `${BOOKING_CUSTOM_DOMAIN_PROOF_LABEL}.${hostname}`,
+      value: `${BOOKING_CUSTOM_DOMAIN_PROOF_PREFIX}${code}`,
+    };
+  };
+  // Null when the record proves the hostname for this property; otherwise why not.
+  const ownershipFailure = async (
+    proof: BookingCustomDomainProofRecord,
+    recordHost: string | null,
+  ): Promise<BookingCustomDomainCheckResult | null> => {
+    const codes = (await dependencies.dns.txtValues(proof.name))
+      .map((value) =>
+        value
+          .trim()
+          .replace(/^"(.*)"$/, "$1")
+          .trim()
+          .toLowerCase(),
+      )
+      .filter((value) => value.startsWith(BOOKING_CUSTOM_DOMAIN_PROOF_PREFIX));
+    if (codes.includes(proof.value)) return null;
+    // Only a well-formed code is another hotel's; a mistyped or cut-off paste is just not there yet.
+    const mismatch = codes.some((value) => WELL_FORMED_PROOF.test(value));
+    return {
+      status: "failed",
+      issue: {
+        code: mismatch ? "ownership_record_mismatch" : "ownership_record_missing",
+        foundTarget: null,
+      },
+      recordHost,
+      errors: [
+        mismatch
+          ? `The TXT record ${proof.name} holds another hotel's code. Only this hotel's code proves the domain is its own.`
+          : `No TXT record ${proof.name} with this hotel's code found. Add it to prove the domain is yours.`,
+      ],
+      proofStatus: "failed",
+    };
+  };
   const ready = (
     hostname: string,
     propertyId: string,
@@ -224,8 +304,15 @@ export function createBookingCustomDomainVerifier(dependencies: {
 
   return {
     async check(hostname, propertyId) {
+      const proof = proofRecord(hostname, propertyId);
+      const proven = proof ? ({ proofStatus: "verified" } as const) : {};
       const found = await dependencies.cloudflare.find(hostname);
-      if (found && active(found)) return ready(hostname, propertyId, null);
+      if (found && active(found)) {
+        if (!proof) return ready(hostname, propertyId, null);
+        const recordHost = await dependencies.dns.recordHost(hostname);
+        const failure = await ownershipFailure(proof, recordHost);
+        return failure ?? { ...ready(hostname, propertyId, recordHost), ...proven };
+      }
 
       const [target, recordHost] = await Promise.all([
         dependencies.dns.cnameTarget(hostname),
@@ -252,6 +339,11 @@ export function createBookingCustomDomainVerifier(dependencies: {
         };
       }
 
+      if (proof) {
+        const failure = await ownershipFailure(proof, recordHost);
+        if (failure) return failure;
+      }
+
       // Only a hostname this check registered is recorded, and only such a one is ever deleted: the
       // old booking-api's hostnames share the zone, and its pages may still use them.
       let registeredHostnameId: string | undefined;
@@ -272,6 +364,7 @@ export function createBookingCustomDomainVerifier(dependencies: {
             ...custom.errors,
           ],
           ...registered,
+          ...proven,
         };
       }
       // The record is right now: validation that timed out, expired or lost the CNAME starts over.
@@ -283,15 +376,19 @@ export function createBookingCustomDomainVerifier(dependencies: {
       ) {
         custom = await dependencies.cloudflare.restartValidation(custom.id);
       }
-      if (active(custom)) return { ...ready(hostname, propertyId, recordHost), ...registered };
+      if (active(custom)) {
+        return { ...ready(hostname, propertyId, recordHost), ...registered, ...proven };
+      }
       return {
         status: "pending",
         issue: { code: "certificate_pending", foundTarget: null },
         recordHost,
         errors: custom.errors,
         ...registered,
+        ...proven,
       };
     },
+    proofRecord,
     async release(hostnameId) {
       return (await dependencies.cloudflare.remove(hostnameId)) ? "deleted" : "absent";
     },
