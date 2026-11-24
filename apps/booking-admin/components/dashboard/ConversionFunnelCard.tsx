@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { formatNumber } from "@/lib/utils";
-import { funnelCsv, funnelRows } from "@/lib/utils/dashboardFunnel";
+import { funnelCsv, funnelDisplay, funnelRows } from "@/lib/utils/dashboardFunnel";
 import { TIME_RANGES, type ConversionFunnel, type TimeRange } from "@/services/dashboard";
 
 type Props = {
@@ -10,17 +10,13 @@ type Props = {
   loading: boolean;
   error: boolean;
   locale: string;
-  t: (key: string) => string;
+  t: (key: string, params?: Record<string, string | number>) => string;
   exportFileName: string;
   /** The page's selected range; the page tabs and this menu share it. */
   timeRange: TimeRange;
   onTimeRangeChange: (range: TimeRange) => void;
-};
-
-// Branch rows compare with their own eligible cohort rather than the row above.
-const DROP_BASE: Record<string, string> = {
-  payment_authorized: "dashboard.funnel.ofCardClicks",
-  booking_completed: "dashboard.funnel.ofEligibleSubmissions",
+  /** Opens the Details window on conversion (VAY-2594). */
+  onDetails?: () => void;
 };
 
 export function ConversionFunnelCard({
@@ -32,13 +28,15 @@ export function ConversionFunnelCard({
   exportFileName,
   timeRange,
   onTimeRangeChange,
+  onDetails,
 }: Props) {
   const tooltipId = useId();
   const rangeLabelId = useId();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
-  const rows = funnel?.steps.some((step) => step.count > 0) ? funnelRows(funnel) : null;
+  // The six steps of the card (VAY-2594); the CSV keeps every stage.
+  const display = funnel?.steps.some((step) => step.count > 0) ? funnelDisplay(funnel) : null;
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -91,9 +89,6 @@ export function ConversionFunnelCard({
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
   };
 
-  const percent = (value: number | null) =>
-    value === null ? "—" : `${formatNumber(value, locale)}%`;
-
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
       <div className="flex items-start justify-between gap-3 mb-5">
@@ -134,124 +129,134 @@ export function ConversionFunnelCard({
             </span>
           </div>
         </div>
-        <div ref={menuRef} className="relative">
-          <button
-            ref={menuButtonRef}
-            type="button"
-            aria-label={t("dashboard.conversionFunnel.options")}
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((open) => !open)}
-            className="rounded-md p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300"
-          >
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <circle cx="5" cy="12" r="1.5" />
-              <circle cx="12" cy="12" r="1.5" />
-              <circle cx="19" cy="12" r="1.5" />
-            </svg>
-          </button>
-          {menuOpen && (
-            <div className="absolute right-0 top-full z-10 mt-1 min-w-44 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
-              <p
-                id={rangeLabelId}
-                className="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-              >
-                {t("dashboard.conversionFunnel.timeRange")}
-              </p>
-              <div role="group" aria-labelledby={rangeLabelId}>
-                {TIME_RANGES.map(([range, label]) => (
-                  <button
-                    key={range}
-                    type="button"
-                    aria-pressed={timeRange === range}
-                    onClick={() => {
-                      closeMenu();
-                      onTimeRangeChange(range);
-                    }}
-                    className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[13px] text-gray-700 hover:bg-gray-50"
-                  >
-                    {t(label)}
-                    {timeRange === range && (
-                      <svg
-                        className="w-4 h-4 text-primary-600"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                        aria-hidden="true"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="m4.5 12.75 6 6 9-13.5"
-                        />
-                      </svg>
-                    )}
-                  </button>
-                ))}
-              </div>
-              <div className="my-1 border-t border-gray-100" />
-              <button
-                type="button"
-                disabled={!funnel}
-                onClick={exportCsv}
-                className="block w-full px-3 py-1.5 text-left text-[13px] text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-400"
-              >
-                {t("dashboard.conversionFunnel.exportCsv")}
-              </button>
-            </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {onDetails && (
+            <button
+              type="button"
+              onClick={onDetails}
+              aria-label={t("dashboard.details.open.conversion")}
+              className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-[13px] font-medium text-gray-900 hover:bg-gray-50"
+            >
+              {t("dashboard.stats.details")} ›
+            </button>
           )}
+          <div ref={menuRef} className="relative">
+            <button
+              ref={menuButtonRef}
+              type="button"
+              aria-label={t("dashboard.conversionFunnel.options")}
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((open) => !open)}
+              className="rounded-md p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <circle cx="5" cy="12" r="1.5" />
+                <circle cx="12" cy="12" r="1.5" />
+                <circle cx="19" cy="12" r="1.5" />
+              </svg>
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-full z-10 mt-1 min-w-44 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                <p
+                  id={rangeLabelId}
+                  className="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+                >
+                  {t("dashboard.conversionFunnel.timeRange")}
+                </p>
+                <div role="group" aria-labelledby={rangeLabelId}>
+                  {TIME_RANGES.map(([range, label]) => (
+                    <button
+                      key={range}
+                      type="button"
+                      aria-pressed={timeRange === range}
+                      onClick={() => {
+                        closeMenu();
+                        onTimeRangeChange(range);
+                      }}
+                      className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[13px] text-gray-700 hover:bg-gray-50"
+                    >
+                      {t(label)}
+                      {timeRange === range && (
+                        <svg
+                          className="w-4 h-4 text-primary-600"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                          aria-hidden="true"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="m4.5 12.75 6 6 9-13.5"
+                          />
+                        </svg>
+                      )}
+                    </button>
+                  ))}
+                </div>
+                <div className="my-1 border-t border-gray-100" />
+                <button
+                  type="button"
+                  disabled={!funnel}
+                  onClick={exportCsv}
+                  className="block w-full px-3 py-1.5 text-left text-[13px] text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-400"
+                >
+                  {t("dashboard.conversionFunnel.exportCsv")}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {rows ? (
-        <ol className="space-y-3.5" aria-busy={loading}>
-          {rows.map(({ stage, count, percentOfVisits, drop, dropPercent }) => (
-            <li
-              key={stage}
-              className={stage === "payment_authorized" ? "pl-3 border-l-2 border-gray-200" : ""}
-            >
-              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 mb-1.5">
-                <span className="text-[13px] text-gray-900">
-                  {t(`dashboard.funnel.${stage}`)}{" "}
-                  <span className="text-gray-500">&middot; {formatNumber(count, locale)}</span>
+      {display ? (
+        <div className="flex flex-col gap-3" aria-busy={loading}>
+          <ol className="flex flex-col gap-2.5">
+            {display.rows.map((row) => (
+              <li
+                key={row.stage}
+                className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap"
+              >
+                <span className="w-full shrink-0 text-[13px] text-gray-700 sm:w-[150px]">
+                  {t(`dashboard.funnelSteps.${row.key}`)}
                 </span>
-                <span className="flex items-baseline gap-2 text-[13px]">
-                  <span className="text-gray-900">{percent(percentOfVisits)}</span>
-                  {drop !== null && (
-                    <span
-                      className={`text-xs ${drop > 0 ? "text-red-600" : "text-gray-400"}`}
-                      title={DROP_BASE[stage] ? t(DROP_BASE[stage]) : undefined}
+                <div className="h-7 min-w-0 flex-1 overflow-hidden rounded-md bg-[#F6F7F9]">
+                  {row.count > 0 ? (
+                    <div
+                      className="flex h-full min-w-[44px] items-center rounded-md bg-[#2B4BF2]"
+                      style={{ width: `${row.width}%` }}
                     >
-                      {drop > 0 ? "\u2212" : ""}
-                      {formatNumber(drop, locale)} ({percent(dropPercent)})
-                      {DROP_BASE[stage] && <span className="sr-only"> {t(DROP_BASE[stage])}</span>}
+                      <span className="pl-2 text-xs font-semibold text-white">
+                        {formatNumber(row.count, locale)}
+                      </span>
+                    </div>
+                  ) : (
+                    // Nobody reached this step: no bar, a grey 0 on the empty track.
+                    <span className="flex h-full items-center pl-2 text-xs font-semibold text-gray-400">
+                      {formatNumber(0, locale)}
                     </span>
                   )}
-                </span>
-              </div>
-              <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-100">
-                <div
-                  className={`h-full rounded-full bg-gradient-to-r ${stage === "booking_completed" ? "from-green-400 to-green-700" : "from-primary-300 to-primary-600"}`}
-                  style={{ width: `${Math.min(Math.max(percentOfVisits ?? 0, 0), 100)}%` }}
-                />
-              </div>
-              {stage === "complete_booking_clicked" && funnel && (
-                <div className="flex flex-wrap gap-x-3 text-xs text-gray-500 mt-1.5">
-                  {funnel.paymentMethods.map(({ method, count: methodCount }) => (
-                    <span key={method}>
-                      {t(`dashboard.funnel.method.${method}`)}: {formatNumber(methodCount, locale)}{" "}
-                      (
-                      {count
-                        ? formatNumber(Math.round((methodCount / count) * 1000) / 10, locale)
-                        : 0}
-                      %)
-                    </span>
-                  ))}
                 </div>
-              )}
-            </li>
-          ))}
-        </ol>
+                <span className="w-[54px] shrink-0 text-right text-xs text-gray-500">
+                  {row.continued === null ? "" : `${formatNumber(row.continued, locale)}%`}
+                </span>
+              </li>
+            ))}
+          </ol>
+          <div className="flex justify-between gap-3 border-t border-[#F0F2F5] pt-3 text-[13px]">
+            <span className="text-gray-500">{t("dashboard.funnelSteps.overallLabel")}</span>
+            <span className="font-semibold text-gray-900">
+              {display.overall === null
+                ? "—"
+                : t("dashboard.funnelSteps.overall", {
+                    percent: formatNumber(display.overall, locale, {
+                      maximumFractionDigits: display.overall < 10 ? 2 : 1,
+                    }),
+                  })}
+            </span>
+          </div>
+        </div>
       ) : (
         <p className="text-[13px] text-gray-500 text-center py-8" aria-busy={loading}>
           {loading

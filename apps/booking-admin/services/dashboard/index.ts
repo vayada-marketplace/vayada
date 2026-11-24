@@ -28,17 +28,30 @@ export interface DashboardStats {
   live_since: string | null;
 }
 
-export interface SourceBreakdown {
-  source: string;
-  revenue: number;
-  percentage: number;
-  count: number;
+/** Guest insights (VAY-2594): the guests of the range's bookings, one per booking. */
+export interface GuestInsights {
+  guests: number;
+  nationalities: { country: string | null; guests: number }[];
+  ages: { bucket: string; guests: number }[];
+  age_known: number;
+  /** Ages show only to people who may read reservations. */
+  ages_hidden: boolean;
+  stays: { bucket: string; guests: number }[];
+  average_nights: number | null;
+  average_lead_days: number | null;
 }
 
-export interface BookingsBySource {
-  currency: string;
-  total_revenue: number;
-  sources: SourceBreakdown[];
+/** One channel or direct source: bookings made in the range and in the period before. */
+export interface ChannelCount {
+  key: string;
+  bookings: number;
+  previous: number;
+}
+
+/** Bookings by channel (VAY-2594): every channel, and the direct ones by source. */
+export interface ChannelMix {
+  channels: ChannelCount[];
+  sources: ChannelCount[];
 }
 
 export interface ConversionFunnel {
@@ -64,24 +77,13 @@ export interface PageViewBucket {
   count: number;
 }
 
-export interface PageViewsTimeline {
-  time_zone: string;
-  window_start: string;
-  window_end: string;
-  previous_window_start: string;
-  previous_window_end: string;
-  buckets: PageViewBucket[];
-  previous_buckets: PageViewBucket[];
-  total: number;
-  previous_total: number;
-  has_previous_data: boolean;
-}
-
 /** One bar of the revenue chart: direct bookings made that day (VAY-2594). */
 export interface RevenueDay {
   date: string;
   revenue: number;
   bookings: number;
+  /** Of those, the ones made on the booking page (the conversion rate's). */
+  booking_page_bookings: number;
 }
 
 export interface RevenueDays {
@@ -102,6 +104,26 @@ export interface DayBooking {
   currency: string;
   /** False for a booking in another currency, which the day's revenue leaves out. */
   counted_in_revenue: boolean;
+}
+
+/** A booking in the Details window's lists, with the day it was made and its state. */
+export interface DashboardBooking extends DayBooking {
+  booked_on: string;
+  status: "confirmed" | "canceled";
+}
+
+/** The Details window (VAY-2594): breakdowns and booking lists for the range and the one before. */
+export interface DashboardDetails {
+  currency: string;
+  /** First day every booking page view is counted (VAY-2592), or null. */
+  page_views_counted_from: string | null;
+  room_types: { name: string | null; revenue: number; previous: number }[];
+  lead_times: { bucket: "0-7" | "8-30" | "31-90" | "90+"; bookings: number; previous: number }[];
+  canceled_bookings: number;
+  top_bookings: DashboardBooking[];
+  recent_bookings: DashboardBooking[];
+  bookings_hidden: boolean;
+  can_open_in_pms: boolean;
 }
 
 /** The day window: the direct bookings made on one day (VAY-2594). */
@@ -174,16 +196,23 @@ type TargetDashboardStatsResponse = {
   };
 };
 
-type TargetSourceMixResponse = {
-  sourceMix: {
-    totalRevenue: Money;
-    items: {
-      source: string;
-      revenue: Money;
-      bookingCount: number;
-      unverifiedBookingCount?: number;
-      revenueSharePercent: number;
-    }[];
+type TargetGuestsResponse = {
+  guestInsights: {
+    guestCount: number;
+    nationalities: { countryCode: string | null; guestCount: number }[];
+    ages: { bucket: string; guestCount: number }[];
+    ageKnownCount: number;
+    stays: { bucket: string; guestCount: number }[];
+    averageNights: number | null;
+    averageLeadDays: number | null;
+  };
+  agesHidden?: boolean;
+};
+
+type TargetChannelMixResponse = {
+  channelMix: {
+    channels: { key: string; bookingCount: number; previousBookingCount: number }[];
+    directSources: { key: string; bookingCount: number; previousBookingCount: number }[];
   };
 };
 
@@ -201,9 +230,60 @@ type TargetSparklinesResponse = {
 
 type TargetRevenueDaysResponse = {
   revenueDays: {
-    days: { date: string; revenue: Money; bookingCount: number }[];
+    days: {
+      date: string;
+      revenue: Money;
+      bookingCount: number;
+      bookingPageBookingCount?: number;
+    }[];
   };
 };
+
+type TargetBooking = {
+  id: string;
+  reference: string;
+  bookedOn: string;
+  status: "confirmed" | "canceled";
+  checkIn: string;
+  checkOut: string;
+  nights: number;
+  roomNames: string[];
+  total: Money;
+  countedInRevenue: boolean;
+};
+
+type TargetDetailsResponse = {
+  details: {
+    pageViewsCountedFrom: string | null;
+    roomTypes: { name: string | null; revenue: Money; previousRevenue: Money }[];
+    leadTimes: {
+      bucket: "0-7" | "8-30" | "31-90" | "90+";
+      bookingCount: number;
+      previousBookingCount: number;
+    }[];
+    canceledBookingCount: number;
+    topBookings: TargetBooking[];
+    recentBookings: TargetBooking[];
+  };
+  bookingsHidden?: boolean;
+  canOpenInPms: boolean;
+};
+
+function toDashboardBooking(booking: TargetBooking): DashboardBooking {
+  return {
+    id: booking.id,
+    reference: booking.reference,
+    booked_on: booking.bookedOn,
+    status: booking.status,
+    check_in: booking.checkIn,
+    check_out: booking.checkOut,
+    nights: booking.nights,
+    room_names: booking.roomNames,
+    total: amount(booking.total),
+    currency: booking.total.currency,
+    counted_in_revenue: booking.countedInRevenue,
+  };
+}
 
 type TargetDayBookingsResponse = {
   dayBookings: {
@@ -331,21 +411,52 @@ export const dashboardService = {
     };
   },
 
-  getBookingsBySource: async (range: TimeRange, timeZone: string): Promise<BookingsBySource> => {
+  /** Whether page views are being counted: bookings on the booking page this week, no views. */
+  getTrackingMissing: async (): Promise<boolean> => {
+    const basePath = requireDashboardBasePath();
+    const response = await apiClient.get<{ tracking: { trackingMissing: boolean } }>(
+      `${basePath}/tracking`,
+    );
+    return response.tracking.trackingMissing === true;
+  },
+
+  getGuestInsights: async (range: TimeRange, timeZone: string): Promise<GuestInsights> => {
     const basePath = requireDashboardBasePath();
     const query = rangeQuery(range, timeZone);
-    const response = await apiClient.get<TargetSourceMixResponse>(
-      `${basePath}/bookings-by-source?periodStart=${query.currentStart}&periodEnd=${query.currentEnd}`,
+    const response = await apiClient.get<TargetGuestsResponse>(
+      `${basePath}/guests?periodStart=${query.currentStart}&periodEnd=${query.currentEnd}`,
     );
+    const insights = response.guestInsights;
     return {
-      currency: response.sourceMix.totalRevenue.currency,
-      total_revenue: amount(response.sourceMix.totalRevenue),
-      sources: response.sourceMix.items.map((item) => ({
-        source: item.source,
-        revenue: amount(item.revenue),
-        percentage: item.revenueSharePercent,
-        count: item.bookingCount,
+      guests: insights.guestCount,
+      nationalities: insights.nationalities.map((row) => ({
+        country: row.countryCode,
+        guests: row.guestCount,
       })),
+      ages: insights.ages.map((row) => ({ bucket: row.bucket, guests: row.guestCount })),
+      age_known: insights.ageKnownCount,
+      ages_hidden: response.agesHidden === true,
+      stays: insights.stays.map((row) => ({ bucket: row.bucket, guests: row.guestCount })),
+      average_nights: insights.averageNights,
+      average_lead_days: insights.averageLeadDays,
+    };
+  },
+
+  getChannelMix: async (range: TimeRange, timeZone: string): Promise<ChannelMix> => {
+    const basePath = requireDashboardBasePath();
+    const query = rangeQuery(range, timeZone);
+    const response = await apiClient.get<TargetChannelMixResponse>(
+      `${basePath}/channels?periodStart=${query.currentStart}&periodEnd=${query.currentEnd}&previousPeriodStart=${query.previousStart}&previousPeriodEnd=${query.previousEnd}`,
+    );
+    const counts = (rows: TargetChannelMixResponse["channelMix"]["channels"]) =>
+      rows.map((row) => ({
+        key: row.key,
+        bookings: row.bookingCount,
+        previous: row.previousBookingCount,
+      }));
+    return {
+      channels: counts(response.channelMix.channels),
+      sources: counts(response.channelMix.directSources),
     };
   },
 
@@ -386,8 +497,48 @@ export const dashboardService = {
         date: day.date,
         revenue: amount(day.revenue),
         bookings: day.bookingCount,
+        booking_page_bookings: day.bookingPageBookingCount ?? 0,
       })),
     };
+  },
+
+  getDetails: async (range: TimeRange, timeZone: string): Promise<DashboardDetails> => {
+    const basePath = requireDashboardBasePath();
+    const query = rangeQuery(range, timeZone);
+    const response = await apiClient.get<TargetDetailsResponse>(
+      `${basePath}/details?periodStart=${query.currentStart}&periodEnd=${query.currentEnd}&previousPeriodStart=${query.previousStart}&previousPeriodEnd=${query.previousEnd}`,
+    );
+    const details = response.details;
+    return {
+      currency:
+        details.roomTypes[0]?.revenue.currency ?? details.topBookings[0]?.total.currency ?? "EUR",
+      page_views_counted_from: details.pageViewsCountedFrom,
+      room_types: details.roomTypes.map((row) => ({
+        name: row.name,
+        revenue: amount(row.revenue),
+        previous: amount(row.previousRevenue),
+      })),
+      lead_times: details.leadTimes.map((row) => ({
+        bucket: row.bucket,
+        bookings: row.bookingCount,
+        previous: row.previousBookingCount,
+      })),
+      canceled_bookings: details.canceledBookingCount,
+      top_bookings: details.topBookings.map(toDashboardBooking),
+      recent_bookings: details.recentBookings.map(toDashboardBooking),
+      bookings_hidden: response.bookingsHidden === true,
+      can_open_in_pms: response.canOpenInPms === true,
+    };
+  },
+
+  /** Page views per day of the range, for the Details window. */
+  getPageViewsForRange: async (range: TimeRange, timeZone: string): Promise<PageViewBucket[]> => {
+    const basePath = requireDashboardBasePath();
+    const query = rangeQuery(range, timeZone);
+    const response = await apiClient.get<TargetPageViewsResponse>(
+      `${basePath}/page-views?windowStart=${query.currentStart}&windowEnd=${query.currentEnd}`,
+    );
+    return response.pageViews.buckets;
   },
 
   getDayBookings: async (date: string): Promise<DayBookings> => {
@@ -415,34 +566,6 @@ export const dashboardService = {
       })),
       bookings_hidden: response.bookingsHidden === true,
       can_open_in_pms: response.canOpenInPms === true,
-    };
-  },
-
-  getPageViewsTimeline: async (
-    weekOffset: number,
-    timeZone: string,
-  ): Promise<PageViewsTimeline> => {
-    const basePath = requireDashboardBasePath();
-    const propertyToday = dateInTimeZone(new Date(), timeZone);
-    const windowEnd = shiftIsoDate(propertyToday, -7 * Math.max(weekOffset, 0));
-    const windowStart = shiftIsoDate(windowEnd, -6);
-    const response = await apiClient.get<TargetPageViewsResponse>(
-      `${basePath}/page-views?windowStart=${windowStart}&windowEnd=${windowEnd}`,
-    );
-    if (response.pageViews.timeZone !== timeZone) {
-      throw new Error("Property timezone changed while loading page views.");
-    }
-    return {
-      time_zone: response.pageViews.timeZone,
-      window_start: response.pageViews.windowStart,
-      window_end: response.pageViews.windowEnd,
-      previous_window_start: response.pageViews.previousWindowStart,
-      previous_window_end: response.pageViews.previousWindowEnd,
-      buckets: response.pageViews.buckets,
-      previous_buckets: response.pageViews.previousBuckets,
-      total: response.pageViews.total,
-      previous_total: response.pageViews.previousTotal,
-      has_previous_data: response.pageViews.previousTotal > 0,
     };
   },
 };

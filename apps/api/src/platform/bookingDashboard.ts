@@ -2,8 +2,13 @@ import { buildBookingConversionFunnel, type BookingFunnelEvent } from "@vayada/d
 import type {
   BookingDashboardMetricsPeriodInput,
   BookingDashboardMetricsReadModel,
+  BookingChannelMixReadModel,
+  BookingDashboardBooking,
+  BookingDashboardDetailsReadModel,
   BookingDashboardMetricsReadPort,
   BookingDate,
+  BookingGuestInsightsReadModel,
+  BookingTrackingCheckReadModel,
   BookingDayBookingsReadModel,
   BookingMoney,
   BookingPageViewTimelineReadModel,
@@ -70,25 +75,62 @@ type BookingRevenueDayRow = {
   date: string | Date;
   revenueAmount: string | null;
   bookingCount: string;
+  bookingPageBookingCount: string;
   otherCurrencyBookingCount: string;
   currency: string | null;
+};
+
+type BookingRowJson = {
+  id: string;
+  reference: string;
+  bookedOn: string;
+  status: string;
+  checkIn: string;
+  checkOut: string;
+  roomCount: number;
+  totalAmount: string;
+  currency: string;
+  counted: boolean;
+  roomNames: string[] | null;
 };
 
 type BookingDayBookingsRow = {
   propertyFound: boolean;
   currency: string | null;
-  bookings: {
-    id: string;
-    reference: string;
-    checkIn: string;
-    checkOut: string;
-    roomCount: number;
-    totalAmount: string;
-    currency: string;
-    counted: boolean;
-    roomNames: string[] | null;
-  }[];
+  bookings: BookingRowJson[];
 };
+
+type BookingDashboardDetailsRow = {
+  currency: string | null;
+  pageViewsCountedFrom: string | null;
+  roomTypes: { name: string | null; revenue: string; previousRevenue: string }[];
+  leadTimes: {
+    bucket: "0-7" | "8-30" | "31-90" | "90+";
+    bookingCount: number;
+    previousBookingCount: number;
+  }[];
+  canceledBookingCount: string;
+  topBookings: BookingRowJson[];
+  recentBookings: BookingRowJson[];
+};
+
+/** A booking row from bookingRowJsonSql. */
+function toDashboardBooking(booking: BookingRowJson): BookingDashboardBooking {
+  return {
+    id: booking.id,
+    reference: booking.reference,
+    bookedOn: booking.bookedOn,
+    status: booking.status === "canceled" ? "canceled" : "confirmed",
+    checkIn: booking.checkIn,
+    checkOut: booking.checkOut,
+    nights: inclusiveDays(booking.checkIn, booking.checkOut) - 1,
+    roomCount: booking.roomCount,
+    // One name per room type, in room order.
+    roomNames: [...new Set(booking.roomNames ?? [])],
+    total: money(numeric(booking.totalAmount), booking.currency),
+    countedInRevenue: booking.counted,
+  };
+}
 
 export function createTargetBookingDashboardMetricsReadPort(config: {
   connectionString: string;
@@ -273,6 +315,84 @@ export function createTargetBookingDashboardMetricsReadPort(config: {
         previousTotal: previousBuckets.reduce((sum, bucket) => sum + bucket.count, 0),
       } satisfies BookingPageViewTimelineReadModel;
     },
+    async getTrackingCheck(input) {
+      const result = await pool.query<{ bookingPageBookingCount: string; pageViewCount: string }>(
+        trackingCheckSql(),
+        [input.propertyId, PAGE_VIEWS_COUNTED_SINCE],
+      );
+      const bookings = Number(result.rows[0]?.bookingPageBookingCount ?? 0);
+      const views = Number(result.rows[0]?.pageViewCount ?? 0);
+      return {
+        propertyId: input.propertyId,
+        bookingPageBookingCount: bookings,
+        pageViewCount: views,
+        trackingMissing: bookings >= TRACKING_MISSING_MIN_BOOKINGS && views === 0,
+      } satisfies BookingTrackingCheckReadModel;
+    },
+    async getGuestInsights(input) {
+      const result = await pool.query<{
+        country: string | null;
+        nights: number;
+        leadDays: number;
+        age: number | null;
+      }>(guestInsightsSql(), [input.propertyId, input.periodStart, input.periodEnd]);
+      return toGuestInsights(input.propertyId, result.rows);
+    },
+    async getChannelMix(input) {
+      const result = await pool.query<{
+        kind: "channel" | "source";
+        key: string | null;
+        bookingCount: string;
+        previousBookingCount: string;
+      }>(channelMixSql(), [
+        input.propertyId,
+        input.periodStart,
+        input.periodEnd,
+        input.previousPeriodStart,
+        input.previousPeriodEnd,
+      ]);
+      const counts = (kind: "channel" | "source") =>
+        result.rows
+          .filter((row) => row.kind === kind)
+          .map((row) => ({
+            key: row.key ?? "unknown",
+            bookingCount: Number(row.bookingCount),
+            previousBookingCount: Number(row.previousBookingCount),
+          }));
+      return {
+        propertyId: input.propertyId,
+        channels: counts("channel"),
+        directSources: counts("source"),
+      } satisfies BookingChannelMixReadModel;
+    },
+    async getDashboardDetails(input) {
+      const result = await pool.query<BookingDashboardDetailsRow>(detailsSql(), [
+        input.propertyId,
+        input.periodStart,
+        input.periodEnd,
+        input.previousPeriodStart,
+        input.previousPeriodEnd,
+      ]);
+      const row = result.rows[0];
+      const currency = row?.currency ?? "USD";
+      return {
+        propertyId: input.propertyId,
+        pageViewsCountedFrom: toDateString(row?.pageViewsCountedFrom),
+        roomTypes: (row?.roomTypes ?? []).map((roomType) => ({
+          name: roomType.name,
+          revenue: money(numeric(roomType.revenue), currency),
+          previousRevenue: money(numeric(roomType.previousRevenue), currency),
+        })),
+        leadTimes: (row?.leadTimes ?? []).map((lead) => ({
+          bucket: lead.bucket,
+          bookingCount: Number(lead.bookingCount),
+          previousBookingCount: Number(lead.previousBookingCount),
+        })),
+        canceledBookingCount: Number(row?.canceledBookingCount ?? 0),
+        topBookings: (row?.topBookings ?? []).map(toDashboardBooking),
+        recentBookings: (row?.recentBookings ?? []).map(toDashboardBooking),
+      } satisfies BookingDashboardDetailsReadModel;
+    },
     async getRevenueDays(input) {
       const result = await pool.query<BookingRevenueDayRow>(revenueDaysSql(), [
         input.propertyId,
@@ -289,6 +409,7 @@ export function createTargetBookingDashboardMetricsReadPort(config: {
           date: toDateString(row.date) ?? String(row.date),
           revenue: money(numeric(row.revenueAmount), currency),
           bookingCount: Number(row.bookingCount),
+          bookingPageBookingCount: Number(row.bookingPageBookingCount ?? 0),
           otherCurrencyBookingCount: Number(row.otherCurrencyBookingCount ?? 0),
         })),
       } satisfies BookingRevenueDaysReadModel;
@@ -302,19 +423,8 @@ export function createTargetBookingDashboardMetricsReadPort(config: {
       if (!row?.propertyFound) return null;
       const currency = row.currency ?? "USD";
       const bookings = row.bookings.map((booking) => {
-        const nights = inclusiveDays(booking.checkIn, booking.checkOut) - 1;
-        return {
-          id: booking.id,
-          reference: booking.reference,
-          checkIn: booking.checkIn,
-          checkOut: booking.checkOut,
-          nights,
-          roomCount: booking.roomCount,
-          // One name per room type, in room order.
-          roomNames: [...new Set(booking.roomNames ?? [])],
-          total: money(numeric(booking.totalAmount), booking.currency),
-          countedInRevenue: booking.counted,
-        };
+        const { bookedOn: _bookedOn, status: _status, ...dayBooking } = toDashboardBooking(booking);
+        return dayBooking;
       });
       return {
         propertyId: input.propertyId,
@@ -378,7 +488,10 @@ function propertyCurrencyCte(): string {
 // by check-in. A booking imported from the channel manager was made before the import, so it is
 // dated by the channel manager's time when that is earlier. The mapping keeps the time of the
 // latest change only, so a booking changed after its import keeps the import date.
-function datedBookingsCte(): string {
+function datedBookingsCte(options: { withCanceled?: boolean } = {}): string {
+  const statuses = options.withCanceled
+    ? "('confirmed', 'completed', 'canceled')"
+    : "('confirmed', 'completed')";
   return `property_zone AS (
     SELECT COALESCE(zone.name, 'UTC') AS time_zone
     FROM scoped_property scoped
@@ -400,7 +513,7 @@ function datedBookingsCte(): string {
         AND mapping.mapping_metadata ->> 'providerInsertedAt'
           ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?(Z|[+-][0-9]{2}:?[0-9]{2})$'
     ) channex ON TRUE
-    WHERE booking.lifecycle_status IN ('confirmed', 'completed')
+    WHERE booking.lifecycle_status IN ${statuses}
   )`;
 }
 
@@ -517,6 +630,152 @@ function sparklineSql(): string {
   ORDER BY bucket.bucket_start`;
 }
 
+/**
+ * Every page view counts (consented or not) since VAY-2592 went live; before, only consented
+ * visits did, so a week reaching back past it would look untracked.
+ */
+const PAGE_VIEWS_COUNTED_SINCE = "2026-11-23T07:44:00Z";
+/** Bookings a guest finished: drafts, expired and declined ones may have no page view. */
+const FINISHED_BOOKING_STATES =
+  "('pending_payment', 'confirmed', 'completed', 'canceled', 'no_show')";
+/** One lost view (a blocker, a bot match) shouldn't raise the banner for a week. */
+const TRACKING_MISSING_MIN_BOOKINGS = 2;
+
+// Page view tracking check (VAY-2594): the last 7 days' finished booking page bookings and page
+// views of guests, consented or not.
+function trackingCheckSql(): string {
+  return `${bookingScopedPropertyCte()}
+  SELECT
+    (
+      SELECT COUNT(*) FROM booking.guest_bookings booking
+      JOIN scoped_property scoped ON scoped.property_id = booking.property_id
+      WHERE booking.direct_booking_source = 'booking_engine'
+        AND booking.lifecycle_status IN ${FINISHED_BOOKING_STATES}
+        AND booking.created_at >= GREATEST(now() - INTERVAL '7 days', $2::timestamptz)
+    )::text AS "bookingPageBookingCount",
+    (
+      SELECT COUNT(*) FROM distribution.booking_web_events event
+      JOIN scoped_property scoped ON scoped.property_id = event.property_id
+      WHERE event.event_type IN ('page_view', 'page_visit')
+        AND event.traffic_class = 'human'
+        AND event.occurred_at >= now() - INTERVAL '7 days'
+    )::text AS "pageViewCount"`;
+}
+
+// Guest insights (VAY-2594): one row per booking of every channel made in the period, with its
+// guest's nationality and age at arrival, its nights and its lead time. The guest is chosen once
+// (the booker first, as PMS does), and the age is that guest's own: from their profile, else from
+// their check-in registration, never a companion's.
+function guestInsightsSql(): string {
+  return `${bookingScopedPropertyCte()},
+  ${datedBookingsCte()},
+  stays AS (
+    SELECT booking.check_in, booking.check_out, booking.booked_on,
+      main_guest.country_code::text AS country,
+      COALESCE(profile.date_of_birth, registration.date_of_birth) AS birth_date
+    FROM dated_bookings booking
+    LEFT JOIN LATERAL (
+      SELECT guest.id, guest.country_code, guest.guest_profile_id
+      FROM booking.booking_guests guest
+      WHERE guest.guest_booking_id = booking.id
+      ORDER BY CASE guest.guest_role WHEN 'booker' THEN 0 WHEN 'primary_guest' THEN 1 ELSE 2 END,
+        guest.created_at, guest.id
+      LIMIT 1
+    ) main_guest ON true
+    LEFT JOIN booking.guest_profiles profile ON profile.id = main_guest.guest_profile_id
+    LEFT JOIN pms.guest_registrations registration
+      ON registration.booking_guest_id = main_guest.id
+      AND registration.property_id = booking.property_id
+    WHERE booking.booked_on BETWEEN $2::date AND $3::date
+  )
+  SELECT country,
+    (check_out - check_in) AS nights,
+    GREATEST(check_in - booked_on, 0) AS "leadDays",
+    CASE WHEN birth_date IS NULL THEN NULL
+      ELSE date_part('year', age(check_in, birth_date))::int END AS age
+  FROM stays`;
+}
+
+const AGE_BUCKETS = [
+  ["18-24", 18, 24],
+  ["25-34", 25, 34],
+  ["35-44", 35, 44],
+  ["45-54", 45, 54],
+  ["55+", 55, 130],
+] as const;
+const STAY_BUCKETS = [
+  ["1-2", 1, 2],
+  ["3-4", 3, 4],
+  ["5-7", 5, 7],
+  ["8+", 8, 100000],
+] as const;
+
+/** Buckets the bookings' guests; an age under 18 (a date typed wrong) counts as not given. */
+export function toGuestInsights(
+  propertyId: string,
+  rows: readonly { country: string | null; nights: number; leadDays: number; age: number | null }[],
+): BookingGuestInsightsReadModel {
+  const byCountry = new Map<string | null, number>();
+  for (const row of rows) {
+    const country = row.country?.trim().toUpperCase() || null;
+    byCountry.set(country, (byCountry.get(country) ?? 0) + 1);
+  }
+  const ages = rows.map((row) => Number(row.age)).filter((age) => isAdultAge(age));
+  const nights = rows.map((row) => Math.max(Number(row.nights), 1));
+  const leads = rows.map((row) => Math.max(Number(row.leadDays), 0));
+  const average = (values: number[]) =>
+    values.length > 0
+      ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10
+      : null;
+  return {
+    propertyId,
+    guestCount: rows.length,
+    nationalities: [...byCountry]
+      .map(([countryCode, guestCount]) => ({ countryCode, guestCount }))
+      .sort(
+        (a, b) =>
+          b.guestCount - a.guestCount ||
+          Number(a.countryCode === null) - Number(b.countryCode === null) ||
+          String(a.countryCode).localeCompare(String(b.countryCode)),
+      ),
+    ages: AGE_BUCKETS.map(([bucket, low, high]) => ({
+      bucket,
+      guestCount: ages.filter((age) => age >= low && age <= high).length,
+    })),
+    ageKnownCount: ages.length,
+    stays: STAY_BUCKETS.map(([bucket, low, high]) => ({
+      bucket,
+      guestCount: nights.filter((night) => night >= low && night <= high).length,
+    })),
+    averageNights: average(nights),
+    averageLeadDays: average(leads),
+  };
+}
+
+function isAdultAge(age: number): boolean {
+  return Number.isFinite(age) && age >= 18 && age <= 130;
+}
+
+// Bookings by channel (VAY-2594): every channel, and direct bookings by source, made in the period
+// and in the period before, by booking date.
+function channelMixSql(): string {
+  const inPeriods = `(booking.booked_on BETWEEN $2::date AND $3::date
+      OR booking.booked_on BETWEEN $4::date AND $5::date)`;
+  const counts = `COUNT(*) FILTER (WHERE booking.booked_on BETWEEN $2::date AND $3::date)::text AS "bookingCount",
+    COUNT(*) FILTER (WHERE booking.booked_on BETWEEN $4::date AND $5::date)::text AS "previousBookingCount"`;
+  return `${bookingScopedPropertyCte()},
+  ${datedBookingsCte()}
+  SELECT 'channel' AS kind, booking.booking_channel AS key, ${counts}
+  FROM dated_bookings booking
+  WHERE ${inPeriods}
+  GROUP BY booking.booking_channel
+  UNION ALL
+  SELECT 'source' AS kind, booking.direct_booking_source AS key, ${counts}
+  FROM dated_bookings booking
+  WHERE booking.booking_channel = 'direct' AND ${inPeriods}
+  GROUP BY booking.direct_booking_source`;
+}
+
 // One row per day of the window: the direct bookings made that day (VAY-2594 revenue chart).
 function revenueDaysSql(): string {
   return `${bookingScopedPropertyCte()},
@@ -530,6 +789,8 @@ function revenueDaysSql(): string {
     days.day::text AS date,
     COALESCE(SUM(booking.total_amount) FILTER (WHERE ${COUNTED_AMOUNT}), 0)::text AS "revenueAmount",
     COUNT(booking.id)::text AS "bookingCount",
+    COUNT(booking.id) FILTER (WHERE booking.direct_booking_source = 'booking_engine')::text
+      AS "bookingPageBookingCount",
     COUNT(booking.id) FILTER (WHERE ${OTHER_CURRENCY})::text AS "otherCurrencyBookingCount",
     (SELECT currency FROM property_currency) AS currency
   FROM days
@@ -538,6 +799,152 @@ function revenueDaysSql(): string {
    AND booking.booked_on = days.day
   GROUP BY days.day
   ORDER BY days.day`;
+}
+
+// One booking in a dashboard list (the day window, Details): its stay, room types and value. The
+// room types are those of its PMS rooms, or of what was booked before PMS has rooms for it.
+function bookingRowJsonSql(): string {
+  return `jsonb_build_object(
+    'id', booking.id::text,
+    'reference', booking.public_reference,
+    'bookedOn', booking.booked_on::text,
+    'status', booking.lifecycle_status,
+    'checkIn', booking.check_in::text,
+    'checkOut', booking.check_out::text,
+    'roomCount', booking.room_count,
+    'totalAmount', booking.total_amount::text,
+    'currency', booking.currency::text,
+    'counted', ${COUNTED_AMOUNT},
+    'roomNames', COALESCE(
+      (
+        SELECT array_agg(typed.name ORDER BY typed.first_position)
+        FROM (
+          SELECT room_type.name, MIN(assignment.position) AS first_position
+          FROM pms.operational_booking_assignments assignment
+          JOIN pms.room_types room_type
+            ON room_type.id = assignment.room_type_id
+           AND room_type.property_id = assignment.property_id
+          WHERE assignment.guest_booking_id = booking.id
+            AND assignment.property_id = booking.property_id
+            AND NOT (assignment.assignment_status = 'released'
+              AND assignment.assignment_payload @> '{"channexAlterationReleased":true}')
+          GROUP BY room_type.id, room_type.name
+        ) typed
+      ),
+      (
+        SELECT array_agg(room_type.name ORDER BY selection.position)
+        FROM jsonb_array_elements(
+          CASE WHEN jsonb_typeof(booking.booking_metadata -> 'pricingSelections') = 'array'
+            THEN booking.booking_metadata -> 'pricingSelections' ELSE '[]'::jsonb END
+        ) WITH ORDINALITY AS selection(value, position)
+        JOIN pms.room_types room_type
+          ON room_type.id::text = selection.value ->> 'roomTypeId'
+         AND room_type.property_id = booking.property_id
+      )
+    )
+  )`;
+}
+
+// The Details window (VAY-2594): direct bookings made in the period and the one before, by room
+// type and lead time, with the period's cancellations, its top bookings and its latest ones.
+function detailsSql(): string {
+  const current = "booking.booked_on BETWEEN $2::date AND $3::date";
+  const previous = "booking.booked_on BETWEEN $4::date AND $5::date";
+  const kept = "booking.lifecycle_status IN ('confirmed', 'completed')";
+  return `${bookingScopedPropertyCte()},
+  ${propertyCurrencyCte()},
+  ${datedBookingsCte({ withCanceled: true })},
+  direct_bookings AS (
+    SELECT booking.* FROM dated_bookings booking
+    WHERE booking.booking_channel = 'direct' AND (${current} OR ${previous})
+  ),
+  room_typed AS (
+    SELECT booking.booked_on, booking.total_amount, ${current} AS in_current,
+      -- A booking with rooms of several types counts under its first room's type.
+      COALESCE(
+        (
+          SELECT room_type.name
+          FROM pms.operational_booking_assignments assignment
+          JOIN pms.room_types room_type
+            ON room_type.id = assignment.room_type_id
+           AND room_type.property_id = assignment.property_id
+          WHERE assignment.guest_booking_id = booking.id
+            AND assignment.property_id = booking.property_id
+            AND NOT (assignment.assignment_status = 'released'
+              AND assignment.assignment_payload @> '{"channexAlterationReleased":true}')
+          ORDER BY assignment.position, assignment.created_at, assignment.id
+          LIMIT 1
+        ),
+        (
+          SELECT room_type.name
+          FROM jsonb_array_elements(
+            CASE WHEN jsonb_typeof(booking.booking_metadata -> 'pricingSelections') = 'array'
+              THEN booking.booking_metadata -> 'pricingSelections' ELSE '[]'::jsonb END
+          ) WITH ORDINALITY AS selection(value, position)
+          JOIN pms.room_types room_type
+            ON room_type.id::text = selection.value ->> 'roomTypeId'
+           AND room_type.property_id = booking.property_id
+          ORDER BY selection.position
+          LIMIT 1
+        )
+      ) AS room_name
+    FROM direct_bookings booking
+    WHERE ${kept} AND ${COUNTED_AMOUNT}
+  )
+  SELECT
+    (SELECT currency FROM property_currency) AS currency,
+    (SELECT counted_from::text FROM (
+      SELECT (MIN(first_view.occurred_at) AT TIME ZONE (SELECT time_zone FROM property_zone))::date
+        AS counted_from
+      FROM distribution.booking_web_events first_view
+      JOIN scoped_property scoped ON scoped.property_id = first_view.property_id
+      WHERE first_view.event_type = 'page_view'
+    ) counted) AS "pageViewsCountedFrom",
+    COALESCE((
+      SELECT jsonb_agg(jsonb_build_object(
+        'name', grouped.room_name,
+        'revenue', grouped.revenue::text,
+        'previousRevenue', grouped.previous_revenue::text
+      ) ORDER BY grouped.revenue DESC, grouped.room_name)
+      FROM (
+        SELECT room_name,
+          COALESCE(SUM(total_amount) FILTER (WHERE in_current), 0) AS revenue,
+          COALESCE(SUM(total_amount) FILTER (WHERE NOT in_current), 0) AS previous_revenue
+        FROM room_typed
+        GROUP BY room_name
+      ) grouped
+    ), '[]'::jsonb) AS "roomTypes",
+    COALESCE((
+      SELECT jsonb_agg(jsonb_build_object(
+        'bucket', bucket.name,
+        'bookingCount', (SELECT COUNT(*) FROM direct_bookings booking
+          WHERE ${kept} AND ${current} AND booking.check_in - booking.booked_on BETWEEN bucket.low AND bucket.high),
+        'previousBookingCount', (SELECT COUNT(*) FROM direct_bookings booking
+          WHERE ${kept} AND ${previous} AND booking.check_in - booking.booked_on BETWEEN bucket.low AND bucket.high)
+      ) ORDER BY bucket.low)
+      FROM (VALUES ('0-7', -100000, 7), ('8-30', 8, 30), ('31-90', 31, 90), ('90+', 91, 100000))
+        AS bucket(name, low, high)
+    ), '[]'::jsonb) AS "leadTimes",
+    (SELECT COUNT(*) FROM direct_bookings booking
+      WHERE booking.lifecycle_status = 'canceled' AND ${current})::text AS "canceledBookingCount",
+    COALESCE((
+      SELECT jsonb_agg(${bookingRowJsonSql()} ORDER BY booking.total_amount DESC, booking.created_at)
+      FROM (
+        SELECT * FROM direct_bookings booking
+        WHERE ${kept} AND ${current} AND ${COUNTED_AMOUNT}
+        ORDER BY booking.total_amount DESC, booking.created_at
+        LIMIT 5
+      ) booking
+    ), '[]'::jsonb) AS "topBookings",
+    COALESCE((
+      SELECT jsonb_agg(${bookingRowJsonSql()} ORDER BY booking.booked_on DESC, booking.created_at DESC, booking.id)
+      FROM (
+        SELECT * FROM direct_bookings booking
+        WHERE ${current}
+        ORDER BY booking.booked_on DESC, booking.created_at DESC, booking.id
+        LIMIT 5
+      ) booking
+    ), '[]'::jsonb) AS "recentBookings"`;
 }
 
 // The direct bookings made on one day, with their room types (VAY-2594 day window).
@@ -549,43 +956,7 @@ function dayBookingsSql(): string {
     EXISTS (SELECT 1 FROM scoped_property) AS "propertyFound",
     (SELECT currency FROM property_currency) AS currency,
     COALESCE((
-      SELECT jsonb_agg(jsonb_build_object(
-        'id', booking.id::text,
-        'reference', booking.public_reference,
-        'checkIn', booking.check_in::text,
-        'checkOut', booking.check_out::text,
-        'roomCount', booking.room_count,
-        'totalAmount', booking.total_amount::text,
-        'currency', booking.currency::text,
-        'counted', ${COUNTED_AMOUNT},
-        'roomNames', COALESCE(
-          (
-            SELECT array_agg(typed.name ORDER BY typed.first_position)
-            FROM (
-              SELECT room_type.name, MIN(assignment.position) AS first_position
-              FROM pms.operational_booking_assignments assignment
-              JOIN pms.room_types room_type
-                ON room_type.id = assignment.room_type_id
-               AND room_type.property_id = assignment.property_id
-              WHERE assignment.guest_booking_id = booking.id
-                AND assignment.property_id = booking.property_id
-                AND NOT (assignment.assignment_status = 'released'
-                  AND assignment.assignment_payload @> '{"channexAlterationReleased":true}')
-              GROUP BY room_type.id, room_type.name
-            ) typed
-          ),
-          (
-            SELECT array_agg(room_type.name ORDER BY selection.position)
-            FROM jsonb_array_elements(
-              CASE WHEN jsonb_typeof(booking.booking_metadata -> 'pricingSelections') = 'array'
-                THEN booking.booking_metadata -> 'pricingSelections' ELSE '[]'::jsonb END
-            ) WITH ORDINALITY AS selection(value, position)
-            JOIN pms.room_types room_type
-              ON room_type.id::text = selection.value ->> 'roomTypeId'
-             AND room_type.property_id = booking.property_id
-          )
-        )
-      ) ORDER BY booking.created_at, booking.id)
+      SELECT jsonb_agg(${bookingRowJsonSql()} ORDER BY booking.created_at, booking.id)
       FROM dated_bookings booking
       WHERE booking.booking_channel = 'direct'
         AND booking.booked_on = $2::date
@@ -736,7 +1107,7 @@ function conversionFunnelSql(): string {
     FROM distribution.booking_web_events event
     WHERE property.profile_status = 'complete'
       AND event.property_id = scoped.property_id
-      AND event.event_type IN ('page_visit', 'rate_selected', 'addons_step_passed',
+      AND event.event_type IN ('page_visit', 'dates_searched', 'rate_selected', 'addons_step_passed',
         'details_completed', 'complete_booking_clicked', 'payment_authorized', 'booking_completed')
       AND event.metadata -> 'funnelVersion' = '1'::jsonb
       AND event.traffic_class = 'human'

@@ -159,6 +159,106 @@ describe.skipIf(!url)("dashboard booking money", () => {
         ["booking_com", 1],
       ]);
 
+      // Bookings by channel: every channel, and direct ones by source, now and in the week before.
+      const mix = await port.getChannelMix({ ...period, ...previous });
+      const byKey = (
+        rows: readonly { key: string; bookingCount: number; previousBookingCount: number }[],
+      ) =>
+        Object.fromEntries(
+          rows.map((row) => [row.key, [row.bookingCount, row.previousBookingCount]]),
+        );
+      expect(byKey(mix.channels)).toEqual({ direct: [2, 1], airbnb: [1, 0] });
+      expect(byKey(mix.directSources)).toEqual({ booking_engine: [1, 1], call: [1, 0] });
+      // The Booking.com booking Channex had on Sep 3 counts there.
+      const septemberMix = await port.getChannelMix({
+        ...period,
+        periodStart: "2026-09-01",
+        periodEnd: "2026-09-07",
+        previousPeriodStart: "2026-08-25",
+        previousPeriodEnd: "2026-08-31",
+      });
+      expect(byKey(septemberMix.channels)).toEqual({ booking_com: [1, 0] });
+      expect(septemberMix.directSources).toEqual([]);
+
+      // The Details window: by room type and lead time, cancellations, top and latest bookings.
+      await pool.query(
+        `INSERT INTO booking.guest_bookings(id,property_id,public_reference,booking_channel,direct_booking_source,lifecycle_status,check_in,check_out,currency,total_amount,created_at) VALUES($1::uuid,$2,$1::text,'direct','booking_engine','canceled','2026-10-20','2026-10-22','EUR',80,'2026-10-04T10:00:00Z')`,
+        [randomUUID(), property],
+      );
+      const details = await port.getDashboardDetails({ ...period, ...previous });
+      expect(details.pageViewsCountedFrom).toBe("2026-10-01");
+      expect(
+        details.roomTypes.map((row) => [
+          row.name,
+          row.revenue.amountDecimal,
+          row.previousRevenue.amountDecimal,
+        ]),
+      ).toEqual([
+        ["Deluxe Room", "200.00", "0.00"],
+        [null, "100.00", "50.00"],
+      ]);
+      // Arrival on Dec 1, booked about two months before: 31–90 days, now and before.
+      expect(
+        details.leadTimes.map((row) => [row.bucket, row.bookingCount, row.previousBookingCount]),
+      ).toEqual([
+        ["0-7", 0, 0],
+        ["8-30", 0, 0],
+        ["31-90", 2, 1],
+        ["90+", 0, 0],
+      ]);
+      expect(details.canceledBookingCount).toBe(1);
+      expect(details.topBookings.map((row) => row.total.amountDecimal)).toEqual([
+        "200.00",
+        "100.00",
+      ]);
+      expect(details.topBookings[0]).toMatchObject({
+        id: first,
+        bookedOn: "2026-10-01",
+        roomNames: ["Deluxe Room"],
+      });
+      expect(details.recentBookings.map((row) => [row.status, row.total.amountDecimal])).toEqual([
+        ["canceled", "80.00"],
+        ["confirmed", "100.00"],
+        ["confirmed", "200.00"],
+      ]);
+
+      // Guest insights: every channel's guests of the bookings made Oct 1–7, one per booking.
+      const guest = await pool.query<{ id: string }>(
+        `INSERT INTO booking.booking_guests(guest_booking_id,guest_role,first_name,last_name,country_code) VALUES($1,'primary_guest','Ada','Example','DE') RETURNING id`,
+        [first],
+      );
+      // A child travelling along, registered at check-in first: neither their country nor their
+      // age is the booking's.
+      const child = await pool.query<{ id: string }>(
+        `INSERT INTO booking.booking_guests(guest_booking_id,guest_role,first_name,last_name,country_code) VALUES($1,'additional_guest','Kit','Example','FR') RETURNING id`,
+        [first],
+      );
+      await pool.query(
+        `INSERT INTO pms.guest_registrations(booking_guest_id,property_id,guest_booking_id,date_of_birth,created_at) VALUES($1,$2,$3,'2015-02-01',now() - interval '1 minute')`,
+        [child.rows[0]!.id, property, first],
+      );
+      await pool.query(
+        `INSERT INTO pms.guest_registrations(booking_guest_id,property_id,guest_booking_id,date_of_birth) VALUES($1,$2,$3,'1990-06-15')`,
+        [guest.rows[0]!.id, property, first],
+      );
+      const guests = await port.getGuestInsights(period);
+      expect(guests).toMatchObject({
+        guestCount: 3,
+        nationalities: [
+          { countryCode: null, guestCount: 2 },
+          { countryCode: "DE", guestCount: 1 },
+        ],
+        ageKnownCount: 1,
+        averageNights: 2,
+        averageLeadDays: 60,
+      });
+      // 36 on arrival (Dec 1).
+      expect(guests.ages.find((row) => row.guestCount > 0)).toEqual({
+        bucket: "35-44",
+        guestCount: 1,
+      });
+      expect(guests.stays[0]).toEqual({ bucket: "1-2", guestCount: 3 });
+
       const spark = await port.getSparklines({
         propertyId: property,
         windowStart: period.periodStart,
@@ -287,6 +387,43 @@ describe.skipIf(!url)("dashboard booking money", () => {
         bookingCount: 1,
         otherCurrencyBookingCount: 1,
         revenue: { amountDecimal: "0.00", currency: "EUR" },
+      });
+      // Tracking check: two finished bookings on the booking page this week but no page view
+      // means the views aren't being counted; one page view clears it.
+      expect(await port.getTrackingCheck({ propertyId: property })).toMatchObject({
+        bookingPageBookingCount: 0,
+        trackingMissing: false,
+      });
+      const pageBooking = () =>
+        insert({
+          channel: "direct",
+          source: "booking_engine",
+          total: 90,
+          createdAt: new Date().toISOString(),
+        });
+      await pageBooking();
+      // One booking could be one lost view; a draft or an expired booking isn't a finished one.
+      const unfinished = await pageBooking();
+      await pool.query(`UPDATE booking.guest_bookings SET lifecycle_status='draft' WHERE id=$1`, [
+        unfinished,
+      ]);
+      expect(await port.getTrackingCheck({ propertyId: property })).toMatchObject({
+        bookingPageBookingCount: 1,
+        trackingMissing: false,
+      });
+      await pageBooking();
+      expect(await port.getTrackingCheck({ propertyId: property })).toMatchObject({
+        bookingPageBookingCount: 2,
+        pageViewCount: 0,
+        trackingMissing: true,
+      });
+      await pool.query(
+        `INSERT INTO distribution.booking_web_events(property_id,event_type,event_id,occurred_at) VALUES($1,'page_view',gen_random_uuid(),now())`,
+        [property],
+      );
+      expect(await port.getTrackingCheck({ propertyId: property })).toMatchObject({
+        pageViewCount: 1,
+        trackingMissing: false,
       });
     } finally {
       await pool.query("DELETE FROM pms.channel_booking_mappings WHERE property_id=$1", [property]);

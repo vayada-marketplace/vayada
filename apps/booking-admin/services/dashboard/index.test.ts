@@ -125,15 +125,12 @@ describe("dashboardService target route adapter", () => {
     await expect(dashboardService.getSparklines("week", "Europe/Vienna")).resolves.toMatchObject({
       page_views: [0, 1, 2, 3, 4, 5, 6],
     });
-    await expect(dashboardService.getPageViewsTimeline(1, "Europe/Vienna")).resolves.toMatchObject({
-      time_zone: "Europe/Vienna",
-      window_start: "2026-06-01",
-      total: 3,
-      previous_total: 2,
-      has_previous_data: true,
-    });
-    expect(String(vi.mocked(fetch).mock.calls[1]?.[0])).toContain(
-      "/page-views?windowStart=2026-06-01&windowEnd=2026-06-07",
+    // The Details window's page views: one bucket per day of the range.
+    await expect(dashboardService.getPageViewsForRange("week", "Europe/Vienna")).resolves.toEqual([
+      { date: "2026-06-01", count: 3 },
+    ]);
+    expect(String(vi.mocked(fetch).mock.calls[1]?.[0])).toMatch(
+      /\/page-views\?windowStart=\d{4}-\d{2}-\d{2}&windowEnd=\d{4}-\d{2}-\d{2}$/,
     );
   });
 
