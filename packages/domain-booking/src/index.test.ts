@@ -332,6 +332,7 @@ describe("@vayada/domain-booking dashboard metrics read model contract", () => {
         channels: [],
         directSources: [],
       }),
+      getDashboardDetails: async (input) => emptyDetails(input.propertyId),
       getRevenueDays: async () => null,
       getDayBookings: async () => null,
       async getPageViewTimeline(input) {
@@ -365,6 +366,7 @@ describe("@vayada/domain-booking dashboard metrics read model contract", () => {
         channels: [],
         directSources: [],
       }),
+      getDashboardDetails: async (input) => emptyDetails(input.propertyId),
       getRevenueDays: async () => null,
       getDayBookings: async () => null,
       getPageViewTimeline: async (input) => fakePageViews(input.propertyId),
@@ -394,6 +396,7 @@ describe("@vayada/domain-booking dashboard metrics read model contract", () => {
         channels: [],
         directSources: [],
       }),
+      getDashboardDetails: async (input) => emptyDetails(input.propertyId),
       getRevenueDays: async () => null,
       getDayBookings: async () => null,
       getPageViewTimeline: async (input) => fakePageViews(input.propertyId),
@@ -612,5 +615,17 @@ function fakePageViews(propertyId: string) {
     previousBuckets,
     total: buckets.reduce((sum, bucket) => sum + bucket.count, 0),
     previousTotal: previousBuckets.reduce((sum, bucket) => sum + bucket.count, 0),
+  };
+}
+
+function emptyDetails(propertyId: string) {
+  return {
+    propertyId,
+    pageViewsCountedFrom: null,
+    roomTypes: [],
+    leadTimes: [],
+    canceledBookingCount: 0,
+    topBookings: [],
+    recentBookings: [],
   };
 }

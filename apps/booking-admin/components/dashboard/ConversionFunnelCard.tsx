@@ -15,6 +15,8 @@ type Props = {
   /** The page's selected range; the page tabs and this menu share it. */
   timeRange: TimeRange;
   onTimeRangeChange: (range: TimeRange) => void;
+  /** Opens the Details window on conversion (VAY-2594). */
+  onDetails?: () => void;
 };
 
 // Branch rows compare with their own eligible cohort rather than the row above.
@@ -32,6 +34,7 @@ export function ConversionFunnelCard({
   exportFileName,
   timeRange,
   onTimeRangeChange,
+  onDetails,
 }: Props) {
   const tooltipId = useId();
   const rangeLabelId = useId();
@@ -134,72 +137,84 @@ export function ConversionFunnelCard({
             </span>
           </div>
         </div>
-        <div ref={menuRef} className="relative">
-          <button
-            ref={menuButtonRef}
-            type="button"
-            aria-label={t("dashboard.conversionFunnel.options")}
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((open) => !open)}
-            className="rounded-md p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300"
-          >
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <circle cx="5" cy="12" r="1.5" />
-              <circle cx="12" cy="12" r="1.5" />
-              <circle cx="19" cy="12" r="1.5" />
-            </svg>
-          </button>
-          {menuOpen && (
-            <div className="absolute right-0 top-full z-10 mt-1 min-w-44 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
-              <p
-                id={rangeLabelId}
-                className="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-              >
-                {t("dashboard.conversionFunnel.timeRange")}
-              </p>
-              <div role="group" aria-labelledby={rangeLabelId}>
-                {TIME_RANGES.map(([range, label]) => (
-                  <button
-                    key={range}
-                    type="button"
-                    aria-pressed={timeRange === range}
-                    onClick={() => {
-                      closeMenu();
-                      onTimeRangeChange(range);
-                    }}
-                    className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[13px] text-gray-700 hover:bg-gray-50"
-                  >
-                    {t(label)}
-                    {timeRange === range && (
-                      <svg
-                        className="w-4 h-4 text-primary-600"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                        aria-hidden="true"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="m4.5 12.75 6 6 9-13.5"
-                        />
-                      </svg>
-                    )}
-                  </button>
-                ))}
-              </div>
-              <div className="my-1 border-t border-gray-100" />
-              <button
-                type="button"
-                disabled={!funnel}
-                onClick={exportCsv}
-                className="block w-full px-3 py-1.5 text-left text-[13px] text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-400"
-              >
-                {t("dashboard.conversionFunnel.exportCsv")}
-              </button>
-            </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {onDetails && (
+            <button
+              type="button"
+              onClick={onDetails}
+              aria-label={t("dashboard.details.open.conversion")}
+              className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-[13px] font-medium text-gray-900 hover:bg-gray-50"
+            >
+              {t("dashboard.stats.details")} ›
+            </button>
           )}
+          <div ref={menuRef} className="relative">
+            <button
+              ref={menuButtonRef}
+              type="button"
+              aria-label={t("dashboard.conversionFunnel.options")}
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((open) => !open)}
+              className="rounded-md p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <circle cx="5" cy="12" r="1.5" />
+                <circle cx="12" cy="12" r="1.5" />
+                <circle cx="19" cy="12" r="1.5" />
+              </svg>
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-full z-10 mt-1 min-w-44 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                <p
+                  id={rangeLabelId}
+                  className="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+                >
+                  {t("dashboard.conversionFunnel.timeRange")}
+                </p>
+                <div role="group" aria-labelledby={rangeLabelId}>
+                  {TIME_RANGES.map(([range, label]) => (
+                    <button
+                      key={range}
+                      type="button"
+                      aria-pressed={timeRange === range}
+                      onClick={() => {
+                        closeMenu();
+                        onTimeRangeChange(range);
+                      }}
+                      className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[13px] text-gray-700 hover:bg-gray-50"
+                    >
+                      {t(label)}
+                      {timeRange === range && (
+                        <svg
+                          className="w-4 h-4 text-primary-600"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                          aria-hidden="true"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="m4.5 12.75 6 6 9-13.5"
+                          />
+                        </svg>
+                      )}
+                    </button>
+                  ))}
+                </div>
+                <div className="my-1 border-t border-gray-100" />
+                <button
+                  type="button"
+                  disabled={!funnel}
+                  onClick={exportCsv}
+                  className="block w-full px-3 py-1.5 text-left text-[13px] text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-400"
+                >
+                  {t("dashboard.conversionFunnel.exportCsv")}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

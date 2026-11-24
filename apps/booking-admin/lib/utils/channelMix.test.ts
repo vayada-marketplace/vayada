@@ -31,6 +31,20 @@ describe("bookings by channel (VAY-2594)", () => {
     expect(channelRows([])).toEqual([]);
   });
 
+  it("keeps a fixed list in its order, empty rows included", () => {
+    const rows = channelRows(
+      [
+        { key: "0-7", bookings: 3, previous: 1 },
+        { key: "8-30", bookings: 0, previous: 2 },
+        { key: "31-90", bookings: 6, previous: 1 },
+      ],
+      { keepOrder: true, keepEmpty: true },
+    );
+    expect(rows.map((row) => row.key)).toEqual(["0-7", "8-30", "31-90"]);
+    expect(rows[1]).toMatchObject({ share: 0, change: { kind: "down", percent: 100 }, width: 0 });
+    expect(rows[2].width).toBe(100);
+  });
+
   it("rounds shares to whole numbers that add up to 100", () => {
     expect(roundedShares([38.3, 34.04, 17.02, 10.64])).toEqual([38, 34, 17, 11]);
     expect(roundedShares([33.33, 33.33, 33.34])).toEqual([33, 33, 34]);

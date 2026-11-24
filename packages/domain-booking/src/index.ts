@@ -182,6 +182,8 @@ export type BookingRevenueDay = {
   date: BookingDate;
   revenue: BookingMoney;
   bookingCount: number;
+  /** Of those, the bookings made on the booking page (the conversion rate's). */
+  bookingPageBookingCount: number;
   /** Bookings in another currency than the property's: counted, but not in revenue. */
   otherCurrencyBookingCount: number;
 };
@@ -209,6 +211,38 @@ export type BookingDayBooking = {
   total: BookingMoney;
   /** False for a booking in another currency, which the day's revenue leaves out. */
   countedInRevenue: boolean;
+};
+
+/** A booking in the Details window's lists, with the day it was made and its state. */
+export type BookingDashboardBooking = BookingDayBooking & {
+  bookedOn: BookingDate;
+  status: "confirmed" | "canceled";
+};
+
+/**
+ * The Details window (VAY-2594): direct bookings made in the period and the period before, by
+ * room type (revenue) and lead time (bookings), with the period's cancellations, its five largest
+ * bookings and its five latest ones (cancelled ones included).
+ */
+export type BookingDashboardDetailsReadModel = {
+  propertyId: string;
+  /** First day every booking page view is counted (VAY-2592), or null before any. */
+  pageViewsCountedFrom: BookingDate | null;
+  /** Revenue by the first room's type; null name when it isn't known. */
+  roomTypes: readonly {
+    name: string | null;
+    revenue: BookingMoney;
+    previousRevenue: BookingMoney;
+  }[];
+  /** Days from booking to arrival: 0–7, 8–30, 31–90 and 90+ days. */
+  leadTimes: readonly {
+    bucket: "0-7" | "8-30" | "31-90" | "90+";
+    bookingCount: number;
+    previousBookingCount: number;
+  }[];
+  canceledBookingCount: number;
+  topBookings: readonly BookingDashboardBooking[];
+  recentBookings: readonly BookingDashboardBooking[];
 };
 
 export type BookingDayBookingsReadModel = {
@@ -253,6 +287,9 @@ export type BookingDashboardMetricsReadPort =
       windowEnd: BookingDate;
     }): Promise<BookingPageViewTimelineReadModel | null>;
     getChannelMix(input: BookingDashboardMetricsPeriodInput): Promise<BookingChannelMixReadModel>;
+    getDashboardDetails(
+      input: BookingDashboardMetricsPeriodInput,
+    ): Promise<BookingDashboardDetailsReadModel>;
     getRevenueDays(input: {
       propertyId: string;
       windowStart: BookingDate;

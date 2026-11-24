@@ -180,6 +180,48 @@ describe.skipIf(!url)("dashboard booking money", () => {
       expect(byKey(septemberMix.channels)).toEqual({ booking_com: [1, 0] });
       expect(septemberMix.directSources).toEqual([]);
 
+      // The Details window: by room type and lead time, cancellations, top and latest bookings.
+      await pool.query(
+        `INSERT INTO booking.guest_bookings(id,property_id,public_reference,booking_channel,direct_booking_source,lifecycle_status,check_in,check_out,currency,total_amount,created_at) VALUES($1::uuid,$2,$1::text,'direct','booking_engine','canceled','2026-10-20','2026-10-22','EUR',80,'2026-10-04T10:00:00Z')`,
+        [randomUUID(), property],
+      );
+      const details = await port.getDashboardDetails({ ...period, ...previous });
+      expect(details.pageViewsCountedFrom).toBe("2026-10-01");
+      expect(
+        details.roomTypes.map((row) => [
+          row.name,
+          row.revenue.amountDecimal,
+          row.previousRevenue.amountDecimal,
+        ]),
+      ).toEqual([
+        ["Deluxe Room", "200.00", "0.00"],
+        [null, "100.00", "50.00"],
+      ]);
+      // Arrival on Dec 1, booked about two months before: 31–90 days, now and before.
+      expect(
+        details.leadTimes.map((row) => [row.bucket, row.bookingCount, row.previousBookingCount]),
+      ).toEqual([
+        ["0-7", 0, 0],
+        ["8-30", 0, 0],
+        ["31-90", 2, 1],
+        ["90+", 0, 0],
+      ]);
+      expect(details.canceledBookingCount).toBe(1);
+      expect(details.topBookings.map((row) => row.total.amountDecimal)).toEqual([
+        "200.00",
+        "100.00",
+      ]);
+      expect(details.topBookings[0]).toMatchObject({
+        id: first,
+        bookedOn: "2026-10-01",
+        roomNames: ["Deluxe Room"],
+      });
+      expect(details.recentBookings.map((row) => [row.status, row.total.amountDecimal])).toEqual([
+        ["canceled", "80.00"],
+        ["confirmed", "100.00"],
+        ["confirmed", "200.00"],
+      ]);
+
       const spark = await port.getSparklines({
         propertyId: property,
         windowStart: period.periodStart,

@@ -188,6 +188,7 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
   "GET /api/booking/properties/:propertyId/dashboard/channels": later(),
   "GET /api/booking/properties/:propertyId/dashboard/conversion-funnel": later(),
   "GET /api/booking/properties/:propertyId/dashboard/day-bookings": later(),
+  "GET /api/booking/properties/:propertyId/dashboard/details": later(),
   "GET /api/booking/properties/:propertyId/dashboard/page-views": later(),
   "GET /api/booking/properties/:propertyId/dashboard/revenue-days": later(),
   "GET /api/booking/properties/:propertyId/dashboard/sparklines": later(),

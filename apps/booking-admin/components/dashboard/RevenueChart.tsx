@@ -15,6 +15,8 @@ type Props = {
   t: (key: string, params?: Record<string, string | number>) => string;
   /** Opens the day window on a day with bookings. */
   onOpenDay: (date: string) => void;
+  /** Opens the Details window on revenue. */
+  onDetails?: () => void;
 };
 
 function shortDate(iso: string, locale: string): string {
@@ -29,7 +31,7 @@ function shortDate(iso: string, locale: string): string {
  * day. Hover or focus shows the day; a click on a day with bookings opens them. On touch, the first
  * tap shows the nearest day's tooltip and a second tap on it opens the day.
  */
-export function RevenueChart({ data, loading, error, locale, t, onOpenDay }: Props) {
+export function RevenueChart({ data, loading, error, locale, t, onOpenDay, onDetails }: Props) {
   const [active, setActive] = useState<number | null>(null);
   // Touch picks the bar nearest the finger across the whole chart, since a day can be 2px wide
   // on a phone: the first tap shows it, a second tap on it opens the day. Mouse and keyboard use
@@ -76,11 +78,23 @@ export function RevenueChart({ data, loading, error, locale, t, onOpenDay }: Pro
 
   return (
     <section className="flex min-w-0 flex-col gap-3.5 rounded-xl border border-gray-200 bg-white p-5">
-      <div className="flex flex-col gap-0.5">
-        <h2 className="text-base font-semibold text-gray-900">
-          {t("dashboard.revenueChart.title")}
-        </h2>
-        <span className="text-[13px] text-gray-500">{t("dashboard.revenueChart.subtitle")}</span>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-col gap-0.5">
+          <h2 className="text-base font-semibold text-gray-900">
+            {t("dashboard.revenueChart.title")}
+          </h2>
+          <span className="text-[13px] text-gray-500">{t("dashboard.revenueChart.subtitle")}</span>
+        </div>
+        {onDetails && (
+          <button
+            type="button"
+            onClick={onDetails}
+            aria-label={t("dashboard.details.open.revenue")}
+            className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-[13px] font-medium text-gray-900 hover:bg-gray-50"
+          >
+            {t("dashboard.stats.details")} ›
+          </button>
+        )}
       </div>
       {error ? (
         <p className="py-10 text-center text-sm text-gray-500">

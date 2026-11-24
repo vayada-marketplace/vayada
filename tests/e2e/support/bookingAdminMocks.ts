@@ -713,6 +713,23 @@ export async function mockBookingAdminShellRoutes(
           })
         : route.fulfill({ status: 204 }),
   );
+  // The Details window (VAY-2594): nothing yet.
+  await page.route("**/api/booking/properties/*/dashboard/details**", (route) =>
+    route.fulfill({
+      json: {
+        details: {
+          pageViewsCountedFrom: null,
+          roomTypes: [],
+          leadTimes: [],
+          canceledBookingCount: 0,
+          topBookings: [],
+          recentBookings: [],
+        },
+        bookingsHidden: false,
+        canOpenInPms: false,
+      },
+    }),
+  );
   // Bookings by channel (VAY-2594): nothing yet.
   await page.route("**/api/booking/properties/*/dashboard/channels**", (route) =>
     route.fulfill({ json: { channelMix: { channels: [], directSources: [] } } }),

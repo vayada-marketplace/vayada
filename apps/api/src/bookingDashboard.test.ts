@@ -117,6 +117,71 @@ describe("Booking dashboard routes", () => {
     }
   });
 
+  it("serves the Details window, with booking lists only for people who may read reservations (VAY-2594)", async () => {
+    const booking = {
+      id: "booking-1",
+      reference: "VB-1050",
+      bookedOn: "2026-06-12",
+      status: "confirmed" as const,
+      checkIn: "2026-07-01",
+      checkOut: "2026-07-03",
+      nights: 2,
+      roomCount: 1,
+      roomNames: ["Deluxe Room"],
+      total: { amountDecimal: "200.00", currency: "EUR" },
+      countedInRevenue: true,
+    };
+    const readPort = {
+      ...fakeReadPort(),
+      getDashboardDetails: async (input: { propertyId: string }) => ({
+        ...emptyDetails(input.propertyId),
+        canceledBookingCount: 1,
+        topBookings: [booking],
+        recentBookings: [booking],
+      }),
+    };
+    const url = "/api/booking/properties/prop_alpenrose/dashboard/details";
+    const headers = { authorization: "Bearer valid-token" };
+    app = buildDashboardApp({ readPort });
+    const hidden = await injectJson(app, {
+      method: "GET",
+      url,
+      headers,
+      query: dashboardStatsQuery,
+    });
+    expect(hidden.statusCode).toBe(200);
+    expect(hidden.body).toMatchObject({
+      details: { canceledBookingCount: 1, topBookings: [], recentBookings: [] },
+      bookingsHidden: true,
+    });
+    const refused = await injectJson(app, {
+      method: "GET",
+      url,
+      headers,
+      query: { periodStart: "2026-06-01", periodEnd: "2026-06-30" },
+    });
+    expect(refused.statusCode).toBe(400);
+    await app.close();
+
+    app = buildDashboardApp({
+      readPort,
+      permissions: ["booking.analytics.read", "booking.reservation.read"],
+    });
+    const shown = await injectJson(app, {
+      method: "GET",
+      url,
+      headers,
+      query: dashboardStatsQuery,
+    });
+    expect(shown.body).toMatchObject({
+      details: {
+        topBookings: [{ reference: "VB-1050" }],
+        recentBookings: [{ status: "confirmed" }],
+      },
+      bookingsHidden: false,
+    });
+  });
+
   it("serves bookings by channel for the period and the one before (VAY-2594)", async () => {
     const reads: unknown[] = [];
     app = buildDashboardApp({
@@ -164,6 +229,7 @@ describe("Booking dashboard routes", () => {
                 date: input.windowStart,
                 revenue: money("200.00"),
                 bookingCount: 1,
+                bookingPageBookingCount: 1,
                 otherCurrencyBookingCount: 0,
               },
             ],
@@ -347,6 +413,7 @@ describe("Booking dashboard routes", () => {
           channels: [],
           directSources: [],
         }),
+        getDashboardDetails: async (input) => emptyDetails(input.propertyId),
         getRevenueDays: async () => null,
         getDayBookings: async () => null,
         async getPageViewTimeline(input) {
@@ -494,6 +561,7 @@ describe("Booking dashboard routes", () => {
         getSparklines: denied,
         getConversionFunnel: denied,
         getChannelMix: denied,
+        getDashboardDetails: denied,
         getRevenueDays: denied,
         getDayBookings: denied,
         getPageViewTimeline: denied,
@@ -543,10 +611,16 @@ describe("Booking dashboard routes", () => {
         headers,
         query: dashboardStatsQuery,
       }),
+      injectJson(app, {
+        method: "GET",
+        url: "/api/booking/properties/prop_alpenrose/dashboard/details",
+        headers,
+        query: dashboardStatsQuery,
+      }),
     ]);
 
     expect(responses.map(({ statusCode }) => statusCode)).toEqual([
-      403, 403, 403, 403, 403, 403, 403,
+      403, 403, 403, 403, 403, 403, 403, 403,
     ]);
   });
 
@@ -628,6 +702,7 @@ describe("Booking dashboard routes", () => {
           channels: [],
           directSources: [],
         }),
+        getDashboardDetails: async (input) => emptyDetails(input.propertyId),
         getRevenueDays: async () => null,
         getDayBookings: async () => null,
         async getPageViewTimeline(input) {
@@ -671,6 +746,7 @@ describe("Booking dashboard routes", () => {
           channels: [],
           directSources: [],
         }),
+        getDashboardDetails: async (input) => emptyDetails(input.propertyId),
         getRevenueDays: async () => null,
         getDayBookings: async () => null,
         async getPageViewTimeline(input) {
@@ -1201,6 +1277,7 @@ function fakeReadPort(): BookingDashboardMetricsReadPort {
       channels: [],
       directSources: [],
     }),
+    getDashboardDetails: async (input) => emptyDetails(input.propertyId),
     getRevenueDays: async () => null,
     getDayBookings: async () => null,
     async getPageViewTimeline(input) {
@@ -1307,4 +1384,16 @@ function createQueuedDashboardPool(
 
 function pageViewRow(bucketDate: string, pageViewCount: string, timeZone = "Europe/Vienna") {
   return { propertyFound: true, timeZone, bucketDate, pageViewCount };
+}
+
+function emptyDetails(propertyId: string) {
+  return {
+    propertyId,
+    pageViewsCountedFrom: null,
+    roomTypes: [],
+    leadTimes: [],
+    canceledBookingCount: 0,
+    topBookings: [],
+    recentBookings: [],
+  };
 }

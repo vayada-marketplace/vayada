@@ -124,11 +124,11 @@ test("opens on the last 30 days with four cards, each changing relative to the p
   await expect(main.locator('svg path[stroke="#16A34A"]')).toHaveCount(2);
   await expect(main.locator('svg path[stroke="#D92D20"]')).toHaveCount(1);
   await expect(main.locator('svg path[stroke="#D1D5DB"]')).toHaveCount(1);
-  // Only the page views card opens a window so far.
-  await expect(main.getByText("Details ›")).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "Open page views breakdown" })).toContainText(
-    "Details ›",
-  );
+  // Every card opens the Details window (and so do the revenue chart and the funnel).
+  for (const name of ["revenue", "bookings", "page views", "conversion"])
+    await expect(page.getByRole("button", { name: `Open ${name} details` }).first()).toContainText(
+      "Details ›",
+    );
 
   // The last 30 days end today and compare with the 30 days right before them.
   const stats = reads.stats.at(-1)!.searchParams;

@@ -1,5 +1,6 @@
 import type {
   BookingChannelMixReadModel,
+  BookingDashboardDetailsReadModel,
   BookingDashboardMetricsPeriodInput,
   BookingDashboardMetricsReadModel,
   BookingDashboardMetricsReadPort,
@@ -78,6 +79,15 @@ export type BookingDashboardChannelsResponse = {
   contractVersion: BookingDashboardContractVersion;
   propertyId: string;
   channelMix: BookingChannelMixReadModel;
+};
+
+export type BookingDashboardDetailsResponse = {
+  contractVersion: BookingDashboardContractVersion;
+  propertyId: string;
+  /** Its booking lists only for people who may read reservations (bookingsHidden). */
+  details: BookingDashboardDetailsReadModel;
+  bookingsHidden: boolean;
+  canOpenInPms: boolean;
 };
 
 export type BookingDashboardRevenueDaysResponse = {
@@ -294,6 +304,34 @@ export async function registerBookingDashboardRoutes(
         } satisfies BookingDashboardChannelsResponse;
       } catch (error) {
         request.log.error({ err: error }, "Booking dashboard channel mix read failed");
+        return sendBookingDashboardError(reply, 500, readModelUnavailableError());
+      }
+    },
+  );
+
+  // VAY-2594: the Details window's breakdowns and booking lists.
+  app.get<{ Params: BookingDashboardPropertyParams; Querystring: DashboardPeriodQuery }>(
+    "/properties/:propertyId/dashboard/details",
+    async (request, reply) => {
+      const { propertyId } = request.params;
+      if (!(await enforceBookingDashboardReadPolicy(request, reply, propertyId, options)))
+        return reply;
+      const period = parseDashboardPeriodQuery(request.query);
+      if (!period.ok) return sendBookingDashboardError(reply, 400, period.error);
+      try {
+        const details = await metricsReadPort.getDashboardDetails({ propertyId, ...period.value });
+        const access = await bookingRowAccess(request, propertyId, options);
+        return {
+          contractVersion: BOOKING_DASHBOARD_CONTRACT_VERSION,
+          propertyId,
+          details: access.canSeeBookings
+            ? details
+            : { ...details, topBookings: [], recentBookings: [] },
+          bookingsHidden: !access.canSeeBookings,
+          canOpenInPms: access.canOpenInPms,
+        } satisfies BookingDashboardDetailsResponse;
+      } catch (error) {
+        request.log.error({ err: error }, "Booking dashboard details read failed");
         return sendBookingDashboardError(reply, 500, readModelUnavailableError());
       }
     },
