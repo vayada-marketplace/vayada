@@ -17,7 +17,10 @@ const bodySchema = z.discriminatedUnion("action", [
     action: z.literal("replace"),
     commandId: z.uuid(),
     expectedVersion: z.int().nonnegative(),
-    countryCode: z.string().regex(/^[A-Z]{2}$/),
+    // vayada Payment pays out to banks in Indonesia and Sri Lanka only (Booking Admin offers just
+    // these). With every hotel able to choose it, the server keeps a hotel elsewhere from
+    // unlocking card payments that Vayada couldn't pay out.
+    countryCode: z.enum(["ID", "LK"]),
     details: payoutDestinationDetailsSchema,
   }),
   z.strictObject({

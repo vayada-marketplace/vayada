@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import {
+  PMS_WEB_OWNER_PERMISSIONS,
   PMS_WEB_PROPERTY_ID,
   PMS_WEB_RESERVATION_ID,
   mockPmsWebAuthenticatedSession,
@@ -86,5 +87,64 @@ test("confirms a bank transfer from the booking page instead of accepting it", a
   await expect.poll(() => paid).toBe(true);
   await expect(page.getByText(/The guest pays you directly/)).toHaveCount(0);
   expect(accepts).toBe(0);
+  await assertHealthy();
+});
+
+// VAY-2575: confirming a booking-page bank transfer is the owner's. Staff without the owner key see
+// the booking awaiting payment, no confirm button, and who can confirm it.
+test("leaves a bank transfer's confirmation to the owner for staff without the owner key", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  let markPaidCalls = 0;
+  const deadline = new Date(Date.now() + 47 * 60 * 60 * 1000).toISOString();
+
+  await mockPmsWebAuthenticatedSession(page);
+  await mockPmsWebTargetRoutes(page);
+  await page.route("**/api/identity/staff/self-access", (route) =>
+    route.fulfill({
+      json: {
+        membershipId: "pms-front-desk-membership",
+        roleKey: "front_desk",
+        permissions: PMS_WEB_OWNER_PERMISSIONS.filter(
+          (permission) => permission !== "pms.operations.manage",
+        ),
+      },
+    }),
+  );
+  const base = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}`;
+  for (const suffix of ["notes", "additional-guests"])
+    await page.route(`${base}/${suffix}`, (route) => route.fulfill({ json: { items: [] } }));
+  await page.route(`${base}/change-request`, (route) => route.fulfill({ json: null }));
+  await page.route(base, (route) =>
+    route.fulfill({
+      json: {
+        item: {
+          ...pmsWebReservation,
+          status: "pending_payment",
+          pricing: {
+            totalAmount: { amountDecimal: "360.00", currency: "EUR" },
+            balanceAmount: { amountDecimal: "360.00", currency: "EUR" },
+          },
+          payment: { method: "bank_transfer", expectedMethod: "bank_transfer", status: "unpaid" },
+          hostResponseDeadlineAt: deadline,
+          awaitingHotelPaymentConfirmation: true,
+        },
+      },
+    }),
+  );
+  await page.route(`${base}/mark-paid`, (route) => {
+    markPaidCalls += 1;
+    return route.fulfill({ status: 403, json: { code: "missing_permission" } });
+  });
+
+  // The calendar card's link lands here with ?confirm=payment; it must not ask either.
+  await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}?confirm=payment`);
+  await expect(page.getByRole("heading", { name: "Booking VAY-ADA" })).toBeVisible();
+  await expect(page.getByText("Awaiting payment").first()).toBeVisible();
+  await expect(page.getByText("Only the account owner can confirm this payment.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Mark transfer received" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Mark received" })).toHaveCount(0);
+  expect(markPaidCalls).toBe(0);
   await assertHealthy();
 });

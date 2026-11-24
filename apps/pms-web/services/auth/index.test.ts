@@ -439,6 +439,35 @@ describe("PMS AuthKit session refresh", () => {
     expect(localStorage.getItem("selectedHotelId")).toBe("property_b");
   });
 
+  it.each([
+    { resources: ["property_a", "property_b"], selected: null },
+    { resources: ["property_a"], selected: "property_a" },
+  ])(
+    "forgets a remembered property the login lost access to and chooses another only if it is the only one (VAY-2585): $resources",
+    ({ resources, selected }) => {
+      const storage = memoryStorage();
+      vi.stubGlobal("localStorage", storage);
+      vi.stubGlobal("window", { localStorage: storage });
+      localStorage.setItem("selectedSharedPropertyOrganizationId", "org_hotel_a");
+      localStorage.setItem("selectedSharedPropertyId", "property_removed");
+      localStorage.setItem("selectedHotelId", "property_removed");
+
+      setAuthKitSession({
+        accessToken: "authkit-token",
+        organizationId: "org_hotel_a",
+        resources: { "pms:pms_property": resources },
+        user: {
+          id: "user_hotel_admin",
+          email: "hotel@example.com",
+          status: "active",
+        },
+      });
+
+      expect(localStorage.getItem("selectedSharedPropertyId")).toBe(selected);
+      expect(localStorage.getItem("selectedHotelId")).toBe(selected);
+    },
+  );
+
   it("starts Google login through the AuthKit backend", () => {
     const location = {
       href: "https://pms.localhost/login",

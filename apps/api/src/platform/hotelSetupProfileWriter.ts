@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import { AuthorizationError } from "@vayada/backend-authorization";
+import type { PropertyProfile } from "@vayada/domain-hotels";
 import type pg from "pg";
 import { projectPropertyPublicProfile } from "./propertyPublicProfileProjection.js";
 import type {
   HotelSetupPropertyProfileCommand,
   HotelSetupPropertyProfileResult,
   HotelSetupPropertyProfileUpdate,
+  PropertyLocationChanges,
 } from "../routes/sharedHotelSetupStatus.js";
 import {
   activateCompleteHotel,
@@ -101,6 +103,91 @@ async function profileRow(client: Client, propertyId: string) {
   return row;
 }
 
+/** Reads a Channex property's time zone (VAY-2582); throws when Channex can't answer. */
+export type ChannexPropertyTimeZoneRead = (externalPropertyId: string) => Promise<string>;
+type ChannexTimeZone = { externalPropertyId: string; timeZone: string | null };
+
+/** The hotel's Channex property, while one is (being) connected. */
+async function channexPropertyId(client: Client, propertyId: string) {
+  const result = await client.query<{ id: string }>(
+    `SELECT external_property_id AS id FROM pms.channel_connections
+     WHERE property_id=$1::uuid AND provider='channex' AND connection_status<>'disconnected'
+       AND external_property_id IS NOT NULL`,
+    [propertyId],
+  );
+  return result.rows[0]?.id ?? null;
+}
+
+/**
+ * VAY-2582: a Channex-connected hotel's time zone change needs the Channex property's time zone. It is
+ * read before the transaction, with no database connection held while Channex answers; the transaction
+ * checks the connection again.
+ */
+async function channexTimeZoneForChange(
+  pool: Pick<pg.Pool, "connect">,
+  propertyId: string,
+  command: HotelSetupPropertyProfileCommand,
+  read: ChannexPropertyTimeZoneRead | undefined,
+): Promise<ChannexTimeZone | null> {
+  const client = await pool.connect();
+  let externalPropertyId: string;
+  try {
+    const connected = await channexPropertyId(client, propertyId);
+    if (!connected) return null;
+    const current = toSharedPropertyProfile(await profileRow(client, propertyId)).profile;
+    const update = command.merge(current);
+    if ("fields" in update || update.profile.location.timezone === current.location.timezone)
+      return null;
+    externalPropertyId = connected;
+  } finally {
+    client.release();
+  }
+  try {
+    if (!read) throw new Error("Channex API is not configured");
+    return { externalPropertyId, timeZone: await read(externalPropertyId) };
+  } catch (error) {
+    console.warn("Channex time zone unavailable; the time zone change is refused.", {
+      propertyId,
+      reason: error instanceof Error ? error.message : "unknown",
+    });
+    return { externalPropertyId, timeZone: null };
+  }
+}
+
+/**
+ * VAY-2582: a profile save never moves a hotel's time zone away from its Channex property's, and a live
+ * hotel's time zone or country changes only when the person confirmed it. A street, postal code or pin
+ * change keeps the time zone, so the calendar, the booking page and the Channex sync keep working.
+ */
+async function locationChangeRefusal(
+  client: Client,
+  propertyId: string,
+  from: PropertyProfile["location"],
+  to: PropertyProfile["location"],
+  confirmed: boolean,
+  channex: ChannexTimeZone | null,
+): Promise<HotelSetupPropertyProfileResult | null> {
+  const changes: PropertyLocationChanges = {};
+  if (to.timezone !== from.timezone) {
+    const externalPropertyId = await channexPropertyId(client, propertyId);
+    if (externalPropertyId) {
+      if (channex?.externalPropertyId !== externalPropertyId || !channex.timeZone)
+        return { status: "channex_time_zone_unavailable" };
+      if (channex.timeZone !== to.timezone)
+        return { status: "channex_time_zone_mismatch", channexTimeZone: channex.timeZone };
+    }
+    // A hotel without a time zone yet gets its first one; that moves nothing.
+    if (from.timezone) changes.timezone = { from: from.timezone, to: to.timezone };
+  }
+  // A stored code may be lower case (e.g. imported); the save always upper-cases it.
+  if (from.countryCode && to.countryCode.toUpperCase() !== from.countryCode.toUpperCase())
+    changes.countryCode = { from: from.countryCode.toUpperCase(), to: to.countryCode };
+  if (confirmed || (!changes.timezone && !changes.countryCode)) return null;
+  return (await isHotelLive(client, propertyId))
+    ? { status: "location_change_unconfirmed", changes }
+    : null;
+}
+
 /** Ordinary-login port of platform.hotel_setup_update_property_profile (migration 0472):
  * one READ COMMITTED transaction with authority, replay, revision CAS, contact privacy,
  * profile/location/contact writes, read models, idempotency key and audit. */
@@ -109,8 +196,15 @@ export async function writeOrdinaryHotelSetupPropertyProfile(
   scope: ProfileScope,
   correlation: string,
   command: HotelSetupPropertyProfileCommand,
+  readChannexTimeZone?: ChannexPropertyTimeZoneRead,
 ): Promise<HotelSetupPropertyProfileResult> {
   const keyHash = createHash("sha256").update(command.idempotencyKey).digest("hex");
+  const channex = await channexTimeZoneForChange(
+    pool,
+    scope.propertyId,
+    command,
+    readChannexTimeZone,
+  );
   const client = await pool.connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
@@ -147,6 +241,18 @@ export async function writeOrdinaryHotelSetupPropertyProfile(
     if (currentRevision !== update.expectedProfileRevision) {
       await client.query("ROLLBACK");
       return { status: "conflict", currentRevision };
+    }
+    const refusal = await locationChangeRefusal(
+      client,
+      scope.propertyId,
+      toSharedPropertyProfile(before).profile.location,
+      update.profile.location,
+      update.confirmLocationChange === true,
+      channex,
+    );
+    if (refusal) {
+      await client.query("ROLLBACK");
+      return refusal;
     }
     const payload = JSON.stringify(propertyProfileWritePayload(update.profile));
     // Never publish or re-own a contact the profile does not show (private or another product's).
@@ -263,6 +369,7 @@ export async function writeOrdinaryHotelSetupPropertyProfile(
 /** Public route adapter: scope, actor and correlation come only from the verified context. */
 export function createOrdinaryHotelSetupProfileCommand(
   pool: Pick<pg.Pool, "connect">,
+  readChannexTimeZone?: ChannexPropertyTimeZoneRead,
 ): HotelSetupPropertyProfileUpdate {
   return (context, propertyId, command) =>
     writeOrdinaryHotelSetupPropertyProfile(
@@ -274,6 +381,7 @@ export function createOrdinaryHotelSetupProfileCommand(
       },
       (context.audit.correlationId ?? context.audit.requestId).slice(0, 200),
       command,
+      readChannexTimeZone,
     );
 }
 
@@ -331,6 +439,24 @@ export async function activateOrdinaryHotelSetupProperty(
   } finally {
     client.release();
   }
+}
+
+/**
+ * VAY-2582: whether guests can book the hotel: its booking page is published, or it is connected to
+ * Channex. Setup is over for a live hotel (Settings changes it), and its time zone or country changes
+ * only on purpose. A hotel that is merely active (complete basics) can still be mid-setup.
+ */
+export async function isHotelLive(client: AuthorityClient, propertyId: string) {
+  const result = await client.query<{ live: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM distribution.active_public_booking_revision active
+         WHERE active.property_id=$1::uuid)
+       OR EXISTS (SELECT 1 FROM pms.channel_connections connection
+         WHERE connection.property_id=$1::uuid AND connection.provider='channex'
+           AND connection.connection_status<>'disconnected'
+           AND connection.external_property_id IS NOT NULL) AS live`,
+    [propertyId],
+  );
+  return result.rows[0]?.live === true;
 }
 
 /** Route adapter: scope and actor come only from the verified context. */

@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",
+    "@vayada/assistant-ui": "*",
     "@vayada/domain-booking": "*",
     "@vayada/domain-finance": "*",
     "@vayada/domain-pms-channex": "*",
@@ -25,6 +26,7 @@
     "@vayada/locale-ui": "*",
     "@vayada/product-onboarding": "*",
     "@vayada/settings-ui": "*",
+    "@vayada/web-security": "*",
     "clsx": "^2.0.0",
     "date-fns": "^4.1.0",
     "flag-icons": "^7.5.0",

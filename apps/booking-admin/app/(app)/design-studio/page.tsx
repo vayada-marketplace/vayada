@@ -220,6 +220,8 @@ export default function DesignStudioPage() {
       return;
     }
     const hotelId = designHotelIdRef.current;
+    // Loading also checks a domain that is not verified yet, which can take a few seconds.
+    setDomainBusy(true);
     settingsService
       .getCustomDomainStatus()
       .then((status) => {
@@ -229,7 +231,8 @@ export default function DesignStudioPage() {
       .catch(() => {
         const message = "admin.failedToLoadCustomDomainStatus";
         setFeedback({ type: "error", message });
-      });
+      })
+      .finally(() => setDomainBusy(false));
     Promise.all([
       settingsService.getDesignSettings(hotelId),
       settingsService.getPropertySettings(hotelId).catch(() => null),

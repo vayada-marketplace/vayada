@@ -21,6 +21,8 @@ import {
   createPgPropertyAccessRepository,
   hasPermission,
   hasActiveEntitlement,
+  hasActiveLinkedResource,
+  isPropertyInMemberScope,
   requirePropertyAccess,
   requirePermission,
   requireActiveEntitlement,
@@ -1055,6 +1057,152 @@ describe("authorization helpers", () => {
         requirement("booking.settings.manage", "booking", "booking_hotel", "booking_hotel_other"),
       ),
     ).toThrow(AuthorizationError);
+  });
+});
+
+describe("member property scope on linked resources (VAY-2574)", () => {
+  const LEGACY_PMS_HOTEL = "pms_hotel_legacy_42";
+
+  function scopedContext(
+    propertyAccess?: RequestContext["membership"]["propertyAccess"],
+  ): RequestContext {
+    const context = contextFor({
+      roleKey: "hotel_manager",
+      permissions: ["booking.settings.manage", "pms.operations.manage", "hotel_catalog.setup.read"],
+      linkedResources: [PROPERTY_A, PROPERTY_B].flatMap((propertyId) => [
+        linkedResource("hotel_catalog", "property", propertyId),
+        linkedResource("booking", "booking_hotel", propertyId),
+        linkedResource("pms", "pms_property", propertyId),
+      ]),
+    });
+    context.linkedResources.push(
+      linkedResource("pms", "pms_hotel", LEGACY_PMS_HOTEL),
+      linkedResource("platform", "user_profile", "user_test"),
+    );
+    if (propertyAccess) context.membership.propertyAccess = propertyAccess;
+    return context;
+  }
+
+  const assignedToA = {
+    mode: "assigned",
+    roleKey: "hotel_manager",
+    accessOrigin: "agency",
+    assignedPropertyIds: [PROPERTY_A],
+  } as const;
+  const allProperties = { ...assignedToA, mode: "all", assignedPropertyIds: [] } as const;
+
+  const propertyRequirements = [
+    ["booking settings", "booking.settings.manage", "booking", "booking_hotel"],
+    ["PMS setup", "pms.operations.manage", "pms", "pms_property"],
+    ["shared property setup", "hotel_catalog.setup.read", "hotel_catalog", "property"],
+  ] as const;
+
+  it.each(propertyRequirements)(
+    "a member assigned to property A keeps %s on A and is refused on B",
+    (_area, permission, product, resourceType) => {
+      const context = scopedContext({ ...assignedToA, assignedPropertyIds: [PROPERTY_A] });
+      expect(
+        canAccessResource(context, requirement(permission, product, resourceType, PROPERTY_A)),
+      ).toBe(true);
+      expect(
+        canAccessResource(context, requirement(permission, product, resourceType, PROPERTY_B)),
+      ).toBe(false);
+      expect(() =>
+        requireResourceAccess(context, requirement(permission, product, resourceType, PROPERTY_B)),
+      ).toThrow(AuthorizationError);
+    },
+  );
+
+  it.each(propertyRequirements)(
+    "members with every property, and contexts without a property scope, keep %s on both",
+    (_area, permission, product, resourceType) => {
+      for (const context of [scopedContext({ ...allProperties }), scopedContext()]) {
+        for (const propertyId of [PROPERTY_A, PROPERTY_B]) {
+          expect(
+            canAccessResource(context, requirement(permission, product, resourceType, propertyId)),
+          ).toBe(true);
+        }
+      }
+    },
+  );
+
+  it("still needs the account's own link: an assignment never adds a property", () => {
+    const context = scopedContext({
+      ...assignedToA,
+      assignedPropertyIds: [PROPERTY_A, PROPERTY_OTHER_TENANT],
+    });
+    expect(
+      canAccessResource(
+        context,
+        requirement("booking.settings.manage", "booking", "booking_hotel", PROPERTY_OTHER_TENANT),
+      ),
+    ).toBe(false);
+  });
+
+  it("refuses a legacy pms_hotel to a limited member only", () => {
+    const legacy = requirement("pms.operations.manage", "pms", "pms_hotel", LEGACY_PMS_HOTEL);
+    expect(
+      canAccessResource(
+        scopedContext({ ...assignedToA, assignedPropertyIds: [PROPERTY_A] }),
+        legacy,
+      ),
+    ).toBe(false);
+    expect(canAccessResource(scopedContext({ ...allProperties }), legacy)).toBe(true);
+  });
+
+  it("leaves resources that are not a property's alone", () => {
+    const context = scopedContext({ ...assignedToA, assignedPropertyIds: [] });
+    expect(
+      hasActiveLinkedResource(context, {
+        product: "platform",
+        resourceType: "user_profile",
+        resourceId: "user_test",
+        allowedRelationships: ["operator"],
+      }),
+    ).toBe(true);
+  });
+
+  it("reads an unknown mode as limited, and refuses malformed assignments", () => {
+    const booking = requirement("booking.settings.manage", "booking", "booking_hotel", PROPERTY_A);
+    expect(
+      canAccessResource(
+        scopedContext({
+          ...assignedToA,
+          mode: "unknown" as never,
+          assignedPropertyIds: [PROPERTY_A],
+        }),
+        booking,
+      ),
+    ).toBe(true);
+    expect(
+      canAccessResource(
+        scopedContext({ ...assignedToA, mode: "unknown" as never, assignedPropertyIds: [] }),
+        booking,
+      ),
+    ).toBe(false);
+    expect(
+      canAccessResource(
+        scopedContext({ ...assignedToA, assignedPropertyIds: null as never }),
+        booking,
+      ),
+    ).toBe(false);
+  });
+
+  it("answers isPropertyInMemberScope from the request snapshot", () => {
+    expect(
+      isPropertyInMemberScope(
+        scopedContext({ ...assignedToA, assignedPropertyIds: [PROPERTY_A] }),
+        PROPERTY_A,
+      ),
+    ).toBe(true);
+    expect(
+      isPropertyInMemberScope(
+        scopedContext({ ...assignedToA, assignedPropertyIds: [PROPERTY_A] }),
+        PROPERTY_B,
+      ),
+    ).toBe(false);
+    expect(isPropertyInMemberScope(scopedContext({ ...allProperties }), PROPERTY_B)).toBe(true);
+    expect(isPropertyInMemberScope(scopedContext(), PROPERTY_B)).toBe(true);
   });
 });
 

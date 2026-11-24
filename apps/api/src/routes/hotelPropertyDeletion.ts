@@ -1,5 +1,5 @@
 import { UnauthorizedError, requireAuthContext, type RequestContext } from "@vayada/backend-auth";
-import { AuthorizationError } from "@vayada/backend-authorization";
+import { AuthorizationError, isPropertyInMemberScope } from "@vayada/backend-authorization";
 import {
   HOTEL_PROPERTY_DELETION_CONTRACT_VERSION,
   type HotelPropertyDeletionRequest,
@@ -135,14 +135,17 @@ function authorize(
     reply.status(400).send({ code: "invalid_property_id", detail: "Property ID must be a UUID." });
     return null;
   }
-  const linked = context.linkedResources.some(
-    (resource) =>
-      resource.status === "active" &&
-      resource.product === "hotel_catalog" &&
-      resource.resourceType === "property" &&
-      (resource.relationship === "owner" || resource.relationship === "operator") &&
-      resource.resourceId.toLowerCase() === propertyId.toLowerCase(),
-  );
+  const linked =
+    // VAY-2574: an admin limited to some properties may delete only those.
+    isPropertyInMemberScope(context, propertyId.toLowerCase()) &&
+    context.linkedResources.some(
+      (resource) =>
+        resource.status === "active" &&
+        resource.product === "hotel_catalog" &&
+        resource.resourceType === "property" &&
+        (resource.relationship === "owner" || resource.relationship === "operator") &&
+        resource.resourceId.toLowerCase() === propertyId.toLowerCase(),
+    );
   if (!linked) {
     sendError(reply, "property_not_found");
     return null;

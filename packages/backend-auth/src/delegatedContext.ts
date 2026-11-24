@@ -1,0 +1,412 @@
+// The RequestContext an AI action uses when it runs a route as the signed-in user (VAY-2506).
+//
+// Rules (AI actions design note §5.2, plan 3.2):
+// - resolved fresh from the database once per tool call, so a removed member or a changed role
+//   stops the very next call;
+// - only hotel accounts (`hotel_group`); platform accounts are refused;
+// - never a session id, so no owner-session gate (`requireOwnerSession`) ever passes;
+// - `audit.source = "agent"`, correlation id = the tool-call id, and a fresh random request id for
+//   every request (tool-call ids come from AI clients and are not unique);
+// - only contexts this module minted are accepted by injectAsDelegate: they are deep-frozen, and
+//   expire after DELEGATED_CONTEXT_MAX_AGE_MS so a cached one stops working;
+// - narrowed to the member's own properties (VAY-2567 rank 1a): the delegated context keeps only the
+//   links of the properties this member may use, on top of the routes' own member check (VAY-2574),
+//   and can narrow further to the action's properties. Narrowing can only take rights away;
+// - read-only unless it came from resolveDelegatedChangeContext (VAY-2522): every tool call gets a
+//   "read" delegation, and only the one executor of AI changes (VAY-2524) mints a "change" one.
+import { randomUUID } from "node:crypto";
+
+import { AuthError, DelegationRefusedError } from "./errors.js";
+import { type IdentityRepository } from "./repository.js";
+import { type AuthorizationResolver } from "./resolve.js";
+import {
+  type LinkedResource,
+  type ProductEntitlement,
+  type RequestContext,
+  type RequestDelegation,
+  type ResourceType,
+} from "./types.js";
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// At most 128: the AI action log keeps a correlation id that long as it is (VAY-2508).
+const TOOL_CALL_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
+const LOCALE = /^[a-z]{2}(-[A-Z]{2})?$/;
+const CURRENCY = /^[A-Z]{3}$/;
+
+/** A delegated context is resolved per tool call; after this it is refused (VAY-2506 review M1). */
+export const DELEGATED_CONTEXT_MAX_AGE_MS = 60_000;
+
+/** Contexts resolveDelegatedContext returned. Nothing else can be injected as a user. */
+const minted = new WeakSet<RequestContext>();
+
+/** Link types whose resource id is a canonical property id. Every other link is dropped. */
+const PROPERTY_RESOURCE_TYPES: ReadonlySet<ResourceType> = new Set([
+  "property",
+  "booking_hotel",
+  "pms_hotel",
+  "pms_property",
+]);
+
+export type DelegatedContextInput = {
+  /** Internal user id (`identity.users.id`). */
+  userId: string;
+  /** Internal organization id; for MCP it comes from the connection row, never from a token. */
+  organizationId: string;
+  /** Where the call came from. Its access is set by the resolver, never by the caller. */
+  delegation: Omit<RequestDelegation, "access">;
+  /** Narrows the delegation to these properties. It can never add one. */
+  propertyIds?: readonly string[];
+  locale?: string;
+  currency?: string;
+};
+
+export type DelegatedContextOptions = {
+  /** The same resolver the auth plugin uses for browser requests. */
+  authorizationResolver: AuthorizationResolver;
+  now?: () => Date;
+};
+
+/**
+ * Resolves the narrowed, read-only RequestContext of an AI tool call that acts as `userId` in
+ * `organizationId`. Throws AuthError when the user, account or membership is missing or not
+ * active, and DelegationRefusedError for platform accounts or malformed input.
+ */
+export function resolveDelegatedContext(
+  repo: IdentityRepository,
+  input: DelegatedContextInput,
+  options: DelegatedContextOptions,
+): Promise<RequestContext> {
+  return resolveDelegated(repo, input, options, "read");
+}
+
+/**
+ * The same context with "change" access: it may also run write routes. Only the one executor of
+ * AI changes may call this (VAY-2524; enforced by apps/api's delegation boundary test). It runs a
+ * change the person already confirmed, or one that needs no confirmation, never a model's wish.
+ */
+export function resolveDelegatedChangeContext(
+  repo: IdentityRepository,
+  input: DelegatedContextInput,
+  options: DelegatedContextOptions,
+): Promise<RequestContext> {
+  return resolveDelegated(repo, input, options, "change");
+}
+
+async function resolveDelegated(
+  repo: IdentityRepository,
+  given: DelegatedContextInput,
+  options: DelegatedContextOptions,
+  access: RequestDelegation["access"],
+): Promise<RequestContext> {
+  const input = snapshotInput(given);
+  assertDelegatedInput(input);
+  if (!repo.findUserById || !repo.findOrganizationById) {
+    throw new Error("The identity repository cannot resolve delegated contexts.");
+  }
+
+  const user = await repo.findUserById(input.userId);
+  if (!user || !user.workosUserId) {
+    throw new AuthError("USER_NOT_FOUND", `No internal user ${input.userId}`);
+  }
+  if (user.status !== "active") {
+    throw new AuthError("USER_SUSPENDED", `User account is ${user.status}`);
+  }
+
+  const org = await repo.findOrganizationById(input.organizationId);
+  if (!org) {
+    throw new AuthError("ORGANIZATION_NOT_FOUND", `No organization ${input.organizationId}`);
+  }
+  if (org.kind !== "hotel_group") {
+    throw new DelegationRefusedError("only hotel accounts can delegate");
+  }
+  if (org.status !== "active") {
+    throw new AuthError("ORGANIZATION_SUSPENDED", `Organization is ${org.status}`);
+  }
+
+  const membership = await repo.findActiveMembership(user.userId, org.organizationId);
+  if (!membership || membership.status !== "active") {
+    throw new AuthError(
+      "MEMBERSHIP_NOT_FOUND",
+      `No active membership for user ${user.userId} in organization ${org.organizationId}`,
+    );
+  }
+
+  const resourceLinks = await repo.findLinkedResources(org.organizationId);
+  const base: RequestContext = {
+    actor: {
+      internalUserId: user.userId,
+      // No sessionId, ever: routes read any session id as proof of an owner browser session.
+      providerIdentity: {
+        provider: "workos",
+        providerUserId: user.workosUserId,
+        ...(org.workosOrgId ? { providerOrganizationId: org.workosOrgId } : {}),
+      },
+      email: user.email,
+      name: user.name,
+      status: user.status,
+    },
+    selectedOrganization: {
+      organizationId: org.organizationId,
+      ...(org.workosOrgId ? { workosOrgId: org.workosOrgId } : {}),
+      name: org.name,
+      kind: org.kind,
+      status: org.status,
+    },
+    membership: {
+      membershipId: membership.membershipId,
+      status: membership.status,
+      roleKey: membership.roleKey,
+      ...(membership.workosMembershipId
+        ? { workosMembershipId: membership.workosMembershipId }
+        : {}),
+      workosRoleSlugs: membership.workosRoleSlugs,
+      permissions: [],
+    },
+    linkedResources: resourceLinks.map(
+      (r): LinkedResource => ({
+        product: r.product as LinkedResource["product"],
+        resourceType: r.resourceType as LinkedResource["resourceType"],
+        resourceId: r.resourceId,
+        relationship: r.relationship as LinkedResource["relationship"],
+        status: r.status as LinkedResource["status"],
+      }),
+    ),
+    entitlements: [],
+    locale: input.locale ?? "en",
+    currency: input.currency ?? "USD",
+    audit: {
+      requestId: randomUUID(),
+      correlationId: input.delegation.toolCallId,
+      source: "agent",
+      receivedAt: (options.now?.() ?? new Date()).toISOString(),
+    },
+  };
+
+  const authorization = await options.authorizationResolver(base);
+  const resolved: RequestContext = {
+    ...base,
+    // Set after the resolver ran, so nothing it does can touch the access (VAY-2522 review).
+    delegation: { ...input.delegation, access },
+    membership: {
+      ...base.membership,
+      permissions: [...authorization.permissions],
+      ...(authorization.propertyAccess ? { propertyAccess: authorization.propertyAccess } : {}),
+    },
+    entitlements: [...(authorization.entitlements ?? [])],
+  };
+  const narrowed = deepFreeze(narrowDelegatedContext(resolved, input.propertyIds));
+  minted.add(narrowed);
+  return narrowed;
+}
+
+/** True only for a context resolveDelegatedContext returned (package-internal; not exported). */
+export function isMintedDelegatedContext(context: RequestContext): boolean {
+  return minted.has(context);
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+/**
+ * Keeps only what the member may use: links of the member's own properties (optionally fewer),
+ * and no active entitlement tied to anything else. Suspended entitlements always stay, because
+ * they only ever take access away. Idempotent: narrowing a narrowed context changes nothing.
+ */
+export function narrowDelegatedContext(
+  context: RequestContext,
+  propertyIds?: readonly string[],
+): RequestContext {
+  const allowed = new Set(delegatedPropertyIds(context, propertyIds));
+  const access = context.membership.propertyAccess;
+  return {
+    ...context,
+    membership: {
+      ...context.membership,
+      permissions: [...context.membership.permissions],
+      ...(access
+        ? {
+            propertyAccess:
+              propertyIds === undefined
+                ? access
+                : { ...access, mode: "assigned", assignedPropertyIds: [...allowed].sort() },
+          }
+        : {}),
+    },
+    linkedResources: context.linkedResources.filter(
+      (resource) =>
+        PROPERTY_RESOURCE_TYPES.has(resource.resourceType) && allowed.has(resource.resourceId),
+    ),
+    entitlements: context.entitlements.filter((entitlement) =>
+      keepsEntitlement(entitlement, allowed),
+    ),
+  };
+}
+
+/** The canonical property ids a delegated context may use. */
+export function delegatedPropertyIds(
+  context: Pick<RequestContext, "linkedResources" | "membership">,
+  propertyIds?: readonly string[],
+): string[] {
+  const canonical = new Set(
+    context.linkedResources
+      .filter(
+        (resource) =>
+          resource.status === "active" &&
+          resource.product === "hotel_catalog" &&
+          resource.resourceType === "property",
+      )
+      .map((resource) => resource.resourceId),
+  );
+  const access = context.membership.propertyAccess;
+  // No property scope means the authorization resolver refused it: no property at all.
+  const memberIds = !access
+    ? []
+    : access.mode === "all"
+      ? [...canonical]
+      : access.assignedPropertyIds.filter((id) => canonical.has(id));
+  const narrowed =
+    propertyIds === undefined ? memberIds : memberIds.filter((id) => propertyIds.includes(id));
+  return [...new Set(narrowed)].sort();
+}
+
+/**
+ * An AI delegation's limits as plain data (VAY-2522). A command whose transaction checks the
+ * user's rights again reads them from the database, which knows nothing of the delegation; the
+ * command carries this so that check can apply the limits too.
+ */
+export type AuthorityNarrowing = {
+  readonly access: "read" | "change";
+  /** The only properties the command may touch. */
+  readonly propertyIds: readonly string[];
+};
+
+/** What a command built from this context must carry: null when a person made the request. */
+export function authorityNarrowing(context: RequestContext): AuthorityNarrowing | null {
+  const { delegation } = context;
+  if (!delegation) return null;
+  return { access: delegation.access, propertyIds: delegatedPropertyIds(context) };
+}
+
+/**
+ * Whether a command under this narrowing may change this property: always for a person's request
+ * (null); for an AI one only with "change" access and the property listed. Anything else is
+ * refused, including a narrowing that is missing or malformed.
+ */
+export function narrowingAllowsChange(
+  narrowing: AuthorityNarrowing | null | undefined,
+  propertyId: string,
+): boolean {
+  if (narrowing === null) return true;
+  if (
+    typeof narrowing !== "object" ||
+    narrowing.access !== "change" ||
+    !Array.isArray(narrowing.propertyIds) ||
+    typeof propertyId !== "string"
+  ) {
+    return false;
+  }
+  // Ids are UUIDs, which the database compares without case.
+  const wanted = propertyId.toLowerCase();
+  return narrowing.propertyIds.some((id) => typeof id === "string" && id.toLowerCase() === wanted);
+}
+
+/**
+ * True only for a context `resolveDelegatedContext` could have produced: an agent context of an
+ * active hotel member, without a session id, already narrowed. The auth hook refuses any other.
+ */
+export function isDelegatedContext(context: RequestContext): boolean {
+  if (
+    context.audit.source !== "agent" ||
+    !context.delegation ||
+    context.delegation.toolCallId !== context.audit.correlationId ||
+    (context.delegation.access !== "read" && context.delegation.access !== "change") ||
+    context.actor.providerIdentity.sessionId !== undefined ||
+    context.actor.status !== "active" ||
+    context.selectedOrganization.kind !== "hotel_group" ||
+    context.selectedOrganization.status !== "active" ||
+    context.membership.status !== "active"
+  ) {
+    return false;
+  }
+  const narrowed = narrowDelegatedContext(context);
+  return (
+    narrowed.linkedResources.length === context.linkedResources.length &&
+    narrowed.entitlements.length === context.entitlements.length
+  );
+}
+
+function keepsEntitlement(entitlement: ProductEntitlement, allowed: ReadonlySet<string>): boolean {
+  if (entitlement.status !== "active" || !entitlement.resource) return true;
+  return (
+    PROPERTY_RESOURCE_TYPES.has(entitlement.resource.resourceType) &&
+    allowed.has(entitlement.resource.resourceId)
+  );
+}
+
+/**
+ * A plain copy that reads every field once and keeps only the known delegation fields, so a getter
+ * or Proxy can't change what was checked (VAY-2522 review M1).
+ */
+function snapshotInput(input: DelegatedContextInput): DelegatedContextInput {
+  const { userId, organizationId, delegation, propertyIds, locale, currency } = input;
+  if (typeof delegation !== "object" || delegation === null) {
+    throw new DelegationRefusedError("a delegation is required");
+  }
+  // The access comes from which resolver was called, never from the input (VAY-2522).
+  if ("access" in delegation) throw new DelegationRefusedError("the caller may not set access");
+  const { channel, connectionId, conversationId, toolCallId } = delegation;
+  if (propertyIds !== undefined && !Array.isArray(propertyIds)) {
+    throw new DelegationRefusedError("malformed property id");
+  }
+  return {
+    userId,
+    organizationId,
+    delegation: {
+      channel,
+      ...(connectionId !== undefined ? { connectionId } : {}),
+      ...(conversationId !== undefined ? { conversationId } : {}),
+      toolCallId,
+    },
+    ...(propertyIds !== undefined ? { propertyIds: [...propertyIds] } : {}),
+    ...(locale !== undefined ? { locale } : {}),
+    ...(currency !== undefined ? { currency } : {}),
+  };
+}
+
+/** RegExp.test turns any value into a string (undefined, or an object's own toString): strings only. */
+const matches = (pattern: RegExp, value: unknown): value is string =>
+  typeof value === "string" && pattern.test(value);
+
+function assertDelegatedInput(input: DelegatedContextInput): void {
+  if (!matches(UUID, input.userId)) throw new DelegationRefusedError("malformed user id");
+  if (!matches(UUID, input.organizationId)) {
+    throw new DelegationRefusedError("malformed organization id");
+  }
+  const { delegation } = input;
+  if (!matches(TOOL_CALL_ID, delegation.toolCallId)) {
+    throw new DelegationRefusedError("malformed tool-call id");
+  }
+  const origin =
+    delegation.channel === "mcp"
+      ? { id: delegation.connectionId, other: delegation.conversationId }
+      : delegation.channel === "in_app"
+        ? { id: delegation.conversationId, other: delegation.connectionId }
+        : null;
+  if (!origin || !matches(UUID, origin.id) || origin.other !== undefined) {
+    throw new DelegationRefusedError("a delegation needs exactly its connection or conversation");
+  }
+  if (input.propertyIds && !input.propertyIds.every((id) => matches(UUID, id))) {
+    throw new DelegationRefusedError("malformed property id");
+  }
+  if (input.locale !== undefined && !matches(LOCALE, input.locale)) {
+    throw new DelegationRefusedError("malformed locale");
+  }
+  if (input.currency !== undefined && !matches(CURRENCY, input.currency)) {
+    throw new DelegationRefusedError("malformed currency");
+  }
+}

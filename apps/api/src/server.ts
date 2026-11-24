@@ -53,6 +53,7 @@ import {
   verifyAdminTransferProof,
 } from "@vayada/backend-auth";
 import {
+  createAuthorizationResolver,
   createPgEntitlementRepository,
   createPgPropertyAccessRepository,
   createPgRolePermissionRepository,
@@ -70,6 +71,7 @@ import { createOrdinaryHotelSetupLogoRuntime } from "./hotelSetupLogoRuntime.js"
 import {
   createOrdinaryHotelSetupActivation,
   createOrdinaryHotelSetupProfileCommand,
+  isHotelLive,
 } from "./platform/hotelSetupProfileWriter.js";
 import { createOrdinaryHotelSetupLaunchSettingsCommand } from "./hotelSetupLaunchSettingsRepository.js";
 import { createOrdinaryHotelSetupFeatureHubCommands } from "./hotelSetupFeatureHubOrdinary.js";
@@ -82,6 +84,7 @@ import {
   replacementPricingManualPaymentMethods,
   stripeSubscriptionRuntimeEnabled,
   vayadaPaymentLiveFor,
+  vayadaPaymentManageableFor,
   vayadaPaymentOpenFor,
 } from "./config.js";
 import { createPgBookingDesignCatalogEvidenceRepository } from "./domains/bookingDesignCatalogEvidenceRepository.js";
@@ -183,6 +186,7 @@ import { createPgPmsPhysicalRoomUnitReconcileRepository } from "./domains/pmsPhy
 import { createPgPmsPhysicalRoomOperationalLabelRepository } from "./domains/pmsPhysicalRoomOperationalLabelRepository.js";
 import {
   followRoomChangesInCalendar,
+  refreshPmsOperatingCalendarRooms,
   repairPmsOperatingCalendarRooms,
   type PmsOperatingCalendarRoomRefreshPorts,
   type PmsRoomChangeCommand,
@@ -234,6 +238,7 @@ import { createFinanceSubscriptionService } from "./domains/financeSubscriptionS
 import { createPgFinanceSubscriptionStore } from "./domains/financeSubscriptionStore.js";
 import { createStripeFinanceSubscriptionProvider } from "./domains/stripeFinanceSubscriptions.js";
 import { createStripeBookingPaymentProvider } from "./domains/stripeBookingPayments.js";
+import { createVayadaPaymentRecordedMode } from "./domains/vayadaPaymentRecordedMode.js";
 import { routeVayadaPaymentStripe } from "./domains/vayadaPaymentStripe.js";
 import { handleVayadaPaymentWebhookEvent } from "./domains/vayadaPaymentWebhookEvents.js";
 import { createStripeConnectProvider } from "./domains/stripeConnect.js";
@@ -282,6 +287,7 @@ import {
   createChannexManagementProvider,
 } from "./integrations/channexManagement.js";
 import { preflightChannexManagementWorker } from "./jobs/channexManagementWorkerStartup.js";
+import { createChannexPropertyTimeZoneRead } from "./integrations/channexPropertyCutOff.js";
 import { resolveChannexManagementDatabaseRouting } from "./channexManagementDatabaseRouting.js";
 import { bootstrapPublishedChannexOffer } from "./integrations/channexPublishedOfferBootstrap.js";
 import { runPmsInboxProviderActions } from "./jobs/pmsInboxProviderActions.js";
@@ -341,6 +347,15 @@ import { createPgHotelAccountAgreementsRepository } from "./domains/hotelAccount
 import { createHotelSetupChecklistService } from "./domains/hotelSetupChecklistService.js";
 import { createTargetBookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
 import {
+  createBookingCustomDomainVerifier,
+  createCloudflareCustomHostnames,
+  createCustomDomainDns,
+} from "./domains/bookingCustomDomainVerification.js";
+import {
+  createGoogleMapsKeyWebsites,
+  startMapsKeyWebsitesSync,
+} from "./domains/googleMapsKeyWebsites.js";
+import {
   createTargetFinancePropertySettingsRepository,
   createTargetFinancePublicHotelPropertyResolver,
   createXenditBankValidator,
@@ -385,6 +400,18 @@ import {
   createPgContactIntakeRetentionStore,
   startContactIntakeRetentionWorker,
 } from "./jobs/contactIntakeRetention.js";
+import {
+  createPgAiActionLogRetentionStore,
+  createPgAiActivityStore,
+} from "./ai/actionLog/aiActivity.js";
+import { startAiActionLogRetentionWorker } from "./jobs/aiActionLogRetention.js";
+import { createAiChangesRuntime } from "./ai/changes/runtime.js";
+import { createPgAiBudgetAdmin } from "./ai/usage/budgetAdmin.js";
+import { createPgAiBudget } from "./ai/usage/budgetGate.js";
+import { createPgAiActionLog } from "./ai/actionLog/actionLog.js";
+import { createPgConversationStore } from "./ai/assistant/conversationStore.js";
+import { createAiProvider, enabledAiProvidersFromEnv } from "./ai/provider/aiProvider.js";
+import { createAiSpendAlert } from "./ai/usage/spendAlert.js";
 import {
   createPgGuestProfileLinkStore,
   startGuestProfileLinkWorker,
@@ -435,6 +462,77 @@ if (!targetDatabaseUrl) {
 }
 
 const { publicHotelProfileRepository } = createPublicRuntimeRepositories(config);
+// VAY-2508: the AI action log behind GET /api/ai/activity.
+const aiActivityStore = createPgAiActivityStore({ connectionString: targetDatabaseUrl });
+// VAY-2504: vayada staff set each hotel account's monthly AI budget; the spend alert reads the
+// same ledger. A staff page and an hourly check need few connections (the pool runtime may share
+// or cap this pool).
+const aiBudgetPool = new pg.Pool({
+  connectionString: targetDatabaseUrl,
+  connectionTimeoutMillis: 5_000,
+  max: 2,
+});
+const aiBudgetAdmin = createPgAiBudgetAdmin({
+  pool: aiBudgetPool,
+  defaultMonthlyLimitMicroUsd: config.aiDefaultMonthlyBudgetMicroUsd,
+});
+const apiAuth = buildAuthOptions(config.auth);
+// VAY-2524: AI changes (Ask first): the record of every change, the one executor, its recovery job
+// and the person's Yes/No routes. Off unless AI_CHANGES_ENABLED; an account without an AI budget
+// can't answer a change either.
+const aiChanges =
+  config.aiChangesEnabled && apiAuth
+    ? (() => {
+        const budget = createPgAiBudget({
+          pool: aiBudgetPool,
+          defaultMonthlyLimitMicroUsd: config.aiDefaultMonthlyBudgetMicroUsd,
+        });
+        return createAiChangesRuntime({
+          connectionString: targetDatabaseUrl,
+          identity: apiAuth.repository,
+          authorizationResolver: createAuthorizationResolver(
+            apiAuth.rolePermissionRepository,
+            apiAuth.entitlementRepository,
+            apiAuth.propertyAccessRepository,
+          ),
+          aiEnabled: async (organizationId) =>
+            (await budget.monthStatus(organizationId)).limitMicroUsd > 0,
+          allowedOrigins: config.authSession?.authAllowedOrigins ?? [],
+          backgroundWorkersEnabled: config.backgroundWorkersEnabled,
+        });
+      })()
+    : undefined;
+// VAY-2518: the in-app assistant, mounted only with AI_ASSISTANT_ENABLED=true. Even then no model
+// is called until AI_PROVIDERS_ENABLED names a provider: it answers that AI is off. Every model
+// call is reserved against the hotel account's budget.
+const assistantPool = config.aiAssistantEnabled
+  ? new pg.Pool({ connectionString: targetDatabaseUrl, connectionTimeoutMillis: 5_000 })
+  : undefined;
+const assistantActionLog = assistantPool
+  ? createPgAiActionLog({ connectionString: targetDatabaseUrl, pool: assistantPool })
+  : undefined;
+const assistant =
+  assistantPool && assistantActionLog
+    ? {
+        store: createPgConversationStore({ pool: assistantPool }),
+        provider: createAiProvider({
+          enabledProviders: enabledAiProvidersFromEnv(process.env),
+          budget: createPgAiBudget({
+            pool: assistantPool,
+            defaultMonthlyLimitMicroUsd: config.aiDefaultMonthlyBudgetMicroUsd,
+          }),
+          log: { warn: (fields, message) => app.log.warn(fields, message) },
+        }),
+        actionLog: assistantActionLog,
+        timeZoneOf: async (propertyId: string) => {
+          const { rows } = await assistantPool.query<{ timezone: string | null }>(
+            "SELECT timezone FROM hotel_catalog.property_locations WHERE property_id = $1::uuid",
+            [propertyId],
+          );
+          return rows[0]?.timezone;
+        },
+      }
+    : undefined;
 
 const bookingSettingsRepository = createPgTargetBookingSettingsRepository({
   connectionString: targetDatabaseUrl,
@@ -502,6 +600,13 @@ const routePmsInventoryPublicOfferProjector = pmsInventoryPublicOfferProjector
 const bookingCustomDomainRepository = createTargetBookingCustomDomainRepository({
   connectionString: targetDatabaseUrl,
 });
+const bookingCustomDomainVerifier = config.bookingCustomDomainCloudflare
+  ? createBookingCustomDomainVerifier({
+      cloudflare: createCloudflareCustomHostnames(config.bookingCustomDomainCloudflare),
+      dns: createCustomDomainDns(),
+      routes: config.bookingCustomDomainRoutes,
+    })
+  : undefined;
 
 const bookingAddonItemsRepository = createPgTargetBookingAddonItemsRepository({
   connectionString: targetDatabaseUrl,
@@ -526,6 +631,8 @@ const bookingDashboardMetricsReadPort =
 
 // VAY-2442: the hotels vayada Payment is on for (the switch, its Stripe keys and the hotel list).
 const vayadaPaymentOpen = vayadaPaymentOpenFor(config);
+// VAY-2570: managing the setup (payment settings, payout account) stays open to a stopped hotel.
+const vayadaPaymentManageable = vayadaPaymentManageableFor(config);
 // VAY-2442: events from vayada Payment's own Stripe account, one endpoint per mode with its own
 // secret; both share this pool.
 const vayadaPaymentWebhookPool =
@@ -534,11 +641,27 @@ const vayadaPaymentWebhookPool =
     : undefined;
 const handleVayadaPaymentWebhook = vayadaPaymentWebhookPool
   ? (event: Record<string, unknown>) =>
-      handleVayadaPaymentWebhookEvent(vayadaPaymentWebhookPool, event, app.log)
+      handleVayadaPaymentWebhookEvent(vayadaPaymentWebhookPool, event, app.log, {
+        disputeCounteredFeeMinor: config.vayadaPaymentDisputeCounteredFeeMinor,
+      })
   : undefined;
 // VAY-2442: payments bound as vayada:<property> go to vayada Payment's own Stripe account, with
-// the live keys for hotels on VAYADA_PAYMENT_LIVE_PROPERTY_IDS and the test keys for the rest;
-// every other card payment goes through Stripe Connect as before.
+// the live keys for live hotels (VAYADA_PAYMENT_LIVE_PROPERTY_IDS, or every hotel except
+// VAYADA_PAYMENT_TEST_PROPERTY_IDS when it is "*") and the test keys for the rest;
+// every other card payment goes through Stripe Connect as before. VAY-2569: a stored payment
+// keeps the mode it was made in, read from finance.payments on a pool of its own (its own
+// application_name, so production's pool runtime doesn't share it with a caller that holds a
+// connection while it calls Stripe).
+const vayadaPaymentModePool =
+  config.stripeSubscriptions.secretKey &&
+  (config.vayadaPaymentStripe || config.vayadaPaymentStripeLive)
+    ? new pg.Pool({
+        connectionString: targetDatabaseUrl,
+        max: 2,
+        connectionTimeoutMillis: 3_000,
+        application_name: "vayada-payment-mode",
+      })
+    : undefined;
 const vayadaPaymentAccount = (keys: ApiConfig["vayadaPaymentStripe"]) =>
   keys
     ? {
@@ -554,6 +677,7 @@ const stripeBookingPaymentProvider = config.stripeSubscriptions.secretKey
         account: vayadaPaymentAccount(config.vayadaPaymentStripeLive),
         for: vayadaPaymentLiveFor(config),
       },
+      vayadaPaymentModePool ? createVayadaPaymentRecordedMode(vayadaPaymentModePool) : undefined,
     )
   : undefined;
 
@@ -793,8 +917,22 @@ const financeRepository =
         stripeConnectProvider,
         afterPaymentChange,
         // A hotel can choose vayada Payment only where it can also save its payout account.
-        vayadaPaymentOpen: payoutDestinationRepository ? vayadaPaymentOpen : undefined,
+        vayadaPaymentOpen: payoutDestinationRepository ? vayadaPaymentManageable : undefined,
+        vayadaPaymentStopped: (propertyId: string) =>
+          vayadaPaymentManageable(propertyId) && !vayadaPaymentOpen(propertyId),
         vayadaPaymentFeePercent: config.vayadaPaymentFeePercent,
+        // VAY-2583: which booking-page rates guests could pay for, with the booking page's own
+        // switches (as its offer catalog has them), so a change can't leave none payable.
+        ratePaymentSwitches: {
+          card:
+            config.replacementPricingAcceptanceEnabled === true &&
+            config.replacementPricingCardAcceptanceEnabled === true &&
+            !!stripeBookingPaymentProvider,
+          deposits: config.replacementPricingDepositAcceptanceEnabled === true,
+          manual: manualPaymentMethods.filter(
+            (method) => method !== "bank_transfer" || !!bankTransferBookings,
+          ),
+        },
       })
     : undefined;
 
@@ -1227,7 +1365,16 @@ const hotelSetupOrdinaryOptions = hotelSetupOrdinaryPool
         pool: hotelSetupOrdinaryPool,
         hotelSetupOwnerCreation: true,
       }),
-      hotelSetupProfileCommand: createOrdinaryHotelSetupProfileCommand(hotelSetupOrdinaryPool),
+      // VAY-2582: a Channex-connected hotel's time zone change is checked against its Channex property.
+      hotelSetupProfileCommand: createOrdinaryHotelSetupProfileCommand(
+        hotelSetupOrdinaryPool,
+        config.channexManagement.apiBaseUrl && config.channexManagement.apiKey
+          ? createChannexPropertyTimeZoneRead({
+              apiBaseUrl: config.channexManagement.apiBaseUrl,
+              apiKey: config.channexManagement.apiKey,
+            })
+          : undefined,
+      ),
       hotelSetupLaunchSettingsCommand:
         createOrdinaryHotelSetupLaunchSettingsCommand(hotelSetupOrdinaryPool),
       hotelSetupFeatureHubCommands:
@@ -1887,6 +2034,7 @@ const hotelFirstRun = (() => {
     design: bookingDesignRepository,
     plans: financeSubscriptionService,
     readiness,
+    lifecycle: { isLive: (propertyId) => isHotelLive(hotelSetupOrdinaryPool, propertyId) },
   });
 })();
 // VAY-2247 wave 2: the setup checklist both dashboards show, with the first run (it reads its state).
@@ -1909,7 +2057,7 @@ const app = buildApp({
   airbnbImports: airbnbImportRuntime?.routes,
   databaseHealth: postgresRuntime.healthCheck(targetDatabaseUrl),
   trustProxy: PRODUCTION_TRUST_PROXY,
-  auth: buildAuthOptions(config.auth),
+  auth: apiAuth,
   browserAllowedOrigins: config.authSession?.authAllowedOrigins ?? [],
   authSession:
     config.auth && config.authSession
@@ -2032,6 +2180,8 @@ const app = buildApp({
   financePaymentSetup: {
     ...financePaymentSetupRuntime.routes,
     manualPayments: financeManualPaymentReadiness,
+    // VAY-2583: the same rate coverage as Payments' own save.
+    ratePaymentCoverage: financeRepository?.ratePaymentCoverage,
   },
   publicPageRefresh: refreshLivePublicPage,
   bookingGuestChoices: {
@@ -2302,6 +2452,12 @@ const app = buildApp({
   pmsRoomAssignmentSettings,
   pmsRoomAssignmentHistory,
   pmsCalendarAutoOpenSettings,
+  pmsOperatingCalendarRefresh: pmsCalendarRoomRefreshPorts
+    ? (actor) =>
+        refreshPmsOperatingCalendarRooms(pmsCalendarRoomRefreshPorts, actor, {
+          acceptTimeZone: true,
+        })
+    : undefined,
   pmsRoomPublication: pmsRoomPublicationRuntime
     ? {
         mediaCommandPort: pmsRoomPublicationRuntime.commandRepository,
@@ -2314,7 +2470,7 @@ const app = buildApp({
   financeRepository,
   financeBankTransfer: bankTransferRepository ? { repository: bankTransferRepository } : undefined,
   financePayoutDestination: payoutDestinationRepository
-    ? { repository: payoutDestinationRepository, open: vayadaPaymentOpen }
+    ? { repository: payoutDestinationRepository, open: vayadaPaymentManageable }
     : undefined,
   vayadaPaymentWebhooks:
     handleVayadaPaymentWebhook && config.vayadaPaymentStripe?.webhookSecret
@@ -2325,6 +2481,10 @@ const app = buildApp({
       ? { secret: config.vayadaPaymentStripeLive.webhookSecret, handle: handleVayadaPaymentWebhook }
       : undefined,
   vayadaPaymentPayouts: vayadaPaymentPayoutRepository
+    ? { repository: vayadaPaymentPayoutRepository }
+    : undefined,
+  // VAY-2584: the hotel owner's own statement, from the same ledger as staff's payouts.
+  financePayoutStatement: vayadaPaymentPayoutRepository
     ? { repository: vayadaPaymentPayoutRepository }
     : undefined,
   // VAY-2348: booking windows per payment method, on the ordinary API login (finance).
@@ -2417,6 +2577,7 @@ const app = buildApp({
       setupRepository: sharedHotelSetupStatusRepository,
     }),
   },
+  platformAiBudgets: { admin: aiBudgetAdmin },
   platformPropertySlug: {
     command: createPropertySlugChangeCommand({
       connectionString: targetDatabaseUrl,
@@ -2439,11 +2600,15 @@ const app = buildApp({
       ? { refresh: bookingPublicationRuntime.refresh.bind(bookingPublicationRuntime) }
       : undefined,
   bookingCustomDomainRepository,
+  bookingCustomDomainVerifier,
   hotelAccountInviteCodeRepository: createPgHotelAccountInviteCodeRepository({
     connectionString: targetDatabaseUrl,
   }),
   hotelAccountInvites: { repository: hotelAccountInviteRepository },
   preparedImportRepository: createPgPreparedImportRepository(targetDatabaseUrl),
+  isHotelLive: hotelSetupOrdinaryPool
+    ? (propertyId: string) => isHotelLive(hotelSetupOrdinaryPool, propertyId)
+    : undefined,
   profileImageMediaRepository: platformMediaRuntime?.profileMediaRepository,
   sharedHotelSetupStatusRepository,
   propertyNearbyRepository: config.auth
@@ -2515,6 +2680,9 @@ const app = buildApp({
   staffInvitations: staffInvitationRuntime,
   identityPrivacyAllowedOrigins: config.identityPrivacyAllowedOrigins,
   publicHotelProfileRepository,
+  aiActivityStore,
+  aiPendingActions: aiChanges?.routes,
+  assistant,
   bookingWebCheckoutAdapter,
   bookingWebDisplayRates,
   bookingWebAttributionSink:
@@ -2530,6 +2698,7 @@ const app = buildApp({
       }
     : undefined,
 });
+aiChanges?.start(app);
 
 const adminRoleWorker =
   config.backgroundWorkersEnabled && config.auth && config.authSession
@@ -2659,6 +2828,7 @@ app.addHook("onClose", async () => {
     bankTransferRepository?.close(),
     payoutDestinationRepository?.close(),
     vayadaPaymentWebhookPool?.end(),
+    vayadaPaymentModePool?.end(),
     vayadaPaymentPayoutRepository?.close(),
     bankTransferBookings?.close(),
     bankTransferKms?.close(),
@@ -3167,6 +3337,64 @@ app.addHook("onClose", async () => {
   if (pricingFreshnessStart) clearTimeout(pricingFreshnessStart);
   await activePricingFreshnessCheck;
   await pricingFreshnessPool?.end();
+});
+
+// VAY-2504: one email a month when vayada's AI spend passes AI_SPEND_ALERT_USD (default $100),
+// checked a minute after start and then hourly.
+const aiSpendAlert =
+  config.backgroundWorkersEnabled && config.aiSpendAlertEmail && config.bookingEmailDelivery
+    ? createAiSpendAlert({
+        pool: aiBudgetPool,
+        to: config.aiSpendAlertEmail,
+        thresholdMicroUsd: config.aiSpendAlertThresholdMicroUsd,
+        delivery: createResendBookingEmailDelivery(config.bookingEmailDelivery),
+      })
+    : undefined;
+let activeAiSpendCheck: Promise<void> | undefined;
+const runAiSpendCheck = () => {
+  if (!aiSpendAlert || activeAiSpendCheck) return;
+  activeAiSpendCheck = aiSpendAlert()
+    .then((result) => {
+      if (result === "sent") app.log.info("AI spend alert sent");
+    })
+    .catch((error: unknown) => app.log.warn({ err: error }, "AI spend alert failed"))
+    .finally(() => {
+      activeAiSpendCheck = undefined;
+    });
+};
+const aiSpendTimer = aiSpendAlert ? setInterval(runAiSpendCheck, 60 * 60 * 1000) : undefined;
+aiSpendTimer?.unref();
+const aiSpendStart = aiSpendAlert ? setTimeout(runAiSpendCheck, 60_000) : undefined;
+aiSpendStart?.unref();
+app.addHook("onClose", async () => {
+  if (aiSpendTimer) clearInterval(aiSpendTimer);
+  if (aiSpendStart) clearTimeout(aiSpendStart);
+  await activeAiSpendCheck;
+  await aiBudgetPool.end();
+});
+
+// VAY-2589: Google refuses the booking page's Maps key on any website missing from its list, so the
+// hotel domains routed to the booking page (BOOKING_CUSTOM_DOMAIN_ROUTES) go onto it, a minute after
+// start and then hourly. A domain is routed before its hotel can verify it (when VAY-2579 drops the
+// per-domain routes, this must read the verified domains instead).
+const stopMapsKeyWebsitesSync = config.googleMapsKeyEditor
+  ? startMapsKeyWebsitesSync({
+      websites: createGoogleMapsKeyWebsites(config.googleMapsKeyEditor),
+      hosts: [...config.bookingCustomDomainRoutes.keys()],
+      report: (outcome) => {
+        if ("error" in outcome) {
+          app.log.warn({ err: outcome.error }, "Maps key website list check failed");
+        } else if (outcome.added.length > 0) {
+          app.log.info(
+            { domains: outcome.added },
+            "Added hotel domains to the Maps key's website list",
+          );
+        }
+      },
+    })
+  : undefined;
+app.addHook("onClose", async () => {
+  stopMapsKeyWebsitesSync?.();
 });
 
 // VAY-2304: the sweep behind the after-commit re-publish. It re-publishes every hotel whose prices
@@ -3713,7 +3941,10 @@ const runBookingEmailDelivery = () => {
   activeBookingEmailDelivery = runBookingEmailDeliveryJobs(
     targetDatabaseUrl,
     bookingEmailDelivery,
-    { bankTransfers: bankTransferBookings },
+    {
+      bankTransfers: bankTransferBookings,
+      pmsWebOrigin: config.authSession?.authSurfaceOrigins["pms-web"],
+    },
   )
     .then((result) => {
       if (result.failed > 0) {
@@ -3890,6 +4121,23 @@ const contactIntakeRetentionWorker = startContactIntakeRetentionWorker({
 
 app.addHook("onClose", async () => {
   await contactIntakeRetentionWorker.close();
+});
+
+app.addHook("onClose", async () => {
+  await aiActivityStore.close();
+  // The action log shares the assistant's pool: ending the pool closes both.
+  await assistantPool?.end();
+});
+
+// VAY-2508: AI action log rows go after two years; expired Inbox assist results are emptied.
+const aiActionLogRetentionWorker = startAiActionLogRetentionWorker({
+  store: createPgAiActionLogRetentionStore({ connectionString: targetDatabaseUrl, max: 1 }),
+  enabled: config.backgroundWorkersEnabled,
+  logger: app.log,
+});
+
+app.addHook("onClose", async () => {
+  await aiActionLogRetentionWorker.close();
 });
 
 // VAY-2420: every booking guest gets one guest profile per person and account.

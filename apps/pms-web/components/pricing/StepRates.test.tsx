@@ -174,7 +174,7 @@ it("shows the Flexible rate always on beside the Non-refundable rate, with cance
 it("says what guests booking inside the free cancellation window get (VAY-2392)", () => {
   mount(room(), terms(["pay_at_property"], ["bank_transfer"]), ["bank_transfer"]);
   expect(textOf(card("Flexible rate"))).toContain(
-    "Guests booking less than 7 days before arrival can't cancel for free. The booking engine shows this rate as Non-refundable for those dates.",
+    "Guests booking less than 7 days before arrival can't cancel for free. The booking page tells them before they book.",
   );
 });
 
@@ -199,7 +199,7 @@ it("says from when guests of a partial-refund rate get no refund (VAY-2428)", ()
     return textOf(card("Flexible rate"));
   };
   const hint = (days: string) =>
-    `Guests booking less than ${days} before arrival get no refund. The booking engine shows this rate as Non-refundable for those dates.`;
+    `Guests booking less than ${days} before arrival get no refund. The booking page tells them before they book.`;
   const steps = partial([
     { minDaysBeforeCheckIn: 30, refundPercent: 100 },
     { minDaysBeforeCheckIn: 14, refundPercent: 50 },
@@ -333,6 +333,45 @@ it("names terms from before payment methods were set, and offers Card online onc
     deposits: { ready: false },
   });
   expect(card("Flexible rate").findAllByProps({ "aria-label": "Card online" })).toHaveLength(0);
+});
+
+it("offers to allow card on a rate that doesn't take it once card is ready at the hotel (VAY-2583)", () => {
+  const ready = {
+    card: { ready: true, reason: null, charge: "at_booking" as const },
+    deposits: { ready: false },
+  };
+  const allowButtons = () =>
+    card("Flexible rate").findAll(
+      (node) => node.type === "button" && textOf(node) === "Allow card on this rate",
+    );
+  // Aether's rates: paid at the hotel only. Card is ready, so the rate offers to take it.
+  mount(room(false), terms(["pay_at_property"]), [], ready);
+  expect(textOf(card("Flexible rate"))).toContain(
+    "Card payments are ready at your hotel, but this rate doesn't take card",
+  );
+  expect(allowButtons()).toHaveLength(1);
+  act(() => allowButtons()[0]!.props.onClick());
+  expect(handlers.onTerms.mock.lastCall![0][0].terms.payment.acceptedMethods).toEqual([
+    "pay_at_property",
+    "card",
+  ]);
+  // A rate that takes card already, or card not ready yet: nothing to offer.
+  mount(room(false), terms(["pay_at_property", "card"]), [], ready);
+  expect(allowButtons()).toHaveLength(0);
+  mount(room(false), terms(["pay_at_property"]), [], {
+    card: { ready: false, reason: "not_connected", charge: "at_booking" },
+    deposits: { ready: false },
+  });
+  expect(allowButtons()).toHaveLength(0);
+  // An old non-refundable rate paid at the property: card takes its place (a non-refundable stay
+  // is paid in advance, and the server refuses pay at property on it).
+  mount(room(), terms(["pay_at_property", "card"], ["pay_at_property"]), [], ready);
+  const nonRefundable = card("Non-refundable rate").findAll(
+    (node) => node.type === "button" && textOf(node) === "Allow card on this rate",
+  );
+  expect(nonRefundable).toHaveLength(1);
+  act(() => nonRefundable[0]!.props.onClick());
+  expect(handlers.onTerms.mock.lastCall![0][0].terms.payment.acceptedMethods).toEqual(["card"]);
 });
 
 it("names a deposit a rate already has (VAY-2205 keeps new ones for later)", () => {

@@ -1,63 +1,78 @@
 #!/usr/bin/env node
-import { open, rm } from "node:fs/promises";
-
+import { CreateSecretCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import pg from "pg";
 
-import { deriveWebhookSigningSecret, parseWebhookSigningKey } from "../domains/partnerWebhooks.js";
-
+import { parseWebhookSigningKey } from "../domains/partnerWebhooks.js";
 import {
   PartnerAppRegistrationRefusal,
+  PartnerRegistrationIncomplete,
   parsePartnerAppRegistrationArgs,
-  registerPartnerApp,
+  refuseWebhookWithoutSigningKey,
+  registerPartnerAppIntoSecretStore,
 } from "../platform/partnerAppRegistration.js";
 
-// VAY-2436: register a partner app once per environment, for example
-//   partner:register-app:dist -- --name "Creator Links" --redirect-uri https://…/callback \
-//     --webhook-url https://…/webhooks/vayada --contact-email … --secret-file /tmp/partner.json --apply
-// Without --apply it only prints what it would store. With --apply it prints the client id and
-// writes the client id and secret to --secret-file (a new file only its owner can read; never to
-// stdout, which may end up in logs). Hand them to the partner over a private channel and delete the
-// file; Vayada keeps only the secret's SHA-256. With --webhook-url the file also holds the webhook
-// signing secret (VAY-2438), derived from PARTNER_WEBHOOK_SIGNING_KEY and never stored, so that key
-// must be set. Runs as the API login (TARGET_DATABASE_URL).
+// VAY-2436, VAY-2441: register a partner app once per environment. Only an ECS task reaches the live
+// database, so it runs as the one-off task vayada-next-api-partner-app-registration, for example
+//   node apps/api/dist/cli/registerPartnerApp.js --name "Creator Links" \
+//     --redirect-uri https://…/admin/connect/vayada --redirect-uri https://…/hotel/connect/vayada \
+//     --contact-email … --secret-name partner-apps/prod/creator-links-test --apply
+// Without --apply it only prints what it would store. With --apply it saves the app and puts its client
+// id and secret into a new AWS Secrets Manager secret (--secret-name) in one go, and prints only the
+// client id: the secret never reaches output or logs. With --webhook-url it also holds the app's
+// webhook signing secret (VAY-2438), derived from PARTNER_WEBHOOK_SIGNING_KEY (the task has it). On
+// the Mac that hands them to the partner, `partner:secret-to-keychain` copies them into the Keychain
+// and deletes the Secrets Manager secret.
+// Vayada keeps only the secret's SHA-256. Runs as the API login (TARGET_DATABASE_URL).
+// Hand a secret over only when its client id has this task's "registered":true line.
 // Exit codes: 0 done, 64 refused, 1 failed.
 
 const print = (line: Record<string, unknown>, stream: NodeJS.WriteStream = process.stdout) =>
   stream.write(`${JSON.stringify(line)}\n`);
 
 async function main(): Promise<number> {
-  const { apply, secretFile, ...registration } = parsePartnerAppRegistrationArgs(
+  const { apply, secretName, ...registration } = parsePartnerAppRegistrationArgs(
     process.argv.slice(2),
   );
   if (!apply) {
-    print({ dryRun: true, wouldRegister: registration });
+    print({ dryRun: true, wouldRegister: registration, secretName });
     return 0;
   }
-  if (!secretFile) throw new PartnerAppRegistrationRefusal("--apply needs --secret-file");
+  if (!secretName) throw new PartnerAppRegistrationRefusal("--apply needs --secret-name");
+  const signingKey = parseWebhookSigningKey(process.env["PARTNER_WEBHOOK_SIGNING_KEY"]);
+  refuseWebhookWithoutSigningKey(registration, signingKey);
   const databaseUrl = process.env["TARGET_DATABASE_URL"];
   if (!databaseUrl) throw new PartnerAppRegistrationRefusal("TARGET_DATABASE_URL is not set");
-  const signingKey = parseWebhookSigningKey(process.env["PARTNER_WEBHOOK_SIGNING_KEY"]);
-  if (registration.webhookUrl && !signingKey)
-    throw new PartnerAppRegistrationRefusal("--webhook-url needs PARTNER_WEBHOOK_SIGNING_KEY");
-  // Create the file first ("wx": never an existing one), so a secret is never stored without a copy.
-  const file = await open(secretFile, "wx", 0o600);
+  const secrets = new SecretsManagerClient({});
   const pool = new pg.Pool({ connectionString: databaseUrl, max: 1 });
-  let written = false;
   try {
-    const { appId, clientId, clientSecret } = await registerPartnerApp(pool, registration);
-    // A new app's webhook signing secret is version 1 (external_api_clients.webhook_secret_version).
-    const webhookSigningSecret =
-      signingKey && registration.webhookUrl
-        ? deriveWebhookSigningSecret(signingKey, clientId, 1)
-        : undefined;
-    await file.writeFile(`${JSON.stringify({ clientId, clientSecret, webhookSigningSecret })}\n`);
-    written = true;
-    print({ registered: true, name: registration.name, appId, clientId, secretFile });
+    const { appId, clientId } = await registerPartnerAppIntoSecretStore(
+      pool,
+      registration,
+      secretName,
+      async (Name, SecretString) => {
+        try {
+          await secrets.send(
+            new CreateSecretCommand({
+              Name,
+              SecretString,
+              Description: "Vayada partner app credentials, until partner:secret-to-keychain",
+            }),
+          );
+        } catch (error) {
+          if (error instanceof Error && error.name === "ResourceExistsException")
+            throw new PartnerAppRegistrationRefusal(
+              `${Name} already exists, from an earlier run: use a new name, and hand that secret over only if its client id has a "registered":true line`,
+            );
+          throw error;
+        }
+      },
+      signingKey,
+    );
+    print({ registered: true, name: registration.name, appId, clientId, secretName });
     return 0;
   } finally {
-    await file.close();
-    if (!written) await rm(secretFile, { force: true });
     await pool.end();
+    secrets.destroy();
   }
 }
 
@@ -68,6 +83,12 @@ main().then(
       print({ refused: error.message }, process.stderr);
       process.exit(64);
     }
+    if (error instanceof PartnerRegistrationIncomplete) {
+      const { message, secretName, clientId, appSaved } = error;
+      print({ failed: message, secretName, clientId, appSaved }, process.stderr);
+      process.exit(1);
+    }
+    // Only the error's name: an AWS or database message could quote what was sent.
     print({ failed: error instanceof Error ? error.name : "unknown" }, process.stderr);
     process.exit(1);
   },

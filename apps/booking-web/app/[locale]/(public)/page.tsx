@@ -13,7 +13,7 @@ import PublicStructuredData from "@/components/booking/PublicStructuredData";
 import { useAgencyPage, useHotel, useSlug, useStayPath } from "@/contexts/HotelContext";
 import AgencyOverview from "@/components/agency/AgencyOverview";
 import { calculateNights, ensureMinOneNight } from "@/lib/utils";
-import { trackEvent } from "@/services/api/tracking";
+import { trackEvent, trackPageView } from "@/services/api/tracking";
 import { onAnalyticsAllowed } from "@/services/api/analyticsConsent";
 import { hotelService } from "@/services/api/hotel";
 import { useStayRooms } from "@/lib/hooks/useStayRooms";
@@ -38,6 +38,7 @@ function HomePageContent() {
   const searchParams = useSearchParams();
 
   useEffect(() => {
+    trackPageView(slug);
     trackEvent(slug, "page_visit", {});
     // VAY-2197: a first visit starts before the guest answers; "Allow" starts it then.
     return onAnalyticsAllowed(slug, () => trackEvent(slug, "page_visit", {}));
@@ -282,7 +283,7 @@ function HomePageContent() {
         />
       ) : null}
 
-      <BookingFooter />
+      <BookingFooter rateCredit />
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );

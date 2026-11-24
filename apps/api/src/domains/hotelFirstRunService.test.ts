@@ -41,6 +41,7 @@ const actor: HotelFirstRunActor = {
 const request = { guestPayment: "pay_at_property" as const };
 const facts: HotelFirstRunWriteFacts = {
   propertyId,
+  live: false,
   firstRunRoomTypeIds: [roomTypeId],
   language: "de",
   profile: {
@@ -71,6 +72,7 @@ function service(
   options: {
     busy?: boolean;
     facts?: HotelFirstRunWriteFacts;
+    live?: boolean;
     plan?: object;
     activation?: Awaited<ReturnType<HotelFirstRunPorts["activation"]["activateWhenComplete"]>>;
   } = {},
@@ -89,7 +91,8 @@ function service(
     plans,
     facts: {
       read: vi.fn(async () => options.facts ?? facts),
-      readSetupProgress: vi.fn(async () => ({ guestPayment: true })),
+      readSetupProgress: vi.fn(async () => ({ guestPayment: true, live: false })),
+      isLive: vi.fn(async () => options.live ?? false),
     },
     lock: {
       withPropertyLock: async (_id: string, work: () => Promise<unknown>) =>
@@ -134,6 +137,20 @@ describe("hotel first run (VAY-2247, VAY-2451)", () => {
       hasCity: true,
       localityPublic: false,
     });
+  });
+
+  it("refuses a live hotel before any step writes (VAY-2582)", async () => {
+    const { first, activation } = service({ live: true, facts: { ...facts, live: true } });
+    const result = await first.run(actor, request);
+    expect(result).toMatchObject({
+      ok: false,
+      code: "hotel_already_live",
+      step: null,
+      state: { live: true },
+      ran: [],
+    });
+    for (const step of Object.values(steps)) expect(step).not.toHaveBeenCalled();
+    expect(activation.activateWhenComplete).not.toHaveBeenCalled();
   });
 
   it("stops at the first step that fails, so nothing runs on top of it", async () => {

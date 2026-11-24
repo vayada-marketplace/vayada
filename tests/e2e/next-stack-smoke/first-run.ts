@@ -164,7 +164,8 @@ export async function setRoomPriceInPms(
 /**
  * Publishes the booking page from Booking Admin's dashboard, as the four-step setup's owner does once the
  * room has its real price: the booking page card's "Publish booking page" (which goes through the same
- * review), with its "Try again" and "Check again" while the review catches up. Returns the live page's link.
+ * review), with its "Try again" and "Check again" while the review catches up. Returns the live page's link,
+ * from the header's Live pill; a live page with something to fix keeps the card and its link (VAY-2594).
  */
 export async function publishFromDashboard(
   page: Page,
@@ -174,17 +175,27 @@ export async function publishFromDashboard(
     await page.goto(`${bookingAdminOrigin}/dashboard`);
     const card = page.getByRole("region", { name: "Your booking page" });
     const open = card.getByRole("link", { name: "Open booking page" });
+    const live = page.locator("header").getByRole("button", { name: /^Live/ });
     const publish = card.getByRole("button", { name: "Publish booking page", exact: true });
     const retry = card.getByRole("button", { name: "Try again", exact: true });
     const check = card.getByRole("button", { name: "Check again", exact: true });
     await expect(async () => {
-      if (await open.isVisible()) return;
+      if ((await live.isVisible()) || (await open.isVisible())) return;
       if (await retry.isVisible()) await retry.click();
       else if ((await publish.isVisible()) && (await publish.isEnabled())) await publish.click();
       else if (await check.isVisible()) await check.click();
-      await expect(open).toBeVisible({ timeout: 20_000 });
+      await expect(live.or(open)).toBeVisible({ timeout: 20_000 });
     }).toPass({ timeout: 180_000, intervals: [2_000, 5_000, 10_000] });
-    const href = await open.getAttribute("href", { timeout: 10_000 });
+    let href: string | null;
+    if (await open.isVisible()) href = await open.getAttribute("href", { timeout: 10_000 });
+    else {
+      await live.click();
+      href = await page
+        .getByRole("dialog", { name: "Your booking page" })
+        .getByRole("link", { name: "Open page" })
+        .getAttribute("href", { timeout: 10_000 });
+      await page.keyboard.press("Escape");
+    }
     // Without a link the page is published but not served at its address yet (VAY-2193).
     if (!href) throw new Error("The dashboard shows no booking page link.");
     return href;

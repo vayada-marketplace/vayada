@@ -78,6 +78,9 @@
     "apply": "Apply",
     "availableAccommodations": "Available Accommodations",
     "roomsUnavailable": "We can't show our rooms right now. Please try again in a moment.",
+    "noWayToPayTitle": "Online booking isn't available right now",
+    "noWayToPayText": "The hotel can't take online bookings at the moment. Please contact the hotel directly to book your stay.",
+    "noWayToPayWhatsapp": "WhatsApp",
     "popularFilters": "Popular Filters",
     "includeBreakfast": "Include Breakfast",
     "freeCancellation": "Free Cancellation",
@@ -110,8 +113,7 @@
     "nonRefundableRate": "Non-Refundable Rate",
     "nonRefundableDesc": "Non-refundable",
     "off": "-15% OFF",
-    "perNightly": "{price} / per night",
-    "youPay": "You pay {price}",
+    "taxesIncluded": "incl. taxes & fees",
     "includes": "Includes:",
     "dailyBreakfast": "Daily breakfast for {count}",
     "welcomeDrink": "Welcome drink",
@@ -136,7 +138,7 @@
       "availabilityUnavailableTooltip": "Availability unavailable"
     },
     "choice": {
-      "freeCancellation": "Free cancellation",
+      "freeCancellation": "Flexible rate",
       "nonRefundable": "Non-refundable",
       "partialRefund": "Partial refund",
       "mealNonRefundable": "{meal}, non-refundable",
@@ -144,8 +146,8 @@
       "freeUntil": "Free cancellation until {date}, 23:59 (local time)",
       "noRefund": "No refund if you cancel or don't arrive",
       "partialRefundTerms": "Part of the price is refunded if you cancel. See our terms on the next step",
-      "windowPassed": "Free cancellation ends {days, plural, one {# day} other {# days}} before arrival. For these dates, no refund if you cancel or don't arrive",
-      "refundsPassed": "Refunds end {days, plural, one {# day} other {# days}} before arrival. For these dates, no refund if you cancel or don't arrive",
+      "windowPassed": "No free cancellation for these dates",
+      "refundsPassed": "No refund for these dates",
       "freeEnded": "Free cancellation has ended",
       "refundsEnded": "No refund any more",
       "meal": {
@@ -590,7 +592,7 @@
       "freeEnded": "Free cancellation ended on {date}.",
       "noRefund": "Refunds ended on {date}.",
       "nonRefundable": "Non-refundable.",
-      "lateBooking": "Non-refundable: booked less than {days} before arrival.",
+      "lateBooking": "No free cancellation: booked less than {days} before arrival.",
       "days": "{count, plural, one {# day} other {# days}}",
       "payFull": "If you cancel or don't arrive, you pay the full amount ({amount}).",
       "beforeAccept": "Free to withdraw until we answer.",
@@ -613,7 +615,8 @@
         "refundsUntil": "{rooms}: refunds until the end of {date}.",
         "freeEnded": "{rooms}: free cancellation has ended.",
         "noRefund": "{rooms}: no refund any more.",
-        "nonRefundable": "{rooms}: non-refundable."
+        "nonRefundable": "{rooms}: non-refundable.",
+        "lateBooking": "{rooms}: no free cancellation."
       }
     },
     "extras": {
@@ -839,8 +842,8 @@
       "pay_at_property": {
         "title": "Pay at the hotel",
         "summary": "Nothing to pay now · pay on arrival",
-        "explain": "Nothing is charged now. You pay {total} at the hotel when you arrive. Your booking is confirmed straight away.",
-        "explainRequest": "Nothing is charged now. If the hotel accepts your request, you pay {total} when you arrive. The hotel answers within 24 hours.",
+        "explain": "Nothing is charged now. You pay at the hotel when you arrive. Your booking is confirmed straight away.",
+        "explainRequest": "Nothing is charged now. If the hotel accepts your request, you pay when you arrive. The hotel answers within 24 hours.",
         "boxNow": "Pay now",
         "boxLater": "At the hotel",
         "phrase": "at the hotel"
@@ -849,10 +852,10 @@
         "title": "Pay with card",
         "summary": "Charged when you book",
         "summaryRequest": "Charged only when the hotel accepts",
-        "explain": "We charge {now} to your card when you confirm. You enter your card details in the next step.",
-        "explainSplit": "We charge {now} to your card when you confirm, and you pay the rest, {later}, at the hotel. You enter your card details in the next step.",
-        "explainRequest": "We place a hold of {now} on your card. If the hotel declines or doesn’t reply within 24 hours, the hold is released. You enter your card details in the next step.",
-        "explainRequestSplit": "We place a hold of {now} on your card, and you pay the rest, {later}, at the hotel. If the hotel declines or doesn’t reply within 24 hours, the hold is released. You enter your card details in the next step.",
+        "explain": "We charge the total to your card when you confirm. You enter your card details in the next step.",
+        "explainSplit": "We charge the amount due now to your card when you confirm, and you pay the rest at the hotel. You enter your card details in the next step.",
+        "explainRequest": "We place a hold for the total on your card. If the hotel declines or doesn’t reply within 24 hours, the hold is released. You enter your card details in the next step.",
+        "explainRequestSplit": "We place a hold for the amount due now on your card, and you pay the rest at the hotel. If the hotel declines or doesn’t reply within 24 hours, the hold is released. You enter your card details in the next step.",
         "boxNow": "Charged now",
         "boxHold": "Card hold now",
         "boxCharged": "Charged",
@@ -902,7 +905,8 @@
       "continueShort": "Continue",
       "priceDetails": "Price details",
       "taxes": "Taxes & fees",
-      "included": "Included"
+      "included": "Included",
+      "chargedIn": "The hotel charges in {currency}: <b>{amount}</b>. The {shown} shown uses today’s exchange rate."
     },
     "checkingPrice": "Checking price…",
     "busyConfirm": "Confirming booking…",
@@ -934,6 +938,8 @@
     "agree": "I agree to the cancellation policy, guest rules and terms & conditions.",
     "agreeNonRefundable": "I understand this booking is non-refundable. If I cancel or don’t arrive, the full stay is charged.",
     "agreeSomeNonRefundable": "I understand some of these rooms are non-refundable. If I cancel or don’t arrive, their full price is charged.",
+    "agreeNoFreeCancellation": "I understand I can’t cancel this booking for free. If I cancel or don’t arrive, the full stay is charged.",
+    "agreeSomeNoFreeCancellation": "I understand some of these rooms can’t be cancelled for free. If I cancel or don’t arrive, their full price is charged.",
     "agreeNoTerms": "I agree to the cancellation policy and guest rules.",
     "agreeMissing": "Please tick the box to confirm your booking.",
     "hintDetails": "Fill in your details to book.",
@@ -950,6 +956,9 @@
         "refundsUntil": "Refunds until {date}",
         "freeEnded": "Free cancellation ended",
         "nonRefundable": "Non-refundable",
+        "lateBooking": "No free cancellation",
+        "lateBookingOnceAccepted": "No free cancellation once the hotel accepts",
+        "lateBookingOncePaid": "No free cancellation once paid",
         "noRefund": "No refund any more",
         "notRefundableOnceAccepted": "Not refundable once the hotel accepts",
         "notRefundableOncePaid": "Not refundable once paid"

@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // VAY-2422: the hotel website template, with Animals Ahangama's homepage.
-const BOOKING_URL = "https://test-only-animals-ahangama.next-booking.vayada.com";
+const BOOKING_URL = "https://animals-ahangama.next-booking.vayada.com";
 // hero.<hash>.jpg at 640px wide, quality 75, as AVIF (apps/hotel-sites/components/photo-files.mjs).
 // Next's hashes can hold dots and tildes.
 const PHOTO_FILE = /^\/_next\/static\/media\/[^/]+\.\d+w\.q75\.avif$/;
@@ -54,16 +54,16 @@ for (const width of [1440, 390]) {
   });
 }
 
-test("tells search engines and link previews what the page is, and keeps placeholders unindexed", async ({
+test("tells search engines and link previews what the page is, and lets them index the site", async ({
   page,
 }) => {
   await page.goto("/");
   await expect(page).toHaveTitle("Animals Ahangama · A place to land");
   const meta = (selector: string) => page.locator(selector).getAttribute("content");
   expect(await meta('meta[name="description"]')).toContain("Ahangama, Sri Lanka");
-  expect(await meta('meta[name="robots"]')).toBe("noindex, nofollow");
-  // Also as a response header on every file, which keeps the photos out of image search too; and
-  // build files are kept for good (the host folder's _headers, applied as Cloudflare Pages will).
+  expect(await meta('meta[name="robots"]')).toBe("index, follow");
+  // No noindex header on any file either, so the photos can show in image search; and build files
+  // are kept for good (the host folder's _headers, applied as Cloudflare Pages will).
   const headers = await page.evaluate(async () => {
     const [home, photo] = await Promise.all([
       fetch("/"),
@@ -76,8 +76,8 @@ test("tells search engines and link previews what the page is, and keeps placeho
     };
   });
   expect(headers).toEqual({
-    page: "noindex",
-    photo: "noindex",
+    page: null,
+    photo: null,
     photoCache: "public, max-age=31536000, immutable",
   });
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
@@ -117,7 +117,7 @@ test("serves the hotel's page at / of its own address, and a 404 for anything el
   await expect(page.getByText("This page could not be found.")).toBeVisible();
 });
 
-test("shows the four rooms, each card leading to its details, and books through the room list", async ({
+test("shows the four rooms, each card leading to its details, each booking button to its rooms", async ({
   page,
 }) => {
   await page.goto("/");
@@ -130,10 +130,18 @@ test("shows the four rooms, each card leading to its details, and books through 
     ).toBeVisible();
   }
   await expect(page.locator('#stay a[href="#elephant"]')).toContainText(/coming soon/i);
-  // Until the hotel says which booking rooms are Tiger, Leopard and Giraffe: the whole room list.
-  const viewRooms = page.getByRole("link", { name: /^view rooms$/i });
-  await expect(viewRooms).toHaveCount(3);
-  for (const link of await viewRooms.all()) await expect(link).toHaveAttribute("href", BOOKING_URL);
+  // The hotel's match (VAY-2465): Rooms 1–4 are Tiger, 5–7 Leopard, 8–11 Giraffe. "View rooms" opens
+  // the first one's details on the booking page, over its room list.
+  await expect(page.getByRole("link", { name: /^view rooms$/i })).toHaveCount(3);
+  for (const [id, roomTypeId] of [
+    ["tiger", "70af6ad4-555d-43be-b387-9f6b46845199"], // Room 1
+    ["leopard", "3a14bd50-2093-4ebc-a1c4-8d66aea0f4a5"], // Room 5
+    ["giraffe", "bf7edd9f-455d-4cfc-8815-c7362f2b7b9c"], // Room 8
+  ] as const) {
+    await expect(
+      page.locator(`#${id}`).getByRole("link", { name: /^view rooms$/i }),
+    ).toHaveAttribute("href", `${BOOKING_URL}/?room=${roomTypeId}`);
+  }
   await expect(page.locator("#elephant").getByRole("link")).toHaveCount(0);
 
   await page.locator('#stay a[href="#giraffe"]').click();
@@ -150,18 +158,18 @@ test("switches the gallery's big slide from its thumbnails", async ({ page }) =>
   ).toBeVisible();
   const thumb = (name: string) => gallery.getByRole("button", { name: new RegExp(name, "i") });
   await expect(thumb("^01 pool$")).toHaveAttribute("aria-pressed", "true");
-  await expect(gallery.getByRole("img", { name: "Pool" })).toBeVisible();
+  await expect(gallery.getByRole("img", { name: /^a guest resting in the pool/i })).toBeVisible();
 
   await thumb("^08 evenings$").click();
   await expect(gallery.getByText("08 / 08")).toBeVisible();
-  // The hotel's own slide texts (VAY-2465); the photos are still placeholders.
+  // The hotel's own slide texts and photos (VAY-2465).
   await expect(
     gallery.getByRole("heading", { level: 3, name: /^evenings at animals$/i }),
   ).toBeVisible();
   await expect(
     gallery.getByText("Warm lights, good music and stories from the day.", { exact: true }),
   ).toBeVisible();
-  await expect(gallery.getByRole("img", { name: "Evenings" })).toBeVisible();
+  await expect(gallery.getByRole("img", { name: /^guests at dinner/i })).toBeVisible();
   // The new slide's photo loads: the build made its AVIF file at every width the slide asks for.
   const slide = gallery.locator(".gallery-slide img");
   await slide.scrollIntoViewIfNeeded();
@@ -171,7 +179,7 @@ test("switches the gallery's big slide from its thumbnails", async ({ page }) =>
         image.complete && image.naturalWidth > 0 ? new URL(image.currentSrc).pathname : "",
       ),
     )
-    .toMatch(/\/beach\.[^/]+\.\d+w\.q75\.avif$/);
+    .toMatch(/\/evenings\.[^/]+\.\d+w\.q75\.avif$/);
   await expect(thumb("^08 evenings$")).toHaveAttribute("aria-pressed", "true");
   await expect(thumb("^01 pool$")).toHaveAttribute("aria-pressed", "false");
 });

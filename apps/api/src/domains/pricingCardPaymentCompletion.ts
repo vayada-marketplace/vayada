@@ -10,6 +10,7 @@ import { pricingDecimalMinor } from "./pricingDecimalMinor.js";
 import { stageAcceptedPricingReservationJob } from "./pricingPmsAcceptedReservationJob.js";
 import { pricingRoomRevenueProjection } from "./pricingRoomRevenueProjection.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
+import { reverseTargetPromoRedemption } from "./currentQuotePromoRedemption.js";
 import type { StripeBookingPaymentProvider } from "./stripeBookingPayments.js";
 import { persistDirectNightlyRevenueProjection } from "./stripeBookingSettlement.js";
 import { stripeAmountMinor } from "./stripeMoney.js";
@@ -224,7 +225,12 @@ async function applyCardPayment(
   const scale = pricingCurrencyScale(quote.stay.currency);
   const record = decodeCurrentPricingQuoteRecord(row.quote_record, propertyId, quote.quoteId);
   const projection =
-    record && pricingRoomRevenueProjection(quote, record.calculation.charges as never);
+    record &&
+    pricingRoomRevenueProjection(
+      quote,
+      record.calculation.charges as never,
+      record.calculation.code,
+    );
   if (
     scale === null ||
     !projection ||
@@ -686,6 +692,8 @@ export async function expirePricingCardBooking(
   );
   if (expired.rows[0]?.bookings !== 1 || expired.rows[0]?.events !== 1)
     throw new PricingCardPaymentError("conflict");
+  // VAY-2566: the unpaid booking gives its code's use back.
+  await reverseTargetPromoRedemption(client, input.propertyId, input.guestBookingId, input.now);
   await releaseRooms(row.booking_metadata);
   return "expired";
 }

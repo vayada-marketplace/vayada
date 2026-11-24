@@ -40,6 +40,7 @@ async function fixture(
     bound?: boolean;
     source?: boolean;
     stale?: boolean;
+    live?: boolean;
     auth?: (context: RequestContext) => RequestContext;
   } = {},
 ) {
@@ -140,6 +141,7 @@ async function fixture(
   await app.register(registerPreparedHotelImportRoutes, {
     repository: { find, apply, close: async () => {} },
     profiles: { getPropertyProfile: async () => profile, updatePropertyProfile: update },
+    isLive: async () => overrides.live ?? false,
     rooms: {
       commandPort: { createRoomTypeFacts: create },
       bindingReadPort: { getDraftRoomTypeBinding: bind },
@@ -169,6 +171,27 @@ describe("prepared import routes", () => {
     expect(result.statusCode).toBe(200);
     expect(f.update).toHaveBeenCalledOnce();
     expect(f.profile.profile.location).toEqual({ ...before, timezone: "Europe/Paris" });
+  });
+  it("never moves a live hotel's time zone or country; its other details still import (VAY-2582)", async () => {
+    for (const property of [{ timezone: "Europe/London" }, { countryCode: "GB" }]) {
+      const f = await fixture({ live: true });
+      const result = await f.post({ ...data, property, rooms: [] });
+      expect(result.statusCode).toBe(200);
+      expect(JSON.stringify(result.json())).toContain("live_location_change");
+      expect(f.update).not.toHaveBeenCalled();
+      expect(f.profile.profile.location).toMatchObject({
+        countryCode: "DE",
+        timezone: "Europe/Berlin",
+      });
+    }
+    const f = await fixture({ live: true });
+    expect((await f.post({ ...data, property: { city: "Potsdam" }, rooms: [] })).statusCode).toBe(
+      200,
+    );
+    expect(f.profile.profile.location).toMatchObject({
+      city: "Potsdam",
+      timezone: "Europe/Berlin",
+    });
   });
   it.each([
     "actor",

@@ -49,6 +49,8 @@ export type HotelFirstRunRoomTypeFacts = Readonly<{
 /** A snapshot of the hotel's real data, read in one go by the adapters. */
 export type HotelFirstRunFacts = Readonly<{
   propertyId: string;
+  /** VAY-2582: the hotel has gone live; setup is over for it, whatever its steps say. */
+  live: boolean;
   profile: Readonly<{
     revision: number;
     countryCode: string | null;
@@ -82,6 +84,8 @@ export type HotelFirstRunState = Readonly<{
   contractVersion: typeof HOTEL_FIRST_RUN_CONTRACT_VERSION;
   defaultsVersion: typeof FIRST_RUN_DEFAULTS_VERSION;
   propertyId: string;
+  /** VAY-2582: the hotel has gone live, so setup leaves (Settings changes it) and the first run refuses. */
+  live: boolean;
   steps: readonly HotelFirstRunStep[];
   /** The first step that still needs a write, or null when every step is done or waiting on Stripe. */
   nextStep: HotelFirstRunStepId | null;
@@ -162,6 +166,7 @@ export function hotelFirstRunState(facts: HotelFirstRunFacts): HotelFirstRunStat
     contractVersion: HOTEL_FIRST_RUN_CONTRACT_VERSION,
     defaultsVersion: FIRST_RUN_DEFAULTS_VERSION,
     propertyId: facts.propertyId,
+    live: facts.live,
     steps: Object.freeze(steps),
     nextStep: next?.id ?? null,
   });

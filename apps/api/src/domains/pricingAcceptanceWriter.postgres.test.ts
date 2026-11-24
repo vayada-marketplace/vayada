@@ -20,6 +20,7 @@ import {
 import { settleStripeBookingPayment } from "./stripeBookingSettlement.js";
 import { createStripeBookingPaymentProvider } from "./stripeBookingPayments.js";
 import { stripeAmountDecimal, stripeAmountMinor } from "./stripeMoney.js";
+import { createVayadaPaymentRecordedMode } from "./vayadaPaymentRecordedMode.js";
 import { routeVayadaPaymentStripe } from "./vayadaPaymentStripe.js";
 import { handleVayadaPaymentWebhookEvent } from "./vayadaPaymentWebhookEvents.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
@@ -120,6 +121,152 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
     await fixture.close();
   });
 
+  it("finishes a stay with a last-minute discount, each night net of its share, and a cancel reverses it (VAY-2566)", async () => {
+    const fixture = await setupFixture(lastMinute(3001n));
+    const hostPool = new pg.Pool({ connectionString: url, max: 2 });
+    const actions = createBookingHostActions({
+      pool: hostPool,
+      guards: targetBookingHostActionGuards,
+      inventory: { reserve: async () => null, release: async () => undefined },
+    });
+    const actorUserId = randomUUID();
+    try {
+      mockOwners(fixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async (client) => {
+        await client.query(
+          "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
+          [fixture.propertyId],
+        );
+        return new Date().toISOString();
+      });
+      const accepted = await writePricingAcceptance(fixture.pool, fixture.input);
+      if (accepted.kind !== "accepted") throw new Error(`unexpected ${accepted.kind}`);
+      expect(await discountedNights(fixture)).toEqual(expectedDiscountedNights(fixture));
+
+      await fixture.observer.query(
+        "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
+        [actorUserId, `${actorUserId}@example.test`],
+      );
+      const scope = { propertyId: fixture.propertyId, bookingId: accepted.bookingId, actorUserId };
+      const preview = await actions.preview(scope, { action: "cancel", reason: "Overbooked" });
+      await expect(actions.apply(scope, preview.previewId, "lm-cancel")).resolves.toMatchObject({
+        lifecycleStatus: "canceled",
+      });
+      // The cancel reverses exactly the net nights that were recorded.
+      const left = await fixture.observer.query(
+        `SELECT sum(gross_room_amount)::text AS amount,sum(occupied_room_nights)::int AS nights
+         FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1`,
+        [accepted.bookingId],
+      );
+      expect(left.rows[0]).toEqual({ amount: "0.0000", nights: 0 });
+    } finally {
+      await actions.close();
+      await hostPool.end().catch(() => undefined);
+      await fixture.close();
+    }
+  });
+
+  it.each(["hotel", "partner"])(
+    "records a %s code with its booking and counts its use once; a cancel gives it back (VAY-2566)",
+    async (owner) => {
+      const promo = promoCode();
+      const fixture = await setupFixture(promo.change, undefined, false, promo.calculation);
+      const partnerClientId = randomUUID();
+      const hostPool = new pg.Pool({ connectionString: url, max: 2 });
+      const actions = createBookingHostActions({
+        pool: hostPool,
+        guards: targetBookingHostActionGuards,
+        inventory: { reserve: async () => null, release: async () => undefined },
+      });
+      const actorUserId = randomUUID();
+      try {
+        if (owner === "partner")
+          await fixture.observer.query(
+            `INSERT INTO distribution.external_api_clients(id,public_client_id,client_name,terms_version)
+             VALUES($1,$2,'Writer partner','v1')`,
+            [partnerClientId, `partner_${partnerClientId.replaceAll("-", "")}`],
+          );
+        await promo.insert(fixture, owner === "partner" ? { partnerClientId } : {});
+        mockOwners(fixture);
+        vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async (client) => {
+          await client.query(
+            "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
+            [fixture.propertyId],
+          );
+          return new Date().toISOString();
+        });
+        const accepted = await writePricingAcceptance(fixture.pool, fixture.input);
+        if (accepted.kind !== "accepted") throw new Error(`unexpected ${accepted.kind}`);
+        expect(await promo.state(fixture)).toEqual({ uses: 1, applications: "applied:30.00" });
+        expect(await discountedNights(fixture)).toEqual(expectedCodeNights(fixture));
+        // A retry of the same booking replays it and counts nothing again.
+        await expect(writePricingAcceptance(fixture.pool, fixture.input)).resolves.toMatchObject({
+          kind: "replayed",
+          bookingId: accepted.bookingId,
+        });
+        expect(await promo.state(fixture)).toEqual({ uses: 1, applications: "applied:30.00" });
+
+        await fixture.observer.query(
+          "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
+          [actorUserId, `${actorUserId}@example.test`],
+        );
+        const scope = {
+          propertyId: fixture.propertyId,
+          bookingId: accepted.bookingId,
+          actorUserId,
+        };
+        const preview = await actions.preview(scope, { action: "cancel", reason: "Overbooked" });
+        await actions.apply(scope, preview.previewId, "code-cancel");
+        expect(await promo.state(fixture)).toEqual({ uses: 0, applications: "reversed:30.00" });
+      } finally {
+        await actions.close();
+        await hostPool.end().catch(() => undefined);
+        // The partner app has no property: remove it with its code, before the property's rows.
+        if (owner === "partner") {
+          await fixture.observer.query("BEGIN");
+          await fixture.observer.query("SET LOCAL session_replication_role=replica");
+          await fixture.observer.query("DELETE FROM booking.promo_definitions WHERE id=$1", [
+            promo.promoId,
+          ]);
+          await fixture.observer.query(
+            "DELETE FROM distribution.external_api_clients WHERE id=$1",
+            [partnerClientId],
+          );
+          await fixture.observer.query("COMMIT");
+        }
+        await fixture.close();
+      }
+    },
+  );
+
+  // Real acceptance refuses a used-up code earlier, at revalidation (a conflict); this mocked
+  // revalidation lets it through, so the redemption's own guard must still write nothing.
+  it("never takes a code's use past its limit and writes nothing (VAY-2566)", async () => {
+    const promo = promoCode();
+    const fixture = await setupFixture(promo.change, undefined, false, promo.calculation);
+    try {
+      await promo.insert(fixture, { maxUses: 1, currentUses: 1 });
+      mockOwners(fixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      await expect(writePricingAcceptance(fixture.pool, fixture.input)).rejects.toMatchObject({
+        code: "unexpected",
+      });
+      await expect(snapshot(fixture.observer, fixture)).resolves.toEqual({
+        bookings: 0,
+        acceptances: 0,
+        jobs: 0,
+        revenue: 0,
+        available: 3,
+        assigned: 0,
+      });
+      expect(await promo.state(fixture)).toEqual({ uses: 1, applications: null });
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("rolls back booking, inventory, revenue, acceptance and jobs after the final gate", async () => {
     const fixture = await setupFixture();
     mockOwners(fixture);
@@ -207,6 +354,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     acceptanceMode: "instant" | "request" = "instant",
     changeQuote?: (quote: Fixture["f"]["current"]["quote"]) => void,
     futureStay: boolean | number = false,
+    calculation?: Parameters<typeof setupFixture>[3],
   ) {
     const fixture = await setupFixture(
       (quote) => {
@@ -216,6 +364,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       },
       currency,
       futureStay,
+      calculation,
     );
     const slug = `writer-${fixture.propertyId}`;
     fixture.input.slug = slug;
@@ -709,6 +858,133 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         ).rows,
       ).toEqual([{ entry_kind: "charge", livemode: true, payment_id: payment[0].id }]);
     } finally {
+      await fixture.close();
+    }
+  });
+
+  it("keeps calling a stored payment with the keys of the mode it was made in after its hotel leaves the live list (VAY-2569)", async () => {
+    const { fixture, slug, createPaymentIntent, retrievePaymentIntent } = await cardFixture();
+    // Its own small pool, as in production.
+    const modePool = new pg.Pool({ connectionString: url, max: 1 });
+    try {
+      await fixture.observer.query(
+        `UPDATE finance.payment_provider_accounts
+         SET provider='vayada', provider_account_id='vayada:'||property_id::text
+         WHERE property_id=$1`,
+        [fixture.propertyId],
+      );
+      Object.assign(fixture.f.finance, { billingPlanSnapshot: "commission" });
+      const testKeys = {
+        createPaymentIntent: vi.fn(),
+        retrievePaymentIntent: vi.fn(),
+        cancelPaymentIntent: vi.fn(),
+      };
+      const liveKeys = { createPaymentIntent, retrievePaymentIntent, cancelPaymentIntent: vi.fn() };
+      let onLiveList = true;
+      const recordedMode = createVayadaPaymentRecordedMode(modePool);
+      const provider = routeVayadaPaymentStripe(
+        {} as never,
+        { provider: testKeys as never, publishableKey: "pk_test_writer" },
+        {
+          account: { provider: liveKeys as never, publishableKey: "pk_live_writer" },
+          for: (propertyId) => onLiveList && propertyId === fixture.propertyId,
+        },
+        recordedMode,
+      );
+
+      // Charged on the live list: the payment records live mode.
+      const result = await writePricingAcceptance(fixture.pool, fixture.input, {
+        provider,
+        vayada: { open: () => true, feePercent: 6 },
+      });
+      expect(result).toMatchObject({ payment: { publishableKey: "pk_live_writer" } });
+      const payment = (
+        await fixture.observer.query(
+          `SELECT id::text,guest_booking_id::text AS booking,provider_payment_intent_id AS intent
+           FROM finance.payments WHERE property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows[0];
+      expect(payment.intent).toBe("pi_writer_test");
+      await expect(
+        recordedMode({ propertyId: fixture.propertyId, paymentIntentId: payment.intent }),
+      ).resolves.toBe(true);
+
+      // The hotel leaves the live list before the guest's payment completes: the stored payment is
+      // still read with the live keys, never the test keys (where it doesn't exist).
+      onLiveList = false;
+      const intent = await createPaymentIntent({
+        amountMinor: Number(fixture.f.current.quote.evidence.dueNowMinor),
+        currency: fixture.f.current.quote.stay.currency,
+      });
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: (result as { bookingReference: string }).bookingReference,
+        status: "succeeded",
+      });
+      await expect(
+        completePricingCardPayment(fixture.pool, provider, {
+          slug,
+          quoteId: fixture.f.current.quote.quoteId,
+          requestId: fixture.f.command.requestId,
+        }),
+      ).resolves.toMatchObject({ kind: "accepted", replayed: false });
+      expect(retrievePaymentIntent).toHaveBeenCalledWith("pi_writer_test", null);
+      expect(testKeys.retrievePaymentIntent).not.toHaveBeenCalled();
+
+      // A refund is found through its command; another hotel, an unknown payment and a payment
+      // with no recorded mode give no mode (the lists decide).
+      await fixture.observer.query(
+        `INSERT INTO finance.card_refund_commands (id,property_id,guest_booking_id,payment_id,
+           idempotency_key,requested_by,amount,amount_minor,currency,provider_account_ref,
+           provider_payment_intent_id,provider_refund_id)
+         VALUES (gen_random_uuid(),$1,$2::uuid,$3::uuid,'vay2569-refund','host',1,100,$4,$5,$6,
+           're_vay2569')`,
+        [
+          fixture.propertyId,
+          payment.booking,
+          payment.id,
+          fixture.f.current.quote.stay.currency,
+          `vayada:${fixture.propertyId}`,
+          payment.intent,
+        ],
+      );
+      await expect(
+        recordedMode({ propertyId: fixture.propertyId, refundId: "re_vay2569" }),
+      ).resolves.toBe(true);
+      const elsewhere = "25690000-0000-4000-8000-000000000001";
+      await expect(
+        recordedMode({ propertyId: elsewhere, paymentIntentId: payment.intent }),
+      ).resolves.toBeNull();
+      await expect(
+        recordedMode({ propertyId: elsewhere, refundId: "re_vay2569" }),
+      ).resolves.toBeNull();
+      await expect(
+        recordedMode({ propertyId: fixture.propertyId, paymentIntentId: "pi_unknown" }),
+      ).resolves.toBeNull();
+      await fixture.observer.query(
+        `INSERT INTO finance.payments (property_id,source_system,payment_kind,payment_method,status,
+           amount,currency,provider_payment_intent_id,payment_metadata)
+         VALUES ($1,'finance','full','card','paid',1,$2,'pi_before_live_mode',
+           '{"chargeType":"vayada_payment"}')`,
+        [fixture.propertyId, fixture.f.current.quote.stay.currency],
+      );
+      await expect(
+        recordedMode({ propertyId: fixture.propertyId, paymentIntentId: "pi_before_live_mode" }),
+      ).resolves.toBeNull();
+      // A payment made in test mode reads as test (a JSON false, not just "not live").
+      await fixture.observer.query(
+        `INSERT INTO finance.payments (property_id,source_system,payment_kind,payment_method,status,
+           amount,currency,provider_payment_intent_id,payment_metadata)
+         VALUES ($1,'finance','full','card','paid',1,$2,'pi_made_in_test',
+           '{"chargeType":"vayada_payment","livemode":false}')`,
+        [fixture.propertyId, fixture.f.current.quote.stay.currency],
+      );
+      await expect(
+        recordedMode({ propertyId: fixture.propertyId, paymentIntentId: "pi_made_in_test" }),
+      ).resolves.toBe(false);
+    } finally {
+      await modePool.end();
       await fixture.close();
     }
   });
@@ -1227,6 +1503,366 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
           source_key: "dispute:dp_other_currency:withdrawn",
         },
       ]);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("takes Stripe's countered fee from the hotel when a dispute Vayada answered is lost, and gives it back if overturned (VAY-2572)", async () => {
+    const { fixture, createPaymentIntent, retrievePaymentIntent } = await cardFixture(
+      undefined,
+      "USD",
+    );
+    try {
+      await fixture.observer.query(
+        `UPDATE finance.payment_provider_accounts
+         SET provider='vayada', provider_account_id='vayada:'||property_id::text
+         WHERE property_id=$1`,
+        [fixture.propertyId],
+      );
+      Object.assign(fixture.f.finance, { billingPlanSnapshot: "commission" });
+      const provider = routeVayadaPaymentStripe({} as never, {
+        provider: { createPaymentIntent, retrievePaymentIntent } as never,
+        publishableKey: "pk_test_writer",
+      });
+      await writePricingAcceptance(fixture.pool, fixture.input, {
+        provider,
+        vayada: { open: () => true, feePercent: 6 },
+      });
+      const amountMinor = Number(fixture.f.current.quote.evidence.dueNowMinor);
+      const log = { info: vi.fn(), warn: vi.fn() };
+      const event = (type: string, object: Record<string, unknown>) =>
+        handleVayadaPaymentWebhookEvent(
+          fixture.pool,
+          { id: `evt_${type}_${String(object.id)}`, type, livemode: false, data: { object } },
+          log,
+          { disputeCounteredFeeMinor: 2000 },
+        );
+      await event("payment_intent.succeeded", {
+        id: "pi_writer_test",
+        amount_received: amountMinor,
+        currency: "usd",
+      });
+      // Each dispute takes half the payment, which moved twice as much in euros on Vayada's
+      // account: EUR 20.00 of fees are 1000 cents of the stay's dollars.
+      const half = Math.floor(amountMinor / 2);
+      const dispute = (
+        id: string,
+        amount: number,
+        extra: Record<string, unknown>,
+        bt?: Record<string, unknown>,
+      ) => ({
+        id,
+        amount,
+        currency: "usd",
+        payment_intent: "pi_writer_test",
+        balance_transactions: [{ currency: "eur", exchange_rate: null, ...bt }],
+        ...extra,
+      });
+      const withdrawal = { amount: -2 * half, fee: 2000 };
+      const answeredLost = { status: "lost", evidence_details: { submission_count: 1 } };
+      const ledger = async () =>
+        (
+          await fixture.observer.query(
+            `SELECT entry_kind,gross_minor::int AS gross,fee_minor::int AS fee,
+               net_minor::int AS net,livemode,source_key
+             FROM finance.hotel_payout_ledger WHERE property_id=$1 AND entry_kind<>'charge'
+             ORDER BY source_key`,
+            [fixture.propertyId],
+          )
+        ).rows;
+
+      // Answered and lost: the countered fee is its own line, taken from the hotel, once.
+      await event("charge.dispute.funds_withdrawn", dispute("dp_a", half, {}, withdrawal));
+      for (let i = 0; i < 2; i++)
+        await expect(
+          event("charge.dispute.closed", dispute("dp_a", half, answeredLost, withdrawal)),
+        ).resolves.toBe("handled");
+      const fee = {
+        entry_kind: "dispute_fee",
+        gross: 0,
+        fee: 1000,
+        net: -1000,
+        livemode: false,
+        source_key: "dispute:dp_a:countered_fee",
+      };
+      expect(await ledger()).toEqual([
+        fee,
+        {
+          entry_kind: "dispute",
+          gross: -half,
+          fee: 1000,
+          net: -half - 1000,
+          livemode: false,
+          source_key: "dispute:dp_a:withdrawn",
+        },
+      ]);
+      expect(log.info).toHaveBeenCalledWith(
+        expect.objectContaining({ disputeId: "dp_a", feeMinor: 2000, stayFeeMinor: 1000 }),
+        "vayada Payment: dispute countered fee taken from the hotel's next payout",
+      );
+
+      // Won, lost without an answer: no countered fee. Closed before its withdrawal: retried.
+      await event("charge.dispute.closed", dispute("dp_b", half, { status: "won" }, withdrawal));
+      await event(
+        "charge.dispute.closed",
+        dispute("dp_c", half, { status: "lost", evidence_details: { submission_count: 0 } }),
+      );
+      expect(await ledger()).toHaveLength(2);
+      await expect(
+        event("charge.dispute.closed", dispute("dp_d", half, answeredLost, withdrawal)),
+      ).rejects.toThrow("closed before its withdrawal was recorded");
+      // Stripe retries it, but the withdrawal may never come: a person is told too.
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ disputeId: "dp_d" }),
+        expect.stringContaining("closed lost before its withdrawal was recorded"),
+      );
+
+      // The loss is overturned: the money comes back and so does the countered fee (Stripe kept
+      // its dispute fee here). Sent twice, booked once.
+      for (let i = 0; i < 2; i++)
+        await event(
+          "charge.dispute.funds_reinstated",
+          dispute("dp_a", half, {}, { amount: 2 * half, fee: 0 }),
+        );
+      const afterOverturn = await ledger();
+      expect(afterOverturn).toHaveLength(4);
+      expect(afterOverturn.slice(0, 3)).toEqual([
+        fee,
+        {
+          entry_kind: "dispute_fee_returned",
+          gross: 0,
+          fee: -1000,
+          net: 1000,
+          livemode: false,
+          source_key: "dispute:dp_a:countered_fee_returned",
+        },
+        expect.objectContaining({
+          entry_kind: "dispute_reversal",
+          gross: half,
+          source_key: "dispute:dp_a:reinstated",
+        }),
+      ]);
+
+      // Events out of order: reinstated before "closed lost" means the fee came back already.
+      await event("charge.dispute.funds_withdrawn", dispute("dp_e", half, {}, withdrawal));
+      await event(
+        "charge.dispute.funds_reinstated",
+        dispute("dp_e", half, {}, { amount: 2 * half, fee: 0 }),
+      );
+      await event("charge.dispute.closed", dispute("dp_e", half, answeredLost, withdrawal));
+      expect((await ledger()).map((row) => row.source_key)).toEqual([
+        "dispute:dp_a:countered_fee",
+        "dispute:dp_a:countered_fee_returned",
+        "dispute:dp_a:reinstated",
+        "dispute:dp_a:withdrawn",
+        "dispute:dp_e:reinstated",
+        "dispute:dp_e:withdrawn",
+      ]);
+      expect(log.warn).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.stringContaining("unknown in the stay's currency"),
+      );
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("leaves an owed countered fee it can't price to a person, and rejects malformed fee lines (VAY-2572)", async () => {
+    const card = await cardFixture(undefined, "USD");
+    const { fixture } = card;
+    try {
+      const { event, log, amountMinor } = await settledVayadaPayment(card);
+      // Three disputes, a third of the payment each, all withdrawn (so the hotel owes their fees).
+      const third = Math.floor(amountMinor / 3);
+      const dispute = (
+        id: string,
+        extra: Record<string, unknown>,
+        bt?: Record<string, unknown>,
+      ) => ({
+        id,
+        amount: third,
+        currency: "usd",
+        payment_intent: "pi_writer_test",
+        balance_transactions: bt ? [bt] : [],
+        ...extra,
+      });
+      const eur = { currency: "eur", exchange_rate: null, amount: -2 * third, fee: 2000 };
+      for (const id of ["dp_none", "dp_gbp", "dp_off"])
+        await event("charge.dispute.funds_withdrawn", dispute(id, {}, eur));
+      const answeredLost = { status: "lost", evidence_details: { submission_count: 1 } };
+      const unpriced = () =>
+        log.warn.mock.calls
+          .filter(([, message]) => String(message).includes("owed but unknown"))
+          .map(([ids]) => (ids as { disputeId: string }).disputeId);
+      // No withdrawal in the closed event, or one not in euros: owed, so a person takes it.
+      await event("charge.dispute.closed", dispute("dp_none", answeredLost));
+      await event(
+        "charge.dispute.closed",
+        dispute("dp_gbp", answeredLost, { ...eur, currency: "gbp" }),
+      );
+      expect(unpriced()).toEqual(["dp_none", "dp_gbp"]);
+      // Turned off: nothing at all.
+      await event("charge.dispute.closed", dispute("dp_off", answeredLost, eur), 0);
+      expect(unpriced()).toHaveLength(2);
+      expect(
+        (
+          await fixture.observer.query(
+            `SELECT count(*)::int AS n FROM finance.hotel_payout_ledger
+             WHERE property_id=$1 AND entry_kind IN ('dispute_fee','dispute_fee_returned')`,
+            [fixture.propertyId],
+          )
+        ).rows[0].n,
+      ).toBe(0);
+
+      // The ledger refuses fee lines of the wrong shape (migration 0549).
+      const payment = (
+        await fixture.observer.query(
+          `SELECT id::text,guest_booking_id::text AS booking FROM finance.payments
+           WHERE provider_payment_intent_id='pi_writer_test'`,
+        )
+      ).rows[0];
+      for (const [kind, gross, fee, withPayment] of [
+        ["dispute_fee", 0, 0, true],
+        ["dispute_fee", 0, -100, true],
+        ["dispute_fee_returned", 0, 100, true],
+        ["dispute_fee", -1, 100, true],
+        ["dispute_fee", 0, 100, false],
+      ] as const)
+        await expect(
+          fixture.observer.query(
+            `INSERT INTO finance.hotel_payout_ledger (property_id,entry_kind,currency,gross_minor,
+               fee_minor,net_minor,guest_booking_id,payment_id,livemode,source_key,occurred_at)
+             VALUES ($1,$2,'USD',$3,$4,$3::bigint-$4::bigint,$5::uuid,$6::uuid,false,$7,now())`,
+            [
+              fixture.propertyId,
+              kind,
+              gross,
+              fee,
+              withPayment ? payment.booking : null,
+              withPayment ? payment.id : null,
+              `bad:${kind}:${gross}:${fee}:${withPayment}`,
+            ],
+          ),
+        ).rejects.toThrow("hotel_payout_ledger_dispute_fee_shape");
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("leaves the countered fee to Vayada after a full refund (VAY-2572)", async () => {
+    const card = await cardFixture(undefined, "USD");
+    const { fixture } = card;
+    try {
+      const { event, log, amountMinor } = await settledVayadaPayment(card);
+      // Refunded in full before the dispute: the dispute took nothing, so neither does its fee.
+      await expect(
+        event("refund.created", {
+          id: "re_vay2572_full",
+          amount: amountMinor,
+          currency: "usd",
+          status: "succeeded",
+          payment_intent: "pi_writer_test",
+          metadata: {},
+        }),
+      ).resolves.toBe("handled");
+      const eur = { currency: "eur", exchange_rate: null, amount: -amountMinor, fee: 2000 };
+      const disputed = {
+        id: "dp_refunded",
+        amount: amountMinor,
+        currency: "usd",
+        payment_intent: "pi_writer_test",
+        status: "lost",
+        evidence_details: { submission_count: 1 },
+        balance_transactions: [eur],
+      };
+      await event("charge.dispute.funds_withdrawn", disputed);
+      await event("charge.dispute.closed", disputed);
+      expect(
+        (
+          await fixture.observer.query(
+            `SELECT entry_kind FROM finance.hotel_payout_ledger
+             WHERE property_id=$1 AND entry_kind IN ('dispute_fee','dispute_fee_returned')`,
+            [fixture.propertyId],
+          )
+        ).rows,
+      ).toEqual([]);
+      expect(log.info).toHaveBeenCalledWith(
+        expect.objectContaining({ disputeId: "dp_refunded", recorded: "not_owed" }),
+        expect.stringContaining("not taken from the hotel"),
+      );
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  /** VAY-2572: a vayada Payment hotel whose card payment (pi_writer_test) Stripe settled, with its
+   * webhook handler (the countered fee priced at EUR 20 unless given). */
+  async function settledVayadaPayment({
+    fixture,
+    createPaymentIntent,
+    retrievePaymentIntent,
+  }: Awaited<ReturnType<typeof cardFixture>>) {
+    await fixture.observer.query(
+      `UPDATE finance.payment_provider_accounts
+       SET provider='vayada', provider_account_id='vayada:'||property_id::text
+       WHERE property_id=$1`,
+      [fixture.propertyId],
+    );
+    Object.assign(fixture.f.finance, { billingPlanSnapshot: "commission" });
+    const provider = routeVayadaPaymentStripe({} as never, {
+      provider: { createPaymentIntent, retrievePaymentIntent } as never,
+      publishableKey: "pk_test_writer",
+    });
+    await writePricingAcceptance(fixture.pool, fixture.input, {
+      provider,
+      vayada: { open: () => true, feePercent: 6 },
+    });
+    const amountMinor = Number(fixture.f.current.quote.evidence.dueNowMinor);
+    const log = { info: vi.fn(), warn: vi.fn() };
+    const event = (type: string, object: Record<string, unknown>, feeMinor = 2000) =>
+      handleVayadaPaymentWebhookEvent(
+        fixture.pool,
+        { id: `evt_${type}_${String(object.id)}`, type, livemode: false, data: { object } },
+        log,
+        { disputeCounteredFeeMinor: feeMinor },
+      );
+    await event("payment_intent.succeeded", {
+      id: "pi_writer_test",
+      amount_received: amountMinor,
+      currency: "usd",
+    });
+    return { event, log, amountMinor };
+  }
+
+  it("charges a last-minute discounted card stay and records each night net of its share once paid (VAY-2566)", async () => {
+    const { fixture, slug, createPaymentIntent, retrievePaymentIntent, provider } =
+      await cardFixture(undefined, undefined, "instant", lastMinute(3001n));
+    try {
+      const result = await writePricingAcceptance(fixture.pool, fixture.input, { provider });
+      if (result.kind !== "payment_required") throw new Error(`unexpected ${result.kind}`);
+      expect(createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({ amountMinor: 32999 }),
+      );
+      const intent = await createPaymentIntent({ amountMinor: 32999, currency: "EUR" });
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: result.bookingReference,
+        status: "succeeded",
+      });
+      await expect(
+        completePricingCardPayment(fixture.pool, provider, {
+          slug,
+          quoteId: fixture.f.current.quote.quoteId,
+          requestId: fixture.f.command.requestId,
+        }),
+      ).resolves.toMatchObject({ kind: "accepted" });
+      // Keep the shared adoption worker from claiming this fixture's job before cleanup.
+      await fixture.observer.query(
+        "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
+        [fixture.propertyId],
+      );
+      expect(await discountedNights(fixture)).toEqual(expectedDiscountedNights(fixture));
     } finally {
       await fixture.close();
     }
@@ -3115,6 +3751,51 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     }
   });
 
+  it("counts a card booking's code while it awaits payment and gives it back when it expires (VAY-2566)", async () => {
+    const promo = promoCode();
+    const { fixture, provider, retrievePaymentIntent, cancelPaymentIntent } = await cardFixture(
+      undefined,
+      undefined,
+      "instant",
+      promo.change,
+      false,
+      promo.calculation,
+    );
+    try {
+      await promo.insert(fixture);
+      const accepted = (await writePricingAcceptance(fixture.pool, fixture.input, {
+        provider,
+      })) as { bookingId: string; bookingReference: string };
+      expect(await promo.state(fixture)).toEqual({ uses: 1, applications: "applied:30.00" });
+      const intent = await retrievePaymentIntent();
+      const bound = { ...intent, bookingReference: accepted.bookingReference };
+      retrievePaymentIntent.mockResolvedValue(bound);
+      cancelPaymentIntent.mockResolvedValue({ ...bound, status: "canceled" });
+      const client = await fixture.pool.connect();
+      try {
+        await client.query("BEGIN");
+        await expect(
+          expirePricingCardBooking(
+            client,
+            provider,
+            {
+              propertyId: fixture.propertyId,
+              guestBookingId: accepted.bookingId,
+              now: new Date(Date.now() + 31 * 60_000),
+            },
+            async () => undefined,
+          ),
+        ).resolves.toBe("expired");
+        await client.query("COMMIT");
+      } finally {
+        client.release();
+      }
+      expect(await promo.state(fixture)).toEqual({ uses: 0, applications: "reversed:30.00" });
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("settles a card acceptance through the legacy Stripe settlement without the legacy PMS job", async () => {
     const { fixture, provider } = await cardFixture();
     try {
@@ -3352,57 +4033,236 @@ describe.skipIf(!url)("pricing acceptance writer requests (PostgreSQL)", () => {
     }
   });
 
-  it("lets the hotel decline a request: rooms released, guest told, no PMS job", async () => {
-    const fixture = await setupFixture((quote) =>
-      Object.assign(quote, { acceptanceMode: "request" }),
-    );
-    const hostPool = new pg.Pool({ connectionString: url, max: 2 });
-    const released: unknown[] = [];
-    const actions = createBookingHostActions({
-      pool: hostPool,
-      guards: targetBookingHostActionGuards,
-      inventory: {
-        reserve: async () => null,
-        async release({ reservation }) {
-          released.push(reservation);
-        },
-      },
+  it("records a request's nights net of its last-minute discount when the hotel accepts (VAY-2566)", async () => {
+    const fixture = await setupFixture((quote) => {
+      Object.assign(quote, { acceptanceMode: "request" });
+      lastMinute(3001n)(quote);
     });
-    const actorUserId = randomUUID();
+    const pmsPool = new pg.Pool({ connectionString: url, max: 2 });
+    const pms = createTargetPmsOperationsCommandRepository({
+      connectionString: url!,
+      pool: pmsPool,
+      readRepository: {
+        findReservationByGuestBookingId: async () => ({}),
+      } as unknown as PmsOperationsReadRepository,
+    });
     try {
       mockOwners(fixture);
       vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
         new Date().toISOString(),
       );
       const requested = await writePricingAcceptance(fixture.pool, fixture.input, undefined, true);
+      expect(await discountedNights(fixture)).toEqual([]);
+      await expect(
+        pms.acceptBooking({
+          propertyId: fixture.propertyId,
+          guestBookingId: requested.bookingId,
+          commandId: randomUUID(),
+          idempotencyKey: randomUUID(),
+          audit: {
+            actor: { kind: "system", service: "apps/api" },
+            requestId: randomUUID(),
+            reason: "Request accepted",
+            requestedAt: new Date().toISOString(),
+          },
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      // Keep the shared adoption worker from claiming this fixture's job before cleanup.
       await fixture.observer.query(
-        "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
-        [actorUserId, `${actorUserId}@example.test`],
+        "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
+        [fixture.propertyId],
       );
-      const scope = { propertyId: fixture.propertyId, bookingId: requested.bookingId, actorUserId };
-      const preview = await actions.preview(scope, { action: "reject", reason: "Fully booked" });
-      await expect(actions.apply(scope, preview.previewId, "decline")).resolves.toEqual({
-        bookingId: requested.bookingId,
-        lifecycleStatus: "declined",
-      });
-      expect(released).toEqual([
-        parsePmsInventoryReservationBundle(acceptanceFixture().inventory_reservation_bundle),
-      ]);
-      const jobs = (
-        await fixture.observer.query(
-          "SELECT job_type FROM platform.jobs WHERE property_id=$1 ORDER BY job_type",
-          [fixture.propertyId],
-        )
-      ).rows.map((row) => row.job_type);
-      expect(jobs).toContain("email.booking-rejected");
-      expect(jobs.filter((job) => job.startsWith("pms."))).toEqual([]);
-      await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({ revenue: 0 });
+      expect(await discountedNights(fixture)).toEqual(expectedDiscountedNights(fixture));
     } finally {
-      await actions.close();
-      await hostPool.end().catch(() => undefined);
+      await pmsPool.end();
       await fixture.close();
     }
   });
+
+  it("records a request's nights net of its code when the hotel accepts, and gives an unanswered one's back (VAY-2566)", async () => {
+    const promo = promoCode();
+    const fixture = await setupFixture(
+      (quote) => {
+        Object.assign(quote, { acceptanceMode: "request" });
+        promo.change(quote);
+      },
+      undefined,
+      false,
+      promo.calculation,
+    );
+    const pmsPool = new pg.Pool({ connectionString: url, max: 2 });
+    const pms = createTargetPmsOperationsCommandRepository({
+      connectionString: url!,
+      pool: pmsPool,
+      readRepository: {
+        findReservationByGuestBookingId: async () => ({}),
+      } as unknown as PmsOperationsReadRepository,
+    });
+    try {
+      await promo.insert(fixture);
+      mockOwners(fixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      const requested = await writePricingAcceptance(fixture.pool, fixture.input, undefined, true);
+      expect(await promo.state(fixture)).toEqual({ uses: 1, applications: "applied:30.00" });
+      await expect(
+        pms.acceptBooking({
+          propertyId: fixture.propertyId,
+          guestBookingId: requested.bookingId,
+          commandId: randomUUID(),
+          idempotencyKey: randomUUID(),
+          audit: {
+            actor: { kind: "system", service: "apps/api" },
+            requestId: randomUUID(),
+            reason: "Request accepted",
+            requestedAt: new Date().toISOString(),
+          },
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      // Keep the shared adoption worker from claiming this fixture's job before cleanup.
+      await fixture.observer.query(
+        "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
+        [fixture.propertyId],
+      );
+      expect(await discountedNights(fixture)).toEqual(expectedCodeNights(fixture));
+      expect(await promo.state(fixture)).toEqual({ uses: 1, applications: "applied:30.00" });
+    } finally {
+      await pmsPool.end();
+      await fixture.close();
+    }
+
+    // An unanswered request lapses at the hotel's deadline and gives the use back.
+    const lapsing = promoCode();
+    const unanswered = await setupFixture(
+      (quote) => {
+        Object.assign(quote, { acceptanceMode: "request" });
+        lapsing.change(quote);
+      },
+      undefined,
+      false,
+      lapsing.calculation,
+    );
+    const sweepPool = new pg.Pool({ connectionString: url, max: 2 });
+    const store = createPgBookingLifecycleStore({
+      connectionString: url!,
+      pool: sweepPool,
+      inventoryReservationPort: { reserve: async () => null, release: async () => undefined },
+    });
+    try {
+      await lapsing.insert(unanswered);
+      mockOwners(unanswered);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      await unanswered.observer.query(
+        `INSERT INTO hotel_catalog.property_contact_channels
+          (property_id,channel_type,value,source_system,purpose)
+         VALUES($1,'email','ops@writer.example.test','platform','operations')`,
+        [unanswered.propertyId],
+      );
+      await unanswered.observer.query(
+        "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Rome')",
+        [unanswered.propertyId],
+      );
+      const requested = await writePricingAcceptance(
+        unanswered.pool,
+        unanswered.input,
+        undefined,
+        true,
+      );
+      if (requested.kind !== "requested") throw new Error(`unexpected ${requested.kind}`);
+      expect(await lapsing.state(unanswered)).toEqual({ uses: 1, applications: "applied:30.00" });
+      const deadline = new Date(requested.hostResponseDeadlineAt!);
+      const run = await runBookingLifecycleSchedulerJobs(store, {
+        now: new Date(deadline.getTime() + 1_000),
+        run: ["pendingBookingExpiry"],
+      });
+      expect(run.failed).toBe(0);
+      expect(await lapsing.state(unanswered)).toEqual({
+        uses: 0,
+        applications: "reversed:30.00",
+      });
+    } finally {
+      await store.close();
+      await sweepPool.end().catch(() => undefined);
+      await unanswered.close();
+    }
+  });
+
+  // VAY-2099: front desk staff (accept, but no cancel permission) may decline a request too.
+  it.each([
+    ["staff who can cancel", undefined],
+    ["front desk", { requestsOnly: true }],
+  ] as const)(
+    "lets the hotel decline a request (%s): rooms released, guest told, no PMS job",
+    async (_who, permissions) => {
+      const fixture = await setupFixture((quote) =>
+        Object.assign(quote, { acceptanceMode: "request" }),
+      );
+      const hostPool = new pg.Pool({ connectionString: url, max: 2 });
+      const released: unknown[] = [];
+      const actions = createBookingHostActions({
+        pool: hostPool,
+        guards: targetBookingHostActionGuards,
+        inventory: {
+          reserve: async () => null,
+          async release({ reservation }) {
+            released.push(reservation);
+          },
+        },
+      });
+      const actorUserId = randomUUID();
+      try {
+        mockOwners(fixture);
+        vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+          new Date().toISOString(),
+        );
+        const requested = await writePricingAcceptance(
+          fixture.pool,
+          fixture.input,
+          undefined,
+          true,
+        );
+        await fixture.observer.query(
+          "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
+          [actorUserId, `${actorUserId}@example.test`],
+        );
+        const scope = {
+          propertyId: fixture.propertyId,
+          bookingId: requested.bookingId,
+          actorUserId,
+        };
+        const preview = await actions.preview(
+          scope,
+          { action: "reject", reason: "Fully booked" },
+          permissions,
+        );
+        await expect(
+          actions.apply(scope, preview.previewId, "decline", permissions),
+        ).resolves.toEqual({
+          bookingId: requested.bookingId,
+          lifecycleStatus: "declined",
+        });
+        expect(released).toEqual([
+          parsePmsInventoryReservationBundle(acceptanceFixture().inventory_reservation_bundle),
+        ]);
+        const jobs = (
+          await fixture.observer.query(
+            "SELECT job_type FROM platform.jobs WHERE property_id=$1 ORDER BY job_type",
+            [fixture.propertyId],
+          )
+        ).rows.map((row) => row.job_type);
+        expect(jobs).toContain("email.booking-rejected");
+        expect(jobs.filter((job) => job.startsWith("pms."))).toEqual([]);
+        await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({ revenue: 0 });
+      } finally {
+        await actions.close();
+        await hostPool.end().catch(() => undefined);
+        await fixture.close();
+      }
+    },
+  );
 
   it("lets the guest withdraw a request: rooms released, no PMS job", async () => {
     const fixture = await setupFixture((quote) =>
@@ -3528,6 +4388,120 @@ describe.skipIf(!url)("pricing acceptance writer requests (PostgreSQL)", () => {
     }
   });
 });
+
+/** VAY-2566: a last-minute discount on the first room, as the quote composes it: its own
+ * discount line, taken off the total and off what is due (now or later). A code's discount
+ * (`room` false) names no room. */
+function lastMinute(amountMinor: bigint, room = true) {
+  return (quote: Fixture["f"]["current"]["quote"]) => {
+    const evidence = quote.evidence;
+    const less = (value: string) => (BigInt(value) - amountMinor).toString();
+    Object.assign(evidence, {
+      lines: [
+        ...evidence.lines,
+        {
+          id: room ? "lm" : "code",
+          kind: "discount",
+          selectionId: room ? quote.stay.rooms[0].selectionId : null,
+          amountMinor: amountMinor.toString(),
+        },
+      ],
+      totalMinor: less(evidence.totalMinor),
+      ...(evidence.dueLaterMinor === "0"
+        ? { dueNowMinor: less(evidence.dueNowMinor) }
+        : { dueLaterMinor: less(evidence.dueLaterMinor) }),
+    });
+  };
+}
+
+/** The booking's total and each room night's recorded revenue (VAY-2566). */
+async function discountedNights(fixture: Fixture) {
+  return (
+    await fixture.observer.query(
+      `SELECT r.stay_date::text AS date,r.gross_room_amount::text AS amount,b.total_amount::text AS total
+       FROM booking.nightly_revenue_evidence r JOIN booking.guest_bookings b ON b.id=r.guest_booking_id
+       WHERE b.property_id=$1 AND r.economic_event='room_night' ORDER BY r.stay_date`,
+      [fixture.propertyId],
+    )
+  ).rows;
+}
+
+/** 3001 off two nights of 150.00 (largest remainder, ties to the earlier night). */
+function expectedDiscountedNights(fixture: Fixture) {
+  const nights = fixture.f.current.quote.rooms[0].nights;
+  expect(nights.map((night) => night.roomMinor)).toEqual(["15000", "15000"]);
+  expect(fixture.f.current.quote.evidence.totalMinor).toBe("32999");
+  return [
+    { date: nights[0].date, amount: "134.9900", total: "329.99" },
+    { date: nights[1].date, amount: "135.0000", total: "329.99" },
+  ];
+}
+
+/** VAY-2566: the hotel's code SAVE10 taking 30.00 off the first room's stay, as the quote and
+ * its stored calculation record it. `insert` saves the code itself once the property exists. */
+function promoCode() {
+  const promoId = randomUUID();
+  return {
+    promoId,
+    change: lastMinute(3000n, false),
+    calculation: (quote: Fixture["f"]["current"]["quote"]) => ({
+      code: {
+        id: promoId,
+        code: "SAVE10",
+        discount: { kind: "percentage", basisPoints: 1000 },
+        eligibleSelectionIds: [quote.stay.rooms[0].selectionId],
+        minimumBookingMinor: "0",
+        bookingLocalDate: quote.evidence.issuedAt.slice(0, 10),
+        sourceRevision: "booking.promo-code.v2:writer",
+      },
+      discounts: {
+        version: "booking.discount-components.v1",
+        lastMinuteLines: [],
+        codeMinor: "3000",
+        totalDiscountMinor: "3000",
+        remainingRoomAndEligibleAddonMinor: "27000",
+      },
+    }),
+    async insert(
+      fixture: Fixture,
+      options: { maxUses?: number; currentUses?: number; partnerClientId?: string } = {},
+    ) {
+      await fixture.observer.query(
+        `INSERT INTO booking.promo_definitions
+          (id,property_id,code,discount_type,discount_value,max_uses,current_uses,partner_client_id)
+         VALUES($1,$2,'SAVE10','percentage',10,$3,$4,$5)`,
+        [
+          promoId,
+          fixture.propertyId,
+          options.maxUses ?? 5,
+          options.currentUses ?? 0,
+          options.partnerClientId ?? null,
+        ],
+      );
+    },
+    /** The code's use count and its applications, as status:amount. */
+    async state(fixture: Fixture) {
+      return (
+        await fixture.observer.query(
+          `SELECT p.current_uses AS uses,
+             (SELECT string_agg(a.application_status||':'||a.discount_amount::text,',')
+              FROM booking.promo_applications a WHERE a.promo_definition_id=p.id) AS applications
+           FROM booking.promo_definitions p WHERE p.id=$1`,
+          [promoId],
+        )
+      ).rows[0];
+    },
+  };
+}
+
+/** 30.00 off two nights of 150.00 by the code. */
+function expectedCodeNights(fixture: Fixture) {
+  const nights = fixture.f.current.quote.rooms[0].nights;
+  return [
+    { date: nights[0].date, amount: "135.0000", total: "330.00" },
+    { date: nights[1].date, amount: "135.0000", total: "330.00" },
+  ];
+}
 
 // K5 in another currency (STRIPE_TEST_CURRENCY): the same quote with every minor amount scaled, so the
 // card amount clears Stripe's minimum charge (EUR 360.00 becomes IDR 3,600,000.00).
@@ -3989,6 +4963,8 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
         reason: "Payment received",
         requestedAt: new Date().toISOString(),
       },
+      // VAY-2575: the owner confirms PayPal payments.
+      allowRemoteConfirmation: true,
     });
     const deadline = (bookingId: string, interval: string) =>
       fixture.observer.query(
@@ -4134,7 +5110,21 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
           requestedAt: new Date().toISOString(),
         },
       };
-      await expect(pms.markBookingPaid(command)).resolves.toMatchObject({ ok: true });
+      // VAY-2575: without the owner key the desk can't confirm it, and nothing is written.
+      await expect(
+        pms.markBookingPaid({ ...command, allowRemoteConfirmation: false }),
+      ).resolves.toMatchObject({ ok: false, statusCode: 403, code: "missing_permission" });
+      const untouched = await fixture.observer.query(
+        `SELECT b.payment_status,
+           (SELECT count(*)::int FROM finance.payments p WHERE p.guest_booking_id=b.id) AS payments
+         FROM booking.guest_bookings b WHERE b.id=$1`,
+        [pending.bookingId],
+      );
+      expect(untouched.rows[0]).toEqual({ payment_status: "unpaid", payments: 0 });
+      // The owner's confirmation with the same key goes through.
+      await expect(
+        pms.markBookingPaid({ ...command, allowRemoteConfirmation: true }),
+      ).resolves.toMatchObject({ ok: true });
       await fixture.observer.query(
         "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
         [fixture.propertyId],
@@ -4164,6 +5154,61 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
       expect(cents(state[0].net_amount)).toBe(cents(state[0].amount) - cents(state[0].fee_amount));
       // Paid: the bank details are no longer shown.
       await expect(reveal()).resolves.toBeNull();
+    } finally {
+      await pmsPool.end();
+      await bank.close();
+      await fixture.close();
+    }
+  });
+
+  it("records a paid bank transfer's nights net of its last-minute discount (VAY-2566)", async () => {
+    const fixture = await setupFixture(
+      (quote) => {
+        manualQuote("bank_transfer", "instant")(quote);
+        lastMinute(3001n)(quote);
+      },
+      undefined,
+      true,
+    );
+    const bank = bankOperations();
+    const pmsPool = new pg.Pool({ connectionString: url, max: 2 });
+    const pms = createTargetPmsOperationsCommandRepository({
+      connectionString: url!,
+      pool: pmsPool,
+      readRepository: {
+        findReservationByGuestBookingId: async () => ({}),
+      } as unknown as PmsOperationsReadRepository,
+    });
+    try {
+      mockOwners(fixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      await finance(fixture, "bank_transfer");
+      const pending = await writePricingAcceptance(fixture.pool, fixture.input, undefined, false, {
+        bankTransfers: bank,
+      });
+      await expect(
+        pms.markBookingPaid({
+          propertyId: fixture.propertyId,
+          guestBookingId: pending.bookingId,
+          commandId: randomUUID(),
+          idempotencyKey: randomUUID(),
+          allowRemoteConfirmation: true,
+          audit: {
+            actor: { kind: "system", service: "apps/api" },
+            requestId: randomUUID(),
+            reason: "Bank transfer received",
+            requestedAt: new Date().toISOString(),
+          },
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      // Keep the shared adoption worker from claiming this fixture's job before cleanup.
+      await fixture.observer.query(
+        "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
+        [fixture.propertyId],
+      );
+      expect(await discountedNights(fixture)).toEqual(expectedDiscountedNights(fixture));
     } finally {
       await pmsPool.end();
       await bank.close();
@@ -4234,6 +5279,7 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
             reason: "Bank transfer received",
             requestedAt: new Date().toISOString(),
           },
+          allowRemoteConfirmation: true,
         }),
       state: async () =>
         (
@@ -4388,58 +5434,80 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
     }
   }, 60_000);
 
-  it("lets the hotel decline an unpaid PayPal booking: rooms released, guest told", async () => {
-    const fixture = await setupFixture(manualQuote("paypal", "instant"), undefined, true);
-    const hostPool = new pg.Pool({ connectionString: url, max: 2 });
-    const released: unknown[] = [];
-    const actions = createBookingHostActions({
-      pool: hostPool,
-      guards: targetBookingHostActionGuards,
-      inventory: {
-        reserve: async () => null,
-        async release({ reservation }) {
-          released.push(reservation);
+  // VAY-2099: in either acceptance mode a PayPal booking waits for its payment, so front desk
+  // (requestsOnly) can't decline it.
+  it.each(["instant", "request"] as const)(
+    "lets the hotel decline an unpaid PayPal booking (%s mode): rooms released, guest told",
+    async (mode) => {
+      const fixture = await setupFixture(manualQuote("paypal", mode), undefined, true);
+      const hostPool = new pg.Pool({ connectionString: url, max: 2 });
+      const released: unknown[] = [];
+      const actions = createBookingHostActions({
+        pool: hostPool,
+        guards: targetBookingHostActionGuards,
+        inventory: {
+          reserve: async () => null,
+          async release({ reservation }) {
+            released.push(reservation);
+          },
         },
-      },
-    });
-    const actorUserId = randomUUID();
-    try {
-      mockOwners(fixture);
-      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
-        new Date().toISOString(),
-      );
-      await finance(fixture, "paypal", { paypalEmail: "pay@writer.example.test" });
-      const pending = await writePricingAcceptance(fixture.pool, fixture.input, undefined, false, {
-        paypal: true,
       });
-      await fixture.observer.query(
-        "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
-        [actorUserId, `${actorUserId}@example.test`],
-      );
-      const scope = { propertyId: fixture.propertyId, bookingId: pending.bookingId, actorUserId };
-      const preview = await actions.preview(scope, { action: "reject", reason: "No payment" });
-      await expect(actions.apply(scope, preview.previewId, "decline")).resolves.toEqual({
-        bookingId: pending.bookingId,
-        lifecycleStatus: "declined",
-      });
-      expect(released).toHaveLength(1);
-      const jobs = (
-        await fixture.observer.query("SELECT job_type FROM platform.jobs WHERE property_id=$1", [
-          fixture.propertyId,
-        ])
-      ).rows.map((row) => row.job_type);
-      expect(jobs).toContain("email.booking-rejected");
-      expect(jobs.filter((job) => job.startsWith("pms."))).toEqual([]);
-      // A retry of the guest's booking is now a conflict, not a confirmation.
-      await expect(
-        writePricingAcceptance(fixture.pool, fixture.input, undefined, false, { paypal: true }),
-      ).rejects.toMatchObject({ code: "conflict" });
-    } finally {
-      await actions.close();
-      await hostPool.end().catch(() => undefined);
-      await fixture.close();
-    }
-  });
+      const actorUserId = randomUUID();
+      try {
+        mockOwners(fixture);
+        vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+          new Date().toISOString(),
+        );
+        await finance(fixture, "paypal", { paypalEmail: "pay@writer.example.test" });
+        const pending = await writePricingAcceptance(
+          fixture.pool,
+          fixture.input,
+          undefined,
+          false,
+          {
+            paypal: true,
+          },
+        );
+        await fixture.observer.query(
+          "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
+          [actorUserId, `${actorUserId}@example.test`],
+        );
+        const scope = { propertyId: fixture.propertyId, bookingId: pending.bookingId, actorUserId };
+        // VAY-2099: declining a booking that waits for its payment stays with staff who can cancel.
+        await expect(
+          actions.preview(
+            scope,
+            { action: "reject", reason: "No payment" },
+            { requestsOnly: true },
+          ),
+        ).rejects.toMatchObject({ statusCode: 403 });
+        const preview = await actions.preview(scope, { action: "reject", reason: "No payment" });
+        await expect(
+          actions.apply(scope, preview.previewId, "front-desk", { requestsOnly: true }),
+        ).rejects.toMatchObject({ statusCode: 403 });
+        await expect(actions.apply(scope, preview.previewId, "decline")).resolves.toEqual({
+          bookingId: pending.bookingId,
+          lifecycleStatus: "declined",
+        });
+        expect(released).toHaveLength(1);
+        const jobs = (
+          await fixture.observer.query("SELECT job_type FROM platform.jobs WHERE property_id=$1", [
+            fixture.propertyId,
+          ])
+        ).rows.map((row) => row.job_type);
+        expect(jobs).toContain("email.booking-rejected");
+        expect(jobs.filter((job) => job.startsWith("pms."))).toEqual([]);
+        // A retry of the guest's booking is now a conflict, not a confirmation.
+        await expect(
+          writePricingAcceptance(fixture.pool, fixture.input, undefined, false, { paypal: true }),
+        ).rejects.toMatchObject({ code: "conflict" });
+      } finally {
+        await actions.close();
+        await hostPool.end().catch(() => undefined);
+        await fixture.close();
+      }
+    },
+  );
 });
 
 async function setupFixture(
@@ -4448,6 +5516,8 @@ async function setupFixture(
   /** Move the stay to 10 days from today (or that many days): bank-transfer and PayPal need the
    * hotel's time zone and a check-in further away than their deadline (VAY-2145). */
   futureStay: boolean | number = false,
+  /** More of the quote's stored calculation, such as a code's (VAY-2566). */
+  calculation?: (quote: Fixture["f"]["current"]["quote"]) => Record<string, unknown>,
 ) {
   if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
     throw new Error("test database required");
@@ -4523,6 +5593,7 @@ async function setupFixture(
         lines: [],
       },
       charges,
+      ...calculation?.(quote),
     },
   });
   await observer.query("BEGIN");
@@ -4623,7 +5694,11 @@ function mockOwners(fixture: Fixture) {
     parseBookingQuoteAcceptanceInput(fixture.input.command, f.current.quote, f.disclosure.policy),
   ).toEqual(f.command);
   expect(
-    pricingRoomRevenueProjection(f.current.quote, f.current.calculation?.charges),
+    pricingRoomRevenueProjection(
+      f.current.quote,
+      f.current.calculation?.charges,
+      f.current.calculation?.code,
+    ),
   ).not.toBeNull();
   vi.mocked(lockPublicPricingAuthority).mockImplementation(async (client) => {
     await lockPmsInventoryMutationScope(client, propertyId);

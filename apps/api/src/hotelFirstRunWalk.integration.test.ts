@@ -57,11 +57,16 @@ import { createPmsRoomFactsVocabularyValidationPort } from "./domains/pmsRoomFac
 import { createPgPmsRoomPublicationReadModel } from "./domains/pmsRoomPublicationReadModel.js";
 import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
 import { createReplacementPricingPublicationReader } from "./domains/replacementPricingPublicationReader.js";
+import {
+  refreshPmsOperatingCalendarRooms,
+  type PmsOperatingCalendarRoomRefreshPorts,
+} from "./domains/pmsOperatingCalendarRoomRefresh.js";
 import { createHotelSetupOrdinaryLoginFixture } from "./hotelSetupOrdinaryLogin.fixture.js";
 import { createPgHotelMediaResolutionPort } from "./platform/hotelMediaResolver.js";
 import {
   createOrdinaryHotelSetupActivation,
   createOrdinaryHotelSetupProfileCommand,
+  isHotelLive,
 } from "./platform/hotelSetupProfileWriter.js";
 import type { PlatformMediaServingConfig } from "./platform/mediaServing.js";
 import { installPostgresPoolRuntime } from "./platform/postgresRuntime.js";
@@ -379,6 +384,7 @@ describe.skipIf(!url)(
           returnBaseUrls: { bookingAdmin: "https://admin.booking.example.test" },
         }),
         readiness: publication.routes.readinessProvider,
+        lifecycle: { isLive: (id) => isHotelLive(pool, id) },
       });
 
       // The owner's signed-in session, carrying every resource link setup created for the hotel.
@@ -469,6 +475,15 @@ describe.skipIf(!url)(
           profiles,
           designRepository,
           operatingCalendar,
+          // PMS Settings › Calendar's "Save calendar again", composed as in server.ts (VAY-2582).
+          calendarRefresh: {
+            pool,
+            calendarRead: operatingCalendar,
+            rooms: { roomFacts, roomCapacity: roomFacts },
+            preview: calendar.routes.impactPreviewPort,
+            calendar: calendar.routes.commandPort,
+            materialization: calendar.routes.materializationPort,
+          } as PmsOperatingCalendarRoomRefreshPorts,
         },
         email: `owner-${suffix}@example.test`,
         context,
@@ -552,6 +567,7 @@ describe.skipIf(!url)(
         // The go-live list's light read agrees, without the booking readiness (VAY-2247 incident).
         expect(await h.service().readSetupProgress(h.actor)).toEqual({
           guestPayment: true,
+          live: false,
         });
         // It takes no locks either: it answers while a pricing save holds the owner locks.
         let timer: NodeJS.Timeout | undefined;
@@ -569,6 +585,7 @@ describe.skipIf(!url)(
           });
           expect(await Promise.race([h.service().readSetupProgress(h.actor), late])).toEqual({
             guestPayment: true,
+            live: false,
           });
         } finally {
           clearTimeout(timer);
@@ -653,7 +670,7 @@ describe.skipIf(!url)(
           activations: 1,
         });
 
-        // A second run finds everything in place.
+        // A second run finds everything in place (active, but not live yet: no page, no Channex).
         const again = await h.service().run(h.actor, request);
         expect(again).toMatchObject({ ok: true, ran: [] });
       } finally {
@@ -741,6 +758,96 @@ describe.skipIf(!url)(
             expect(await page()).toMatchObject({ hotel: { location: { city: "Ahangama" } } }),
           { timeout: 20_000, interval: 250 },
         );
+        // VAY-2582: the street and city kept the time zone, so the calendar and the page stay valid.
+        expect(blockerCodes(await h.readiness())).toEqual([]);
+        // The published hotel is live: the first run writes nothing to it, and the dashboard's go-live
+        // list never offers Finish setup...
+        expect(await h.service().readSetupProgress(h.actor)).toEqual({
+          guestPayment: true,
+          live: true,
+        });
+        expect(await h.service().run(h.actor, request)).toMatchObject({
+          ok: false,
+          code: "hotel_already_live",
+          ran: [],
+        });
+        // ...and its time zone and country move only when confirmed (Aether, 2026-11-21).
+        const placed = (await h.ports.profiles.getPropertyProfile(scope))!;
+        const moved = await api.inject({
+          method: "PUT",
+          url: `/api/hotel-setup/properties/${h.propertyId}/profile`,
+          headers: { "idempotency-key": `move-${h.propertyId}` },
+          payload: {
+            expectedProfileRevision: placed.profileRevision,
+            patch: {
+              location: {
+                city: "Sheffield",
+                streetAddress: "London Road",
+                countryCode: "GB",
+                timezone: "Europe/London",
+              },
+            },
+          },
+        });
+        expect(moved.statusCode, moved.body).toBe(409);
+        expect(moved.json()).toMatchObject({
+          code: "location_change_needs_confirmation",
+          changes: {
+            timezone: { from: placed.profile.location.timezone, to: "Europe/London" },
+            countryCode: { from: placed.profile.location.countryCode, to: "GB" },
+          },
+        });
+        expect((await h.ports.profiles.getPropertyProfile(scope))?.profileRevision).toBe(
+          placed.profileRevision,
+        );
+        expect(blockerCodes(await h.readiness())).toEqual([]);
+
+        // VAY-2582: the owner confirms a time zone move. Its calendar falls behind and the page can't
+        // sell...
+        const payMethods = async () =>
+          (await h.ports.financeRead.getPaymentReadiness(scope))?.methods
+            .filter((method) => method.selected)
+            .map((method) => method.method);
+        const paidBefore = await payMethods();
+        const zone = await api.inject({
+          method: "PUT",
+          url: `/api/hotel-setup/properties/${h.propertyId}/profile`,
+          headers: { "idempotency-key": `zone-${h.propertyId}` },
+          payload: {
+            expectedProfileRevision: placed.profileRevision,
+            patch: { location: { timezone: "Asia/Kolkata" } },
+            confirmLocationChange: true,
+          },
+        });
+        expect(zone.statusCode, zone.body).toBe(200);
+        expect(blockerCodes(await h.readiness())).toContainEqual(
+          expect.stringMatching(/operating_calendar_source_stale$/),
+        );
+        const refresher = {
+          organizationId: h.organizationId,
+          propertyId: h.propertyId,
+          userId: h.actor.userId,
+          requestId: `calendar-refresh-${h.propertyId}`,
+          correlationId: null,
+        };
+        // ...a room change or the hourly repair never takes a new time zone...
+        expect(await refreshPmsOperatingCalendarRooms(h.ports.calendarRefresh, refresher)).toEqual({
+          outcome: "not_room_change",
+          reason: "property_profile_revision_conflict",
+        });
+        // ..."Save calendar again" does, with the hotel's own calendar settings: the page sells again,
+        // and how guests pay is untouched (the first run switched on pay at property for Aether).
+        expect(
+          await refreshPmsOperatingCalendarRooms(h.ports.calendarRefresh, refresher, {
+            acceptTimeZone: true,
+          }),
+        ).toMatchObject({ outcome: "refreshed", savedCalendar: true });
+        expect(
+          (await h.ports.operatingCalendar.getCurrentOperatingCalendarConfiguration(h.propertyId))
+            ?.configuration.sourceInputs.propertyTimeZone,
+        ).toBe("Asia/Kolkata");
+        expect(blockerCodes(await h.readiness())).toEqual([]);
+        expect(await payMethods()).toEqual(paidBefore);
 
         // Two saves a moment apart (General saves the profile, then the settings): the second
         // refresh meets the first one's publication, waits for it and still lands.
@@ -882,6 +989,7 @@ describe.skipIf(!url)(
           // Setup is done (how guests pay and the plan); the room is what the go-live list asks for.
           expect(await h.service().readSetupProgress(h.actor)).toEqual({
             guestPayment: true,
+            live: false,
           });
           const checklist = await goLive(h);
           expect(checklist).toMatchObject({

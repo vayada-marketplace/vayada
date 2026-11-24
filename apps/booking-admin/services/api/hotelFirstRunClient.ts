@@ -21,6 +21,8 @@ export type HotelFirstRunStepState = "done" | "stale" | "todo" | "blocked" | "aw
 export type HotelFirstRunState = Readonly<{
   contractVersion: "hotel-first-run.v1";
   propertyId: string;
+  /** VAY-2582: the hotel has gone live, so setup leaves (an API before VAY-2582 never says so). */
+  live: boolean;
   steps: readonly Readonly<{ id: HotelFirstRunStepId; state: HotelFirstRunStepState }>[];
   nextStep: HotelFirstRunStepId | null;
 }>;
@@ -96,6 +98,7 @@ export function parseHotelFirstRunState(
   return Object.freeze({
     contractVersion: "hotel-first-run.v1",
     propertyId: value["propertyId"],
+    live: value["live"] === true,
     steps: Object.freeze(steps as HotelFirstRunState["steps"][number][]),
     nextStep: value["nextStep"],
   });

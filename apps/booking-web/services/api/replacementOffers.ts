@@ -135,7 +135,10 @@ export async function getReplacementOffers(
   slug: string,
   signal?: AbortSignal,
 ): Promise<PricingRoom[]> {
-  return (await getReplacementCatalog(slug, signal)).rooms;
+  const catalog = await getReplacementCatalog(slug, signal);
+  // VAY-2583: nothing guests can pay for is no room to choose: /book says so as before.
+  if (catalog.unavailable) throw new Error("Room options are not available.");
+  return catalog.rooms;
 }
 
 /** The property's place on the guest maps (VAY-2126, read live): its own pin as its visibility shows it
@@ -155,6 +158,9 @@ export async function getReplacementCatalog(
   locationMap: CatalogLocationMap | null;
   detailsMap: CatalogLocationMap | null;
   roomSorting: RoomSorting | null;
+  /** VAY-2583: why no room is listed. "no_payment_method": guests can't pay for any rate with a way
+   * the hotel takes now, so they should contact the hotel. Absent: no reason given. */
+  unavailable?: "no_payment_method";
 }> {
   const raw = await bookingWebPublic.get<unknown>(
     `/api/booking-web/hotels/${encodeURIComponent(slug)}/pricing-offers`,
@@ -219,6 +225,8 @@ export async function getReplacementCatalog(
     locationMap: catalogLocationMap(raw.locationMap),
     detailsMap: catalogLocationMap(raw.detailsMap),
     roomSorting: catalogRoomSorting(raw.roomSorting),
+    ...(raw.unavailable === "no_payment_method" &&
+      !rooms.length && { unavailable: "no_payment_method" as const }),
   };
 }
 

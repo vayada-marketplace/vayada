@@ -15,7 +15,7 @@ export default function PrivacyPage() {
           <div className="mb-8">
             <h1 className="text-4xl md:text-5xl font-bold text-primary-800 mb-4">Privacy Policy</h1>
             <p className="text-gray-600">
-              <strong>Effective Date:</strong> November 20, 2026
+              <strong>Effective Date:</strong> November 23, 2026
             </p>
           </div>
 
@@ -523,10 +523,10 @@ export default function PrivacyPage() {
               <div className="mt-6">
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">A. Who Is Responsible</h3>
                 <p>
-                  The hotel named on the booking site is the controller for your booking and for the
-                  optional analytics on its booking site. vayada runs the booking site and processes
-                  this data on the hotel&apos;s behalf and on its instructions (Article 28 GDPR).
-                  The hotel and vayada have a{" "}
+                  The hotel named on the booking site is the controller for your booking, for the
+                  page view count and for the optional analytics on its booking site. vayada runs
+                  the booking site and processes this data on the hotel&apos;s behalf and on its
+                  instructions (Article 28 GDPR). The hotel and vayada have a{" "}
                   <a href="/terms/dpa" className={LINK}>
                     data processing agreement
                   </a>{" "}
@@ -582,8 +582,20 @@ export default function PrivacyPage() {
                   <li>
                     <strong>Technical data:</strong> our servers log each request, including your IP
                     address, to keep the booking site secure and working. These logs are kept for 30
-                    days. When you look up a booking, we also count the attempts from your IP
-                    address for one minute, in memory only, to stop abuse; this count is not stored
+                    days. When you look up a booking, or the booking site counts a page view or
+                    sends an analytics event, we also count these requests from your IP address for
+                    one minute, in memory only, to stop abuse; this count is not stored (Article
+                    6(1) lit. f GDPR).
+                  </li>
+                  <li>
+                    <strong>Page views: </strong>each time you open the hotel&apos;s page on the
+                    booking site, we count one page view for the hotel. A page view holds only the
+                    hotel, the quarter hour in which it happened and a random number our server
+                    makes for that one view. Nothing is read from or saved on your device for it,
+                    and we keep no IP address, browser details or identifier with it, so a page view
+                    can&apos;t be linked to another page view or to you. Your browser&apos;s user
+                    agent is checked only to leave out automated visits and is not kept. The hotel
+                    sees how many people open its booking site. We keep page views for 13 months
                     (Article 6(1) lit. f GDPR).
                   </li>
                   <li>

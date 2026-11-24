@@ -5,6 +5,7 @@ import { mockHotelAccountAgreements } from "./hotelAccountAgreementsMocks";
 import { createAdaptiveHotelSetupStatusMock } from "./sharedHotelSetupMocks";
 import { mockBookingModules } from "./featureHubModuleMocks";
 import { mockSinglePropertyAccountBookingPage } from "./accountBookingPageMocks";
+import { fulfillCorsPreflight } from "./cors";
 
 export const BOOKING_ADMIN_HOTEL_ID = "booking_hotel_alpenrose";
 export const BOOKING_ADMIN_PROPERTY_ID = "f6853000-0000-4000-8000-000000000001";
@@ -181,10 +182,12 @@ export interface BookingAdminCustomDomainFixture {
   dnsRecords: Array<{
     type: "CNAME" | "TXT";
     name: string;
+    host?: string;
     value: string;
     status: "pending" | "verified" | "failed";
   }>;
   verificationErrors: string[];
+  verificationIssue: { code: string; foundTarget: string | null } | null;
   checkedAt: string | null;
   updatedAt: string | null;
 }
@@ -378,6 +381,7 @@ export const defaultCustomDomain: BookingAdminCustomDomainFixture = {
   sslStatus: "not_configured",
   dnsRecords: [],
   verificationErrors: [],
+  verificationIssue: null,
   checkedAt: null,
   updatedAt: null,
 };
@@ -682,20 +686,32 @@ export async function mockBookingAdminShellRoutes(
       },
     }),
   );
+  // The in-app assistant (VAY-2519) is switched off, as in production: its routes are not there (404), so
+  // the header shows no "Ask AI". A context route, so a spec's own page.route wins.
+  await page.context().route(/\/api\/ai\/assistant\//, (route) =>
+    route.request().method() === "OPTIONS"
+      ? fulfillCorsPreflight(route)
+      : route.fulfill({
+          status: 404,
+          json: { statusCode: 404, code: "not_found", message: "Not found" },
+        }),
+  );
   // The header's notifications bell (VAY-2349): nothing yet. Specs that need a feed route their own.
-  await page.route(/\/api\/booking\/properties\/[^/]+\/notifications(\/read(-all)?)?$/, (route) =>
-    route.request().method() === "GET"
-      ? route.fulfill({
-          json: {
-            generatedAt: new Date().toISOString(),
-            timeZone: "Europe/Berlin",
-            items: [],
-            syncAlert: null,
-            unread: { all: 0, bookings: 0, needsAction: 0, updates: 0 },
-            badge: "none",
-          },
-        })
-      : route.fulfill({ status: 204 }),
+  await page.route(
+    /\/api\/booking\/properties\/[^/]+\/notifications(\/(read|read-all|unread|done))?$/,
+    (route) =>
+      route.request().method() === "GET"
+        ? route.fulfill({
+            json: {
+              generatedAt: new Date().toISOString(),
+              timeZone: "Europe/Berlin",
+              items: [],
+              syncAlert: null,
+              unread: { all: 0, bookings: 0, needsAction: 0, updates: 0 },
+              badge: "none",
+            },
+          })
+        : route.fulfill({ status: 204 }),
   );
   await page.route("**/api/booking/properties/*/dashboard/bookings-by-source**", (route) =>
     route.fulfill({
@@ -731,7 +747,7 @@ export async function mockBookingAdminShellRoutes(
     }),
   );
   // An unanswered dashboard read logs an error, and Next's dev overlay badge then covers the
-  // sidebar's Collapse button. dashboard-funnel.spec registers its own funnel after these mocks.
+  // bottom of the sidebar. dashboard-funnel.spec registers its own funnel after these mocks.
   await page.route("**/api/booking/properties/*/dashboard/conversion-funnel**", (route) =>
     route.fulfill({
       json: {

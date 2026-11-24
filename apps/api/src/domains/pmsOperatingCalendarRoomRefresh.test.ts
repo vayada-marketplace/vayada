@@ -70,6 +70,8 @@ type Start = {
   crowded?: readonly string[];
   /** The changed room type still has rooms waiting for their name. */
   unnamed?: boolean;
+  /** The time zone the save took (the hotel's current one). */
+  savedTimeZone?: string;
 };
 
 function fake(start: Start = {}) {
@@ -130,12 +132,23 @@ function fake(start: Start = {}) {
     calendar: {
       upsertOperatingCalendar: async (command: Record<string, unknown>) => {
         calls.push(["save", command]);
-        return start.save ?? { ok: true, response: { configuration: { calendarRevision: 5 } } };
+        return (
+          start.save ?? {
+            ok: true,
+            response: {
+              configuration: {
+                calendarRevision: 5,
+                sourceInputs: { propertyTimeZone: start.savedTimeZone ?? "Asia/Makassar" },
+              },
+            },
+          }
+        );
       },
     },
     materialization: {
       materializeInventory: async (command: Record<string, unknown>) => {
         calls.push(["materialize", command]);
+        if (Array.isArray(start.materialize)) return start.materialize.shift() ?? { ok: true };
         return start.materialize ?? { ok: true };
       },
     },
@@ -292,6 +305,66 @@ describe("the calendar follows room changes (VAY-2469)", () => {
     }
   });
 
+  it("takes a new time zone only when the hotel asks: Save calendar again (VAY-2582)", async () => {
+    // The hotel moved to Los Angeles; its rooms didn't change.
+    const moved = {
+      conflicts: [{ code: "property_profile_revision_conflict", currentRevision: 9 }],
+    };
+    const automatic = fake(moved);
+    expect(await refreshPmsOperatingCalendarRooms(automatic.ports, actor)).toEqual({
+      outcome: "not_room_change",
+      reason: "property_profile_revision_conflict",
+    });
+    expect(automatic.calls.filter(([name]) => name !== "crowded")).toEqual([]);
+
+    const asked = fake({ ...moved, savedTimeZone: "America/Los_Angeles" });
+    expect(
+      await refreshPmsOperatingCalendarRooms(asked.ports, actor, { acceptTimeZone: true }),
+    ).toEqual({ outcome: "refreshed", calendarRevision: 5, savedCalendar: true });
+    const steps = asked.calls.filter(([name]) => name !== "crowded");
+    expect(steps.map(([name]) => name)).toEqual(["preview", "save", "materialize"]);
+    // The hotel's own schedule, minimum stay and room limits; never the first run's defaults.
+    expect(steps[1]![1]).toMatchObject({
+      expectedPropertyProfileRevision: 9,
+      schedule: configuration.schedule,
+      defaultMinimumStayNights: 2,
+      roomTypeLimits: [
+        expect.objectContaining({ roomTypeId: studio, startingSellableLimitCount: 3 }),
+        expect.objectContaining({ roomTypeId: garden, startingSellableLimitCount: 1 }),
+      ],
+    });
+    // 02:00 UTC on 3 November is still 2 November in Los Angeles: the nights start there.
+    expect(steps[2]![1]["horizon"]).toEqual({ from: "2026-11-02", through: "2027-03-31" });
+
+    // A hotel whose nights began on 3 November (set up that day) has none for 2 November: they start
+    // at 3 November then. A move east never retries.
+    const fresh = fake({
+      ...moved,
+      savedTimeZone: "America/Los_Angeles",
+      materialize: [{ ok: false, error: { code: "inventory_invariant_violation" } }],
+    });
+    expect(
+      await refreshPmsOperatingCalendarRooms(fresh.ports, actor, { acceptTimeZone: true }),
+    ).toMatchObject({ outcome: "refreshed" });
+    expect(
+      fresh.calls
+        .filter(([name]) => name === "materialize")
+        .map(([, command]) => command["horizon"]),
+    ).toEqual([
+      { from: "2026-11-02", through: "2027-03-31" },
+      { from: "2026-11-03", through: "2027-03-31" },
+    ]);
+    const east = fake({
+      ...moved,
+      savedTimeZone: "Pacific/Kiritimati",
+      materialize: [{ ok: false, error: { code: "inventory_invariant_violation" } }],
+    });
+    expect(
+      await refreshPmsOperatingCalendarRooms(east.ports, actor, { acceptTimeZone: true }),
+    ).toMatchObject({ outcome: "failed", step: "inventory" });
+    expect(east.calls.filter(([name]) => name === "materialize")).toHaveLength(1);
+  });
+
   it("reports a refused preview, save or night preparation without going further", async () => {
     const refused = { ok: false, error: { code: "setup_scope_unavailable" } };
     const preview = fake({ preview: refused });
@@ -381,6 +454,47 @@ describe("room commands bring the calendar along (VAY-2469)", () => {
       refused,
     );
     expect(calls.map(([name]) => name)).toEqual(["crowded", "preview", "save", "materialize"]);
+  });
+
+  it("follows an AI room change only on a property its limits allow (VAY-2522)", async () => {
+    // The refresh checks the user's rights without the AI's limits, so it must not run where they
+    // refuse, not even after the refused command.
+    const refused = { ok: false as const, error: { code: "setup_scope_unavailable" } };
+    for (const narrowing of [
+      { access: "read", propertyIds: [propertyId] },
+      { access: "change", propertyIds: [organizationId] },
+      { access: "change", propertyIds: [] },
+    ] as const) {
+      const { ports, calls } = fake();
+      const query = vi.spyOn(ports.pool, "query");
+      expect(
+        await followRoomChangesInCalendar(
+          async () => refused,
+          ports,
+          vi.fn(),
+        )({
+          ...command,
+          narrowing,
+        }),
+      ).toBe(refused);
+      expect(calls).toEqual([]);
+      expect(query).not.toHaveBeenCalled();
+    }
+    // An AI change the limits allow, and a person's change (null), both bring the calendar along.
+    for (const narrowing of [{ access: "change", propertyIds: [propertyId] }, null] as const) {
+      const allowed = fake();
+      await followRoomChangesInCalendar(
+        async () => ({ ok: true }),
+        allowed.ports,
+        vi.fn(),
+      )({ ...command, narrowing });
+      expect(allowed.calls.map(([name]) => name)).toEqual([
+        "crowded",
+        "preview",
+        "save",
+        "materialize",
+      ]);
+    }
   });
 
   it("logs a calendar that can't follow, and still answers with the room change", async () => {

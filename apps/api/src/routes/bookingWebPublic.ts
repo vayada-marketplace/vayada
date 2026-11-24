@@ -64,6 +64,7 @@ import type { ExternalChangePresentationPort } from "../domains/booking/external
 import {
   bestBookingPromotion,
   BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
+  BOOKING_WEB_PAGE_VIEW_EVENT,
   isFunnelId,
   isManualPricingPaymentMethod,
   parseAccountBookingPageSlug,
@@ -87,13 +88,14 @@ import type { BillingConfigReadModel, BillingConfigReadPort } from "@vayada/doma
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { isVayadaPaymentAccountRef, stripeCallAccountRef } from "../domains/vayadaPaymentStripe.js";
 import { onlineCardReadySql } from "../domains/financeOnlineCardReadySql.js";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 import {
   bookedMealDescription,
   projectBookingRoomSelection,
 } from "../domains/bookingRoomSelectionProjection.js";
 import { appendMissingAddonRevenueEvidence } from "../domains/bookingAddonRevenueEvidence.js";
+import { reverseTargetPromoRedemption } from "../domains/currentQuotePromoRedemption.js";
 import type { BankTransferBookingOperations } from "../domains/financeBankTransferBooking.js";
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
 import { createBookingLookupRateLimit } from "../platform/bookingLookupRateLimit.js";
@@ -239,7 +241,8 @@ export type BookingWebTelemetryEvent = {
   hotelSlug: string;
   eventType: string;
   eventId: string;
-  sessionId: string;
+  /** Null for an anonymous page view (VAY-2592). */
+  sessionId: string | null;
   occurredAt: Date;
   /** Only to tell bots apart; not stored. */
   userAgent?: string;
@@ -1060,9 +1063,14 @@ export async function registerBookingWebPublicRoutes(
       // string.
       const body =
         typeof request.body === "string" ? parseTelemetryEventBody(request.body) : request.body;
+      // VAY-2592: a page view is counted without consent, so it may carry nothing but the hotel and
+      // its type. The id is made here and the time kept to the quarter hour, so no client can
+      // send a value that links its views, and a view can't be matched to an exact request.
+      const pageView = body?.eventType === BOOKING_WEB_PAGE_VIEW_EVENT;
       if (
-        body?.analyticsConsent !== true ||
-        body?.consentVersion !== BOOKING_WEB_ANALYTICS_CONSENT_VERSION
+        !pageView &&
+        (body?.analyticsConsent !== true ||
+          body?.consentVersion !== BOOKING_WEB_ANALYTICS_CONSENT_VERSION)
       ) {
         return reply.header("Cache-Control", "no-store").status(204).send();
       }
@@ -1071,14 +1079,25 @@ export async function registerBookingWebPublicRoutes(
       if (!hotelSlug || !eventType) {
         throw createHttpError(400, "Hotel slug and event type are required.");
       }
-      const metadata = parseFunnelEventMetadata(eventType, body?.metadata);
-      const eventId = firstString(body?.eventId, body?.event_id);
-      const sessionId = firstString(body?.sessionId, body?.session_id);
-      if (!metadata || !isFunnelId(eventId) || !isFunnelId(sessionId)) {
-        throw createHttpError(400, "Invalid booking funnel event.");
+      let eventId = firstString(body?.eventId, body?.event_id);
+      let metadata: Record<string, unknown> | null;
+      let sessionId: string | null;
+      if (pageView) {
+        if (Object.keys(body ?? {}).some((key) => !PAGE_VIEW_FIELDS.has(key))) {
+          throw createHttpError(400, "Invalid booking page view.");
+        }
+        eventId = randomUUID();
+        metadata = {};
+        sessionId = null;
+      } else {
+        metadata = parseFunnelEventMetadata(eventType, body?.metadata);
+        sessionId = firstString(body?.sessionId, body?.session_id) ?? null;
+        if (!metadata || !isFunnelId(eventId) || !isFunnelId(sessionId)) {
+          throw createHttpError(400, "Invalid booking funnel event.");
+        }
       }
-      // Per address, session and hotel, before any database read (VAY-2214). Nothing is stored
-      // for a refused event, and the browser ignores the answer.
+      // Per address, session (page views have none) and hotel, before any database read
+      // (VAY-2214). Nothing is stored for a refused event, and the browser ignores the answer.
       const limit = eventRateLimit({ address: request.ip, sessionId, hotelSlug });
       if (!limit.allowed) {
         // No address or session; the slug names the hotel being flooded.
@@ -1108,7 +1127,7 @@ export async function registerBookingWebPublicRoutes(
           eventType,
           eventId,
           sessionId,
-          occurredAt: now(),
+          occurredAt: pageView ? quarterHour(now()) : now(),
           userAgent: request.headers["user-agent"],
           metadata,
         });
@@ -1118,6 +1137,15 @@ export async function registerBookingWebPublicRoutes(
       return reply.status(204).send();
     },
   );
+}
+
+/** The only fields an anonymous page view may send (VAY-2592). */
+const PAGE_VIEW_FIELDS = new Set(["hotelSlug", "eventType"]);
+
+/** The start of the quarter hour: every time zone's offset is a multiple of 15 minutes, so a page
+ * view still lands on the right local day. */
+function quarterHour(at: Date): Date {
+  return new Date(Math.floor(at.getTime() / 900_000) * 900_000);
 }
 
 /**
@@ -2091,7 +2119,8 @@ export function createTargetBookingWebCheckoutAdapter(
     async getPricingOffers(slug) {
       let offers;
       try {
-        offers = await pricingOffers.read(slug);
+        // VAY-2583: with the reason when guests can pay for no rate (contact the hotel).
+        offers = await pricingOffers.readForGuests(slug);
       } catch (error) {
         throw Object.assign(
           new Error("Pricing offers temporarily unavailable.", { cause: error }),
@@ -5232,32 +5261,6 @@ export async function redeemTargetPromo(
   );
   if (redemption.rows.length !== 1)
     throw createHttpError(409, "Promo redemption changed. Please refresh.");
-}
-
-export async function reverseTargetPromoRedemption(
-  pool: BookingWebQueryExecutor,
-  propertyId: string,
-  guestBookingId: string,
-  occurredAt: Date,
-): Promise<void> {
-  await pool.query(
-    `WITH reversed AS (
-       UPDATE booking.promo_applications
-          SET application_status = 'reversed',
-              metadata = metadata || jsonb_build_object('reversedAt', $3::text)
-        WHERE property_id = $1::uuid
-          AND guest_booking_id = $2::uuid
-          AND application_status = 'applied'
-      RETURNING promo_definition_id
-     )
-     UPDATE booking.promo_definitions promo
-        SET current_uses = GREATEST(promo.current_uses - 1, 0),
-            updated_at = $3::timestamptz
-       FROM reversed
-      WHERE promo.id = reversed.promo_definition_id
-        AND promo.property_id = $1::uuid`,
-    [propertyId, guestBookingId, occurredAt.toISOString()],
-  );
 }
 
 export async function enqueuePmsReservationHandoff(

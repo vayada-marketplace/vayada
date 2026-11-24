@@ -99,6 +99,7 @@ export async function resolveRequestContext(
         providerUserId: session.workosUserId,
         sessionId: session.sessionId ?? undefined,
         providerOrganizationId: session.workosOrgId,
+        ...(session.impersonated ? { impersonated: true as const } : {}),
       },
       email: user.email,
       name: user.name,

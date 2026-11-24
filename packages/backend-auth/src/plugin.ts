@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from "fastify";
 import fp from "fastify-plugin";
 
+import { type DelegatedRouteGate, takeDelegatedContext } from "./delegatedScope.js";
 import { AuthError, AuthorizationResolutionError, UnauthorizedError } from "./errors.js";
 import { type IdentityRepository } from "./repository.js";
 import { type AuthorizationResolver, resolveRequestContext } from "./resolve.js";
@@ -32,6 +33,11 @@ export type BackendAuthPluginOptions = {
    * tokens there, which are never looked at as WorkOS tokens. Skipping only ever leaves authContext null.
    */
   skipPathPrefixes?: readonly string[];
+  /**
+   * Routes an AI action may run as the user (VAY-2506). Without a gate, every delegated request
+   * is refused.
+   */
+  delegation?: DelegatedRouteGate;
 };
 
 declare module "fastify" {
@@ -56,6 +62,13 @@ const backendAuthPluginFn: FastifyPluginAsync<BackendAuthPluginOptions> = async 
   app.decorateRequest(CONTEXT_DECORATION, null);
 
   app.addHook("onRequest", async (request: FastifyRequest) => {
+    // An AI action's one-shot delegated scope (VAY-2506) wins over the bearer path. Outside
+    // requests can never carry one; a refused scope throws a 403.
+    const delegated = takeDelegatedContext(request, options.delegation, options.skipPathPrefixes);
+    if (delegated) {
+      request.authContext = delegated;
+      return;
+    }
     if (options.skipPathPrefixes?.some((prefix) => request.url.startsWith(prefix))) return;
     const token = extractBearerToken(request.headers.authorization);
     if (!token) return;

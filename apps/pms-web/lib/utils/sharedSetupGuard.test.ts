@@ -167,6 +167,41 @@ describe("resolvePmsSetupGuard", () => {
     expect(storage.getItem("selectedHotelId")).toBe("property-remaining");
   });
 
+  it("forgets a remembered property it can't open and shows a login with several properties the picker (VAY-2585)", async () => {
+    const storage = memoryStorage({
+      selectedHotelId: "property-removed",
+      selectedSharedPropertyId: "property-removed",
+    });
+    const api = {
+      getStatus: vi.fn(async (input: { propertyId?: string | null }) => {
+        if (input.propertyId) {
+          throw Object.assign(new Error("Missing property resource link"), {
+            status: 403,
+            data: { code: "missing_property_resource_link" },
+          });
+        }
+        return withoutChosenProperty(["property-1", "property-2", "property-3"]);
+      }),
+    };
+
+    await expect(resolvePmsSetupGuard("/dashboard", api, storage)).resolves.toMatchObject({
+      action: "redirect_to_setup",
+      redirectPath: "/choose-property",
+    });
+    expect(api.getStatus).toHaveBeenCalledTimes(2);
+    expect(storage.getItem("selectedHotelId")).toBeNull();
+    expect(storage.getItem("selectedSharedPropertyId")).toBeNull();
+  });
+
+  it("still sends a login with no property to setup", async () => {
+    const api = { getStatus: vi.fn(async () => withoutChosenProperty([])) };
+
+    await expect(resolvePmsSetupGuard("/dashboard", api, memoryStorage())).resolves.toMatchObject({
+      action: "redirect_to_setup",
+      redirectPath: "/setup?entryProduct=pms&returnProduct=pms&returnTo=%2Fdashboard",
+    });
+  });
+
   it("does not replace an invalid explicit setup-exit property with another property", async () => {
     const missingPropertyError = Object.assign(new Error("Missing property resource link"), {
       status: 403,
@@ -278,6 +313,32 @@ function status(input: {
         : [],
     },
     updatedAt: "2026-07-26T10:00:00.000Z",
+  };
+}
+
+/** The API's answer without a chosen property: setup, whether the login has none or several. */
+function withoutChosenProperty(propertyIds: string[]): AdaptiveHotelSetupStatus {
+  const base = status({ product: "pms", propertyId: "unused", decision: "setup_required" });
+  return {
+    ...base,
+    propertySelection: {
+      state: propertyIds.length === 0 ? "no_property" : "multiple_properties",
+      selectedPropertyId: null,
+      availableProperties: propertyIds.map((propertyId) => ({
+        propertyId,
+        publicId: propertyId,
+        displayName: propertyId,
+        locationSummary: null,
+      })),
+    },
+    entryDecision: {
+      requestedProduct: "pms",
+      propertyId: null,
+      decision: "setup_required",
+      destinationRouteKey: "hotel_setup",
+      reasonCode: "property_selection_required",
+    },
+    setupPlan: null,
   };
 }
 

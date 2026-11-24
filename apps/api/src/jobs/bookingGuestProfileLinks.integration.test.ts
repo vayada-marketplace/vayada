@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -152,6 +153,62 @@ describe.skipIf(!TEST_DATABASE_URL)("Guest profile links (runtime login)", () =>
        VALUES ($1::uuid, 'guest_booking.accepted', NULL, 'confirmed', 'property_user')`,
       [bookingId],
     );
+
+  // VAY-2577: a booking with a Channex mapping is a channel booking. Replica mode skips the binding
+  // triggers a real connection needs; this suite doesn't test those.
+  // One Channex connection per property (the table allows one per provider).
+  const connections = new Map<string, string>();
+  const mapToChannel = async (propertyId: string, bookingId: string) => {
+    const client = await admin.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL session_replication_role = replica");
+      let connectionId = connections.get(propertyId);
+      if (!connectionId) {
+        connectionId = randomUUID();
+        await client.query(
+          `INSERT INTO pms.channel_connections
+             (id, property_id, provider, connection_status, external_property_id)
+           VALUES ($1::uuid, $2::uuid, 'channex', 'connected', $3)`,
+          [connectionId, propertyId, `${PREFIX}${connectionId}`],
+        );
+        connections.set(propertyId, connectionId);
+      }
+      await client.query(
+        `INSERT INTO pms.channel_booking_mappings
+           (property_id, connection_id, guest_booking_id, external_booking_id)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4)`,
+        [propertyId, connectionId, bookingId, `${PREFIX}${bookingId}`],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  };
+
+  const remark = async () => {
+    const sql = await readFile(
+      new URL(
+        "../../../../packages/backend-migration/migrations/0554_booking_guest_profile_channel_contact_remark.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const client = await admin.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(sql);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  };
 
   const link = async (bookingGuestId: string) =>
     (
@@ -560,6 +617,90 @@ describe.skipIf(!TEST_DATABASE_URL)("Guest profile links (runtime login)", () =>
     });
   });
 
+  // VAY-2577: a channel stay that closed while its contact was hidden never reached the guest
+  // record; migration 0554 marks it once and the next run fills only the record's empty fields.
+  it("fills the guest record from a channel stay that closed while its contact was hidden (0554)", async () => {
+    const closed = (first: string, last: string, contact: Pick<Guest, "email" | "phone">) =>
+      book(
+        propertyB,
+        { channel: "booking_com", status: "canceled", accepted: false },
+        { first, last, ...contact },
+      );
+    const ota = await closed("Lea", "Brandt", {
+      email: "lea.k2@guest.booking.test",
+      phone: "+49 30 1234567",
+    });
+    const kept = await closed("Ove", "Holm", {
+      email: "ove.x@guest.booking.test",
+      phone: "+47 22 123456",
+    });
+    const masked = await closed("Ina", "Lund", { email: "***", phone: "+46 8 1234567" });
+    const renamed = await closed("Max", "Wolf", { email: "max.w@guest.booking.test" });
+    const desk = await book(
+      propertyB,
+      { status: "canceled", accepted: false },
+      { first: "Jan", last: "Roth", email: "jan@example.test" },
+    );
+    await sweep();
+    expect(await link(ota.guestIds[0]!)).toMatchObject({
+      link: "created",
+      deferred: false,
+      email: null,
+      phone: null,
+    });
+    // Since then staff entered Ove's email and renamed Max on their guest records.
+    const profileOf = async (stay: { guestIds: string[] }) =>
+      (await link(stay.guestIds[0]!)).profileId;
+    await admin.query("UPDATE booking.guest_profiles SET email = $2 WHERE id = $1::uuid", [
+      await profileOf(kept),
+      "ove@example.test",
+    ]);
+    await admin.query("UPDATE booking.guest_profiles SET first_name = $2 WHERE id = $1::uuid", [
+      await profileOf(renamed),
+      "Maximilian",
+    ]);
+
+    // Since #4220 the Channex mapping shows the contact, but the job doesn't read a closed row again.
+    for (const stay of [ota, kept, masked, renamed]) await mapToChannel(propertyB, stay.bookingId);
+    await sweep();
+    expect(await link(ota.guestIds[0]!)).toMatchObject({ email: null, phone: null });
+
+    await remark();
+    const deferred = async (stay: { guestIds: string[] }) =>
+      (await link(stay.guestIds[0]!)).deferred;
+    expect(await deferred(ota)).toBe(true);
+    expect(await deferred(kept)).toBe(true);
+    // Not marked: a stay holding Channex's mask (the job would copy it), a record whose name staff
+    // changed (re-reading would rename it back), and a desk booking (its contact stays hidden).
+    expect(await deferred(masked)).toBe(false);
+    expect(await deferred(renamed)).toBe(false);
+    expect(await deferred(desk)).toBe(false);
+    await sweep();
+    expect(await link(ota.guestIds[0]!)).toMatchObject({
+      deferred: false,
+      synced: true,
+      email: "lea.k2@guest.booking.test",
+      phone: "+49 30 1234567",
+    });
+    // A channel stay only fills what the record lacks.
+    expect(await link(kept.guestIds[0]!)).toMatchObject({
+      deferred: false,
+      email: "ove@example.test",
+      phone: "+47 22 123456",
+    });
+    expect(await link(masked.guestIds[0]!)).toMatchObject({ email: null, phone: null });
+    expect(await link(renamed.guestIds[0]!)).toMatchObject({
+      firstName: "Maximilian",
+      email: null,
+    });
+    expect((await link(desk.guestIds[0]!)).email).toBeNull();
+
+    // Nothing is left to fill, so a second run marks nothing.
+    await remark();
+    expect(await deferred(ota)).toBe(false);
+    expect(await deferred(kept)).toBe(false);
+  });
+
   it("linked every row of this suite without a row error", async () => {
     const ours = await admin.query<{ id: string }>(
       `SELECT guest.id::text AS id FROM booking.booking_guests guest
@@ -611,6 +752,10 @@ async function cleanup(pool: pg.Pool): Promise<void> {
       "DELETE FROM platform.product_audit_events WHERE property_id = ANY($1::uuid[])",
       [properties],
     );
+    // VAY-2577's channel fixture (its mappings went with the bookings).
+    await client.query("DELETE FROM pms.channel_connections WHERE property_id = ANY($1::uuid[])", [
+      properties,
+    ]);
     await client.query(
       "DELETE FROM identity.organization_resource_links WHERE resource_id = ANY($1::text[])",
       [properties],

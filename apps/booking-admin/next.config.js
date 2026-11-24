@@ -13,6 +13,15 @@ const nextConfig = {
   logging: { incomingRequests: { ignore: [/^\/setup\/airbnb-return(?:\/|\?|$)/] } },
   async headers() {
     return [
+      // VAY-2516: no other site may frame any page (a hidden click on a Yes). Enforced here because
+      // frame-ancestors does nothing in the report-only policy the proxy sends.
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+        ],
+      },
       // VAY-2436: a partner app's approval page must never sit in another site's frame (a hidden
       // "Allow" click), and its address carries the app's one-time request.
       {
@@ -39,7 +48,7 @@ const nextConfig = {
     ...(authPublicHostname ? [authPublicHostname] : []),
   ],
   output: "standalone",
-  transpilePackages: ["@vayada/feature-hub"],
+  transpilePackages: ["@vayada/assistant-ui", "@vayada/feature-hub", "@vayada/web-security"],
   turbopack: {
     root: path.join(__dirname, "../.."),
   },

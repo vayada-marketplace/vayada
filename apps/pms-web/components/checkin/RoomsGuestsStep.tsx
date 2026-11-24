@@ -24,6 +24,7 @@ export function RoomsGuestsStep({
   movedFrom,
   formInitial,
   lockedFields,
+  notProvided,
   onSaveGuest,
   guestFlush,
   onGuestUnsaved,
@@ -39,6 +40,8 @@ export function RoomsGuestsStep({
   movedFrom: Record<string, string>;
   formInitial: (guest: RegistrationGuest) => GuestFormValues;
   lockedFields: (guest: RegistrationGuest) => ReadonlySet<GuestLockableField>;
+  /** "Not provided by Airbnb" for a guest whose channel sent no email or phone (VAY-2577). */
+  notProvided?: (guest: RegistrationGuest) => string | null;
   /** Saves what changed since `saved`; `listed` gets a new guest's id as soon as it is listed. */
   onSaveGuest: (
     guest: RegistrationGuest,
@@ -326,6 +329,7 @@ export function RoomsGuestsStep({
                         settings={settingsFor(guest)}
                         rooms={rooms}
                         lockedFields={lockedFields(guest)}
+                        notProvided={notProvided?.(guest) ?? null}
                         canReadIdentity={canReadIdentity}
                         savedFilledFields={guest.registration?.filledFields ?? []}
                         onSave={saveGuest(guest)}

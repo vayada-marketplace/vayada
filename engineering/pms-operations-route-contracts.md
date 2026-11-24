@@ -359,11 +359,15 @@ VAY-783 implements the P2c checkout charge operational subset in `apps/api`.
 `GET /api/pms/properties/:propertyId/reservations/:guestBookingId/checkout-charges`
 uses the PMS operations read policy; `POST /checkout-charges`,
 `POST /checkout-charges/:chargeId/mark-paid`, and
-`POST /checkout-charges/:chargeId/waive` use the PMS operations manage policy
-and persist only `pms.booking_checkout_charges` operational state plus PMS audit
-events. The legacy F1a guard path
-`POST /checkout-charges/:chargeId/paid` remains as a compatibility alias for
-the same operational mark-paid command. The check-out command is still VAY-784
+`POST /checkout-charges/:chargeId/waive` persist only
+`pms.booking_checkout_charges` operational state plus PMS audit events. Creating
+a charge (VAY-2498) and, since VAY-2575, marking a charge paid or waived, like
+marking the booking paid (`POST .../mark-paid`), need `pms.reservation.update`,
+the desk key front desk holds for check-in and check-out, on the member's own
+properties. Waiving a charge that is already paid still needs the owner-only
+`pms.operations.manage`; otherwise it answers 400 `invalid_status_transition`. `POST /checkout-charges/:chargeId/paid` is the path PMS Web calls (one
+idempotency key per charge since VAY-2573); `/mark-paid` is an alias for the
+same operational mark-paid command. The check-out command is still VAY-784
 and is not implemented by this slice.
 
 `mark-paid` on checkout charges means a front-desk operator marked the
@@ -390,6 +394,13 @@ VAY-2373/2374 add the step-by-step check-in's data, outside `pmsOperations.ts`:
 - `POST .../reservations/:guestBookingId/mark-paid` takes an optional `settlementMethod` (`cash`,
   `manual_card`, `bank_transfer`, `other`): how staff took the money at the desk, recorded on the
   Finance payment instead of the booking's own method. Nothing is charged online.
+- Since VAY-2575, confirming a booking-page bank transfer or PayPal booking through `mark-paid`
+  needs the owner key `pms.operations.manage`. The one exception is a confirmed stay where the desk
+  took the money itself (`settlementMethod` `cash` or `manual_card`); a booking still waiting for
+  its payment needs the owner key with any method. Without it the command answers 403
+  `missing_permission` before anything is written. Pay-at-hotel bookings and a card deposit's
+  remainder stay on `pms.reservation.update` with any method. Only the account owner role holds
+  `pms.operations.manage`; staff roles, the Agency manager included, can't be given it.
 
 VAY-2420 adds guest profiles (`routes/pmsGuestProfiles.ts`, `booking.guest_profiles` and
 `booking.guest_notes`, migration 0527). A background job links every booking guest to one profile
@@ -494,6 +505,9 @@ routes for inventory, operational reservations, room assignment, check-in/out,
 notes, or guest operations. If F1a is not complete, paid checkout charges must
 be explicitly frozen or routed through an accepted finance contract for the
 rehearsal window; PMS operations must not implement provider settlement itself.
+Since VAY-2573 (2026-11-20) the freeze is off unless a setup turns it on
+(`pmsCheckoutChargeMarkPaidFreezeEnabled: true`): marking paid records PMS
+state only, as described in [`finance-route-contracts.md`](finance-route-contracts.md#f1a-pms-checkout-charge-settlement-bridge).
 
 ## First Implementation Tickets
 

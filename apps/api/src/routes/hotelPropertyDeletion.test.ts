@@ -1,4 +1,4 @@
-import type { LinkedResource } from "@vayada/backend-auth";
+import type { LinkedResource, RequestContext } from "@vayada/backend-auth";
 import type { HotelPropertyDeletionCheck } from "@vayada/domain-hotels";
 import Fastify from "fastify";
 import { describe, expect, it, vi } from "vitest";
@@ -93,6 +93,38 @@ describe("hotel property deletion routes", () => {
     expect(invalid.statusCode).toBe(400);
     expect(invalid.json()).toMatchObject({ code: "invalid_property_id" });
     expect(repository.check).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("lets an admin limited to property A reach only A (VAY-2574)", async () => {
+    const repository = fakeRepository();
+    const app = await routeApp(repository, {
+      propertyAccess: {
+        mode: "assigned",
+        roleKey: "hotel_owner",
+        accessOrigin: "agency",
+        assignedPropertyIds: [propertyA],
+      },
+    });
+
+    const readB = await app.inject({ method: "GET", url: checkUrl(propertyB), headers });
+    const writeB = await app.inject({
+      method: "POST",
+      url: deleteUrl(propertyB),
+      headers: deleteHeaders,
+      payload: { expectedLifecycleRevision: 3, confirmationName: "Escape Villa" },
+    });
+    expect(readB.statusCode).toBe(404);
+    expect(readB.json()).toMatchObject({ code: "property_not_found" });
+    expect(writeB.statusCode).toBe(404);
+    expect(repository.check).not.toHaveBeenCalled();
+    expect(repository.delete).not.toHaveBeenCalled();
+
+    const readA = await app.inject({ method: "GET", url: checkUrl(propertyA), headers });
+    expect(readA.statusCode).toBe(200);
+    expect(repository.check).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId, actorUserId, propertyId: propertyA }),
+    );
     await app.close();
   });
 
@@ -286,6 +318,7 @@ async function routeApp(
     roleKey?: string;
     kind?: "hotel_group" | "platform";
     membershipStatus?: "active" | "suspended";
+    propertyAccess?: RequestContext["membership"]["propertyAccess"];
   } = {},
 ) {
   const app = Fastify({ logger: false });
@@ -311,6 +344,7 @@ async function routeApp(
         roleKey: options.roleKey ?? "hotel_owner",
         workosRoleSlugs: ["hotel_admin"],
         permissions: ["hotel_catalog.setup.manage"],
+        ...(options.propertyAccess ? { propertyAccess: options.propertyAccess } : {}),
       },
       linkedResources: [link(propertyA), link(propertyB)],
       entitlements: [],

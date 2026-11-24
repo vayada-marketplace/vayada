@@ -19,6 +19,7 @@ export type SharedHotelSetupGuardDecision =
       redirectPath: null;
     }
   | {
+      /** Leaves the product for redirectPath: setup, or this app's property picker (VAY-2585). */
       action: "redirect_to_setup";
       propertyId: string | null;
       redirectPath: string;
@@ -51,10 +52,18 @@ export function resolveSharedHotelSetupGuardDecision(
   }
 
   const propertyId = entryDecision?.propertyId ?? status.propertySelection.selectedPropertyId;
+  // The API asks for a property both when the login has none (setup creates one) and when it
+  // has several and none is chosen: then the picker, not setup (VAY-2585). The picker is this app's
+  // own page, so it ignores setupBaseUrl.
+  const choosesProperty =
+    entryDecision?.reasonCode === "property_selection_required" &&
+    status.propertySelection.state === "multiple_properties";
   return {
     action: "redirect_to_setup",
     propertyId,
-    redirectPath: buildSharedHotelSetupRedirectPath({ ...input, propertyId }),
+    redirectPath: choosesProperty
+      ? "/choose-property"
+      : buildSharedHotelSetupRedirectPath({ ...input, propertyId }),
     entryDecision: entryDecision?.decision ?? "not_evaluated",
     reasonCode: entryDecision?.reasonCode ?? null,
   };
@@ -80,7 +89,7 @@ export async function resolveSharedHotelSetupGuard(
       propertyId: input.propertyId,
     });
   } catch (error) {
-    if (!input.propertyId || !isMissingPropertyResourceLinkError(error)) throw error;
+    if (!input.propertyId || !isUnopenablePropertyError(error)) throw error;
     input.onInvalidPropertyId?.();
     if (input.fallbackOnInvalidPropertyId === false) throw error;
     status = await api.getStatus({
@@ -117,7 +126,11 @@ function hasExplicitPropertyMismatch(
   );
 }
 
-function isMissingPropertyResourceLinkError(error: unknown): boolean {
+/**
+ * The login can't open the requested property: it was deleted (VAY-2493), or the login lost access
+ * to it (VAY-2585).
+ */
+function isUnopenablePropertyError(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
   const candidate = error as { status?: unknown; statusCode?: unknown; data?: unknown };
   const status = Number(candidate.status ?? candidate.statusCode);
@@ -125,7 +138,10 @@ function isMissingPropertyResourceLinkError(error: unknown): boolean {
     typeof candidate.data === "object" && candidate.data !== null
       ? (candidate.data as { code?: unknown })
       : null;
-  return status === 403 && data?.code === "missing_property_resource_link";
+  return (
+    status === 403 &&
+    (data?.code === "missing_property_resource_link" || data?.code === "property_access_denied")
+  );
 }
 
 export function buildSharedHotelSetupRedirectPath(input: {

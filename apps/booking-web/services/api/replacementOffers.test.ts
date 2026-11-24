@@ -418,3 +418,26 @@ it("keeps a partial refund's last refund day, when the API sends one (VAY-2406)"
     { kind: "partial_refund" },
   ]);
 });
+
+it("says why no room is listed when guests can't pay for any rate, and /book refuses it (VAY-2583)", async () => {
+  // A fresh response each call (a body is read once).
+  const catalog = (body: Record<string, unknown>) =>
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () => new Response(JSON.stringify({ version: "public-pricing-offers.v1", ...body })),
+      ),
+    );
+  catalog({ rooms: [], unavailable: "no_payment_method" });
+  expect(await getReplacementCatalog("hotel")).toEqual({
+    rooms: [],
+    locationMap: null,
+    detailsMap: null,
+    roomSorting: null,
+    unavailable: "no_payment_method",
+  });
+  await expect(getReplacementOffers("hotel")).rejects.toThrow("Room options are not available.");
+  // A reason only with no rooms, and only one the page knows.
+  catalog({ rooms: [], unavailable: "something_else" });
+  expect(await getReplacementCatalog("hotel")).not.toHaveProperty("unavailable");
+});

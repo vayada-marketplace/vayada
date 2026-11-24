@@ -5,6 +5,7 @@ import { mockSetupChecklistUnavailable } from "./setupChecklistMocks";
 import { mockHotelAccountAgreements } from "./hotelAccountAgreementsMocks";
 import { mockGoogleMaps } from "./googleMapsFake";
 import { checkinSettingsResponse } from "./checkinSettingsMocks";
+import { fulfillCorsPreflight } from "./cors";
 
 export const PMS_WEB_PROPERTY_ID = "f6853000-0000-4000-8000-000000000001";
 export const PMS_WEB_ROOM_TYPE_ID = "room_type_alpine_suite";
@@ -352,6 +353,35 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
     .context()
     .route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/guest-stay-times`, (route) =>
       route.fulfill({ json: pmsWebStayTimes(null) }),
+    );
+  // The in-app assistant (VAY-2519) is switched off, as in production: its routes are not there (404), so
+  // the header shows no "Ask AI". A context route, so a spec's own page.route wins.
+  await page.context().route(/\/api\/ai\/assistant\//, (route) =>
+    route.request().method() === "OPTIONS"
+      ? fulfillCorsPreflight(route)
+      : route.fulfill({
+          status: 404,
+          json: { statusCode: 404, code: "not_found", message: "Not found" },
+        }),
+  );
+  // The top bar's notifications bell (VAY-2591): nothing yet. A context route, so a spec's own page.route wins.
+  await page
+    .context()
+    .route(
+      /\/api\/booking\/properties\/[^/]+\/notifications(\/(read|read-all|unread|done))?$/,
+      (route) =>
+        route.request().method() === "GET"
+          ? route.fulfill({
+              json: {
+                generatedAt: new Date().toISOString(),
+                timeZone: "Europe/Berlin",
+                items: [],
+                syncAlert: null,
+                unread: { all: 0, bookings: 0, needsAction: 0, updates: 0 },
+                badge: "none",
+              },
+            })
+          : route.fulfill({ status: 204 }),
     );
   // The room Location box loads Google Maps when the dev server has a key (CI's is a fake, VAY-2126): never the
   // real script. A context route, so a spec's own mockGoogleMaps(page, ...) wins.

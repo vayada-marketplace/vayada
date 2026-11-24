@@ -968,6 +968,10 @@ export function createTargetPmsOperationsCommandRepository(
           if (charge.status === "waived" || charge.status === "void") {
             return checkoutChargeInvalidTransition(charge.status, "waived");
           }
+          // VAY-2575: undoing a paid charge stays with the owner key.
+          if (charge.status === "paid" && command.allowWaivePaid !== true) {
+            return checkoutChargeInvalidTransition(charge.status, "waived");
+          }
           return updateCheckoutChargeStatus(client, command, "waived", acceptedAt);
         },
       });
@@ -4154,7 +4158,9 @@ function checkoutChargeCommandFingerprint(
     | PmsCheckoutChargeMarkPaidCommand
     | PmsCheckoutChargeWaiveCommand,
 ): unknown {
+  // VAY-2575: who may waive a paid charge is not part of what the request asked for.
   const { audit: _audit, ...fingerprint } = command;
+  if ("allowWaivePaid" in fingerprint) delete fingerprint.allowWaivePaid;
   return fingerprint;
 }
 
@@ -6094,6 +6100,9 @@ async function applyBookingMarkPaidCommandMutation(
   if (jsonObject(booking.bookingMetadata)["airbnbMoneyStatus"] === "unverified") {
     return invalidStatusTransition("booking_amount_unverified", "confirmed/paid");
   }
+  if (confirmsRemotePayment(booking, command) && command.allowRemoteConfirmation !== true) {
+    return remoteConfirmationNeedsOwner(booking.paymentMethod);
+  }
   const recordPayment = async (
     bookingMethod: FinanceBookingManualPaymentSettlementCommand["payload"]["paymentMethod"],
   ) => {
@@ -7759,6 +7768,35 @@ function operationalInvalidBody(
   return { ok: false, statusCode: 400, code: "invalid_body", message };
 }
 
+/**
+ * VAY-2575: a booking-page bank transfer or PayPal payment reaches the hotel away from the desk, so
+ * confirming it needs the owner key. On a confirmed stay the desk keeps recording money it took
+ * itself: cash, or the hotel's own card terminal. A booking still waiting for its payment is the
+ * owner's to confirm with any method. Pay-at-hotel bookings and a card deposit's remainder are desk
+ * payments with any method.
+ */
+function confirmsRemotePayment(
+  booking: { paymentMethod: string | null; lifecycleStatus: string },
+  command: Pick<PmsBookingLifecycleCommand, "settlementMethod">,
+): boolean {
+  if (booking.paymentMethod !== "bank_transfer" && booking.paymentMethod !== "paypal") return false;
+  if (booking.lifecycleStatus !== "confirmed") return true;
+  return command.settlementMethod !== "cash" && command.settlementMethod !== "manual_card";
+}
+
+function remoteConfirmationNeedsOwner(
+  paymentMethod: string | null,
+): Exclude<PmsOperationalCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 403,
+    code: "missing_permission",
+    message: `Only the account owner can confirm a ${
+      paymentMethod === "paypal" ? "PayPal payment" : "bank transfer"
+    }.`,
+  };
+}
+
 function invalidStatusTransition(
   fromStatus: string,
   toStatus: string,
@@ -8032,7 +8070,9 @@ function isOperationalReplayMeta(
 }
 
 function operationalCommandFingerprint(command: PmsOperationalCommand): unknown {
+  // VAY-2575: who may confirm a remote payment is not part of what the request asked for.
   const { audit: _audit, ...fingerprint } = command;
+  if ("allowRemoteConfirmation" in fingerprint) delete fingerprint.allowRemoteConfirmation;
   return fingerprint;
 }
 

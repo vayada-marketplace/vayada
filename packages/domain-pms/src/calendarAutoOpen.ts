@@ -46,6 +46,8 @@ export type PmsCalendarAutoOpenSetupError = Readonly<{
   code:
     | "operating_calendar_not_configured"
     | "operating_calendar_room_bindings_stale"
+    /** VAY-2582: the hotel's time zone changed since its calendar was saved. */
+    | "operating_calendar_time_zone_stale"
     | "physical_room_labels_unverified";
 }>;
 

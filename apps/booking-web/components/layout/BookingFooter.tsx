@@ -2,12 +2,25 @@
 
 import { useState } from "react";
 import FindBookingModal from "@/components/booking/FindBookingModal";
+import { useCurrency } from "@/contexts/CurrencyContext";
 import { useHotel } from "@/contexts/HotelContext";
 import { openAnalyticsChoices } from "@/services/api/analyticsConsent";
 import { useTranslations } from "next-intl";
 
-export default function BookingFooter() {
+/** `rateCredit`: the page shows prices converted with the exchange-rate provider's rates, whose
+ * terms ask for its credit link on such pages (VAY-2588; it used to sit above the room list). */
+export default function BookingFooter({
+  rateCredit = false,
+  amountsCurrency,
+}: {
+  rateCredit?: boolean;
+  /** The shown prices' own currency; the page's base (the hotel's) when not given. */
+  amountsCurrency?: string;
+}) {
   const { hotel } = useHotel();
+  const { attribution, baseCurrency, converts } = useCurrency();
+  const credit =
+    rateCredit && attribution && converts(amountsCurrency ?? baseCurrency) ? attribution : null;
   const t = useTranslations("common");
   const tm = useTranslations("myBooking");
   const ta = useTranslations("analyticsConsent");
@@ -140,6 +153,16 @@ export default function BookingFooter() {
               >
                 {ta("settings")}
               </button>
+              {credit && (
+                <a
+                  href={credit.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline underline-offset-4 transition-colors hover:text-white"
+                >
+                  {credit.label}
+                </a>
+              )}
             </div>
             <p>
               {t("poweredBy")} <span className="text-white font-semibold underline">vayada</span>

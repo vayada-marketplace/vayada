@@ -4,6 +4,12 @@ import { bookingCustomDomainLockKey } from "@vayada/domain-booking";
 import pg from "pg";
 import type { QueryResult, QueryResultRow } from "pg";
 
+import {
+  BOOKING_CUSTOM_DOMAIN_CNAME_TARGET,
+  type BookingCustomDomainCheckResult,
+  type BookingCustomDomainVerifier,
+} from "../domains/bookingCustomDomainVerification.js";
+import { projectPropertyPublicProfile } from "../platform/propertyPublicProfileProjection.js";
 import { enforcePropertyRoutePolicy, enforceRoutePolicy } from "./policy.js";
 
 export type BookingCustomDomainStatus = "not_configured" | "pending" | "verified" | "failed";
@@ -14,6 +20,8 @@ export type BookingCustomDomainDnsRecord = {
   name: string;
   value: string;
   status: "pending" | "verified" | "failed";
+  /** The name as typed in the hotel's DNS panel ("booking"), known after a check. */
+  host?: string;
 };
 
 export type BookingCustomDomainState = {
@@ -23,6 +31,8 @@ export type BookingCustomDomainState = {
   verificationStatus: "pending" | "verified" | "failed" | "disabled" | null;
   verifiedAt?: string | Date | null;
   updatedAt?: string | Date | null;
+  /** The Cloudflare hostname that next-api's check registered for this domain (VAY-2580). */
+  cloudflareHostnameId?: string | null;
 };
 
 export type BookingCustomDomainResponse = {
@@ -34,6 +44,8 @@ export type BookingCustomDomainResponse = {
   sslStatus: BookingCustomDomainSslStatus;
   dnsRecords: BookingCustomDomainDnsRecord[];
   verificationErrors: string[];
+  /** Why the domain is not verified yet, from the last check (VAY-2568); null otherwise. */
+  verificationIssue: BookingCustomDomainCheckResult["issue"];
   checkedAt: string | null;
   updatedAt: string | null;
 };
@@ -47,7 +59,25 @@ export type BookingCustomDomainRepository = {
   findByPropertyId(propertyId: string): Promise<BookingCustomDomainState | null>;
   upsertForPropertyId(propertyId: string, domain: string): Promise<BookingCustomDomainState | null>;
   deleteForPropertyId(propertyId: string): Promise<boolean>;
+  /** Stores a check's outcome for the property's current hostname; null when it changed since.
+   * `registeredHostnameId` is the Cloudflare hostname the check registered, kept on the row. */
+  recordCheckResult(
+    propertyId: string,
+    domain: string,
+    status: BookingCustomDomainCheckResult["status"],
+    registeredHostnameId?: string,
+  ): Promise<BookingCustomDomainState | null>;
+  /** Whether any property has this hostname saved (VAY-2580). */
+  isHostnameSaved(hostname: string): Promise<boolean>;
+  /** Re-projects the public profile read model, which carries the verified domain. */
+  projectPublicProfile(propertyId: string): Promise<void>;
   close?(): Promise<void>;
+};
+
+export type BookingCustomDomainRouteOptions = {
+  verifier?: BookingCustomDomainVerifier;
+  /** Republishes a live booking page, so its custom domain follows the verified one. */
+  refreshPublicPage?: (propertyId: string, request: FastifyRequest) => Promise<void>;
 };
 
 export type BookingCustomDomainPool = {
@@ -85,6 +115,7 @@ type TargetCustomDomainRow = {
   verificationStatus: "pending" | "verified" | "failed" | "disabled" | null;
   verifiedAt: string | Date | null;
   updatedAt: string | Date | null;
+  cloudflareHostnameId?: string | null;
 };
 
 const TARGET_BOOKING_CUSTOM_DOMAIN_SCOPED_PROPERTY_CTE = `scoped_property_candidates AS (
@@ -147,10 +178,11 @@ export function createTargetBookingCustomDomainRepository(config: {
            domain.hostname AS "domain",
            domain.verification_status AS "verificationStatus",
            domain.verified_at AS "verifiedAt",
-           domain.updated_at AS "updatedAt"
+           domain.updated_at AS "updatedAt",
+           domain.cloudflare_hostname_id AS "cloudflareHostnameId"
          FROM scoped_property
          LEFT JOIN LATERAL (
-           SELECT hostname, verification_status, verified_at, updated_at
+           SELECT hostname, verification_status, verified_at, updated_at, cloudflare_hostname_id
            FROM hotel_catalog.property_domains
            WHERE property_id = scoped_property.property_id
              AND verification_status <> 'disabled'
@@ -221,7 +253,8 @@ export function createTargetBookingCustomDomainRepository(config: {
            hostname AS "domain",
            verification_status AS "verificationStatus",
            verified_at AS "verifiedAt",
-           updated_at AS "updatedAt"`,
+           updated_at AS "updatedAt",
+           cloudflare_hostname_id AS "cloudflareHostnameId"`,
         [propertyId, normalizedDomain, bookingCustomDomainLockKey(propertyId)],
       );
 
@@ -258,6 +291,49 @@ export function createTargetBookingCustomDomainRepository(config: {
 
       return Boolean(result.rows[0]);
     },
+    async recordCheckResult(propertyId, domain, status, registeredHostnameId) {
+      const result = await pool.query<TargetCustomDomainRow>(
+        `WITH safety_lock AS MATERIALIZED (
+           SELECT pg_advisory_xact_lock(hashtextextended($4,0))
+         )
+         UPDATE hotel_catalog.property_domains
+            SET verification_status = $3::text,
+                canonical_when_verified = ($3::text = 'verified'),
+                verified_at = CASE WHEN $3::text = 'verified' THEN now() END,
+                cloudflare_hostname_id = COALESCE($5::text, cloudflare_hostname_id),
+                updated_at = now()
+          WHERE property_id = $1::uuid
+            AND hostname = $2
+            AND verification_status <> 'disabled'
+            AND EXISTS (SELECT 1 FROM safety_lock)
+         RETURNING
+           property_id::text AS "propertyId",
+           hostname AS "domain",
+           verification_status AS "verificationStatus",
+           verified_at AS "verifiedAt",
+           updated_at AS "updatedAt",
+           cloudflare_hostname_id AS "cloudflareHostnameId"`,
+        [
+          propertyId,
+          domain,
+          status,
+          bookingCustomDomainLockKey(propertyId),
+          registeredHostnameId ?? null,
+        ],
+      );
+      const row = result.rows[0];
+      return row ? toState(propertyId, row) : null;
+    },
+    async isHostnameSaved(hostname) {
+      const result = await pool.query(
+        `SELECT 1 FROM hotel_catalog.property_domains WHERE hostname = $1 LIMIT 1`,
+        [hostname],
+      );
+      return result.rows.length > 0;
+    },
+    async projectPublicProfile(propertyId) {
+      await projectPropertyPublicProfile(pool, { propertyId });
+    },
     async close() {
       if (ownsPool) {
         await pool.end();
@@ -270,8 +346,56 @@ export async function registerBookingCustomDomainRoutes(
   app: FastifyInstance,
   repository: BookingCustomDomainRepository,
   propertyAccessRepository: PropertyAccessRepository,
+  options: BookingCustomDomainRouteOptions = {},
 ): Promise<void> {
   const authorizedPropertyIds = new WeakMap<FastifyRequest, string>();
+  // A live page shows the verified domain (and booking-web redirects to it), so every change of
+  // the verified domain republishes it. Fire and forget, like settings saves; failures are logged.
+  const refreshPublicPage = (propertyId: string, request: FastifyRequest) => {
+    options
+      .refreshPublicPage?.(propertyId, request)
+      .catch((error: unknown) =>
+        request.log.warn(
+          { err: error, propertyId },
+          "Booking page refresh after a custom-domain change failed",
+        ),
+      );
+  };
+  // A removed or replaced domain's Cloudflare hostname goes with it, if next-api's check registered
+  // it (VAY-2580); the old booking-api's hostnames are never touched. Awaited, so the hotel can add
+  // the domain again right after; a Cloudflare failure is logged (status and codes only) and the
+  // removal stands.
+  const releaseHostname = async (
+    domain: string | null,
+    hostnameId: string | null | undefined,
+    propertyId: string,
+    request: FastifyRequest,
+  ) => {
+    if (!domain || !hostnameId || !options.verifier) return;
+    const context = { propertyId, domain, hostnameId };
+    try {
+      // Saved again meanwhile (another tab, or another hotel): its check may already use it.
+      if (await repository.isHostnameSaved(domain)) {
+        request.log.warn(
+          context,
+          "Kept a removed custom domain's Cloudflare hostname: saved again",
+        );
+        return;
+      }
+      const outcome = await options.verifier.release(hostnameId);
+      request.log.info(
+        { ...context, outcome },
+        outcome === "deleted"
+          ? "Deleted a removed custom domain's Cloudflare hostname"
+          : "A removed custom domain's Cloudflare hostname was already gone",
+      );
+    } catch (error) {
+      request.log.warn(
+        { ...context, err: error },
+        "Deleting a removed custom domain's Cloudflare hostname failed",
+      );
+    }
+  };
   const authorize = async (request: FastifyRequest, reply: FastifyReply) => {
     const { hotelId } = request.params as BookingHotelParams;
     const propertyId = await enforceBookingCustomDomainAccess(
@@ -341,6 +465,12 @@ export async function registerBookingCustomDomainRoutes(
         });
       }
 
+      // Saving the verified domain again keeps it verified (and on the live page) as it is.
+      const previous = await repository.findByPropertyId(propertyId).catch(() => null);
+      if (previous?.domain === parsed.value.domain && previous.verificationStatus === "verified") {
+        return toBookingCustomDomainResponse({ ...previous, hotelId });
+      }
+
       let state: BookingCustomDomainState | null;
       try {
         state = await repository.upsertForPropertyId(propertyId, parsed.value.domain);
@@ -372,7 +502,135 @@ export async function registerBookingCustomDomainRoutes(
         });
       }
 
+      if (previous?.domain && previous.domain !== state.domain) {
+        await releaseHostname(previous.domain, previous.cloudflareHostnameId, propertyId, request);
+      }
+      // The verified domain was replaced: the live page must stop using it. When unsure, refresh.
+      if (!previous || previous.verificationStatus === "verified") {
+        refreshPublicPage(propertyId, request);
+      }
       return toBookingCustomDomainResponse({ ...state, hotelId });
+    },
+  );
+
+  app.post<{ Params: BookingHotelParams }>(
+    "/hotels/:hotelId/custom-domain/check",
+    { onRequest: authorize },
+    async (request, reply) => {
+      const { hotelId } = request.params;
+      const propertyId = authorizedPropertyIds.get(request)!;
+
+      let state: BookingCustomDomainState | null;
+      try {
+        state = await repository.findByPropertyId(propertyId);
+      } catch {
+        return sendBookingCustomDomainError(reply, {
+          statusCode: 500,
+          code: "read_model_unavailable",
+          category: "read_model",
+          message: "Booking custom-domain status is unavailable.",
+        });
+      }
+      if (!state) {
+        return sendBookingCustomDomainError(reply, {
+          statusCode: 404,
+          code: "not_found",
+          category: "read_model",
+          message: "Booking custom-domain target not found.",
+        });
+      }
+
+      // A verified domain stays verified; there is nothing to check without one.
+      const status = toContractStatus(state);
+      if ((status !== "pending" && status !== "failed") || !state.domain) {
+        return toBookingCustomDomainResponse({ ...state, hotelId });
+      }
+
+      const domain = state.domain;
+      let result: BookingCustomDomainCheckResult;
+      try {
+        if (!options.verifier) throw new Error("Custom-domain verification is not configured.");
+        result = await options.verifier.check(domain, propertyId);
+      } catch (error) {
+        request.log.warn({ err: error, propertyId, domain }, "Booking custom-domain check failed");
+        result = {
+          status: status === "failed" ? "failed" : "pending",
+          issue: { code: "check_unavailable", foundTarget: null },
+          recordHost: null,
+          errors: ["The domain could not be checked right now. Try again in a few minutes."],
+        };
+      }
+
+      if (result.issue?.code === "routing_pending") {
+        // Vayada's turn: platform's next_booking_custom_domains needs "<domain>" for this property.
+        request.log.warn(
+          { propertyId, domain },
+          "Custom domain is ready in Cloudflare but not routed to the new booking frontend",
+        );
+      }
+
+      if (
+        result.issue?.code !== "check_unavailable" &&
+        (result.status !== state.verificationStatus || result.registeredHostnameId)
+      ) {
+        let recorded: BookingCustomDomainState | null;
+        try {
+          recorded = await repository.recordCheckResult(
+            propertyId,
+            domain,
+            result.status,
+            result.registeredHostnameId,
+          );
+        } catch (error) {
+          request.log.error(
+            { err: error, propertyId, domain, registeredHostnameId: result.registeredHostnameId },
+            "Booking custom-domain check could not be saved",
+          );
+          return sendBookingCustomDomainError(reply, {
+            statusCode: 500,
+            code: "write_model_unavailable",
+            category: "write_model",
+            message: "Booking custom-domain check could not be saved.",
+          });
+        }
+        // The hotel replaced or removed the domain meanwhile: a hostname this check registered for it
+        // goes too, and the answer is what is stored now.
+        if (!recorded) {
+          await releaseHostname(domain, result.registeredHostnameId, propertyId, request);
+          const current = await repository.findByPropertyId(propertyId).catch(() => null);
+          if (current) return toBookingCustomDomainResponse({ ...current, hotelId });
+          return sendBookingCustomDomainError(reply, {
+            statusCode: 404,
+            code: "not_found",
+            category: "read_model",
+            message: "Booking custom-domain target not found.",
+          });
+        }
+        state = recorded;
+        // After the reply, best effort: the read model (PUT/DELETE clear it), then the live page.
+        if (recorded.verificationStatus === "verified") {
+          void repository
+            .projectPublicProfile(propertyId)
+            .catch((error: unknown) =>
+              request.log.warn(
+                { err: error, propertyId },
+                "Public profile projection after a custom-domain check failed",
+              ),
+            )
+            .then(() => refreshPublicPage(propertyId, request));
+        }
+      }
+
+      const response = toBookingCustomDomainResponse({ ...state, hotelId });
+      return {
+        ...response,
+        dnsRecords: response.dnsRecords.map((record) =>
+          result.recordHost ? { ...record, host: result.recordHost } : record,
+        ),
+        verificationErrors: result.errors.length > 0 ? result.errors : response.verificationErrors,
+        verificationIssue: result.issue,
+        checkedAt: new Date().toISOString(),
+      } satisfies BookingCustomDomainResponse;
     },
   );
 
@@ -383,6 +641,7 @@ export async function registerBookingCustomDomainRoutes(
       const { hotelId } = request.params;
       const propertyId = authorizedPropertyIds.get(request)!;
 
+      const previous = await repository.findByPropertyId(propertyId).catch(() => null);
       let deleted: boolean;
       try {
         deleted = await repository.deleteForPropertyId(propertyId);
@@ -404,6 +663,12 @@ export async function registerBookingCustomDomainRoutes(
         });
       }
 
+      if (previous) {
+        await releaseHostname(previous.domain, previous.cloudflareHostnameId, propertyId, request);
+      }
+      if (!previous || previous.verificationStatus === "verified") {
+        refreshPublicPage(propertyId, request);
+      }
       return reply.code(204).send();
     },
   );
@@ -587,7 +852,9 @@ function parseUpsertBookingCustomDomainBody(
   } else {
     const normalizedDomain = normalizeDomain(domain);
     if (!normalizedDomain) {
-      details.push("domain must be a hostname, not a URL, path, wildcard, localhost, or IP.");
+      details.push(
+        "domain must be a hostname, not a URL, path, wildcard, localhost, IP, or vayada.com address.",
+      );
     }
   }
 
@@ -616,13 +883,14 @@ function toBookingCustomDomainResponse(
           {
             type: "CNAME",
             name: domain,
-            value: "custom.booking.vayada.com",
+            value: BOOKING_CUSTOM_DOMAIN_CNAME_TARGET,
             status: status === "verified" ? "verified" : status === "failed" ? "failed" : "pending",
           },
         ]
       : [],
     verificationErrors:
       status === "failed" ? ["Domain verification failed. Check DNS records."] : [],
+    verificationIssue: null,
     checkedAt,
     updatedAt,
   };
@@ -636,6 +904,7 @@ function toState(hotelId: string, row: TargetCustomDomainRow): BookingCustomDoma
     verificationStatus: row.verificationStatus,
     verifiedAt: row.verifiedAt,
     updatedAt: row.updatedAt,
+    cloudflareHostnameId: row.cloudflareHostnameId ?? null,
   };
 }
 
@@ -666,6 +935,9 @@ function normalizeDomain(value: string): string | null {
     domain.startsWith("*.") ||
     domain === "localhost" ||
     domain.endsWith(".localhost") ||
+    // Vayada's own addresses (a hotel's *.next-booking.vayada.com page included) are not custom.
+    domain === "vayada.com" ||
+    domain.endsWith(".vayada.com") ||
     /^[\d.]+$/.test(domain)
   ) {
     return null;

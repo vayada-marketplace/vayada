@@ -26,7 +26,7 @@ it("words each way to pay, its payment lines and its button (VAY-2347)", () => {
     title: "Pay at the hotel",
     summary: "Nothing to pay now · pay on arrival",
     explanation:
-      "Nothing is charged now. You pay €240 at the hotel when you arrive. Your booking is confirmed straight away.",
+      "Nothing is charged now. You pay at the hotel when you arrive. Your booking is confirmed straight away.",
     box: [
       { label: "Pay now", value: "€0" },
       { label: "At the hotel", value: "€240" },
@@ -54,7 +54,7 @@ it("says nothing is charged until a request is accepted; bank transfer still wai
     t,
   );
   expect(hotel!.explanation).toBe(
-    "Nothing is charged now. If the hotel accepts your request, you pay €240 when you arrive. The hotel answers within 24 hours.",
+    "Nothing is charged now. If the hotel accepts your request, you pay when you arrive. The hotel answers within 24 hours.",
   );
   expect(hotel!.button).toBe("Send booking request");
   expect(hotel!.busy).toBe("Sending request…");
@@ -77,13 +77,23 @@ it("words card payments, holds and a part paid at the hotel", () => {
     box: [{ label: "Charged now", value: "€240" }],
     button: "Continue to card details",
   });
+  // VAY-2588: the sentences carry no amount; the box beside them shows it in the guest's currency.
+  expect(card(false, "€0").explanation).toBe(
+    "We charge the total to your card when you confirm. You enter your card details in the next step.",
+  );
   expect(card(false, "€168").explanation).toBe(
-    "We charge €72 to your card when you confirm, and you pay the rest, €168, at the hotel. You enter your card details in the next step.",
+    "We charge the amount due now to your card when you confirm, and you pay the rest at the hotel. You enter your card details in the next step.",
   );
   expect(card(false, "€168").box).toEqual([
     { label: "Charged now", value: "€72" },
     { label: "At the hotel", value: "€168" },
   ]);
+  expect(card(true, "€0").explanation).toBe(
+    "We place a hold for the total on your card. If the hotel declines or doesn’t reply within 24 hours, the hold is released. You enter your card details in the next step.",
+  );
+  expect(card(true, "€168").explanation).toBe(
+    "We place a hold for the amount due now on your card, and you pay the rest at the hotel. If the hotel declines or doesn’t reply within 24 hours, the hold is released. You enter your card details in the next step.",
+  );
   expect(card(true, "€0")).toMatchObject({
     summary: "Charged only when the hotel accepts",
     box: [
@@ -99,11 +109,14 @@ it("has every way to pay's words in all five languages", () => {
     for (const request of [false, true]) {
       for (const option of paymentMethodOptions(
         ["pay_at_property", "card", "bank_transfer", "paypal"],
-        { request, amounts: { total: "1", now: "2", later: "3", zero: "0" } },
+        { request, amounts: { total: "§T", now: "§N", later: "§L", zero: "§0" } },
         tr,
       )) {
         for (const text of [option.title, option.summary, option.explanation, option.button])
           expect(text, `${locale} ${option.method}`).not.toMatch(/reviewPay\.|^$/);
+        // VAY-2588: no sentence names an amount (it would be in the hotel's currency or a converted
+        // one); the payment box beside it does.
+        expect(option.explanation, `${locale} ${option.method}`).not.toContain("§");
       }
     }
   }

@@ -5,6 +5,7 @@ import { GuestFormPage } from "@/components/settings/GuestFormPage";
 import { MultiPropertyBookingPage } from "@/components/settings/MultiPropertyBookingPage";
 import { DataExportPage } from "@/components/settings/DataExportPage";
 import { DeleteAccountPage } from "@/components/settings/DeleteAccountPage";
+import { PayoutStatementPage } from "@/components/settings/PayoutStatementPage";
 import { PrivacyPage } from "@/components/settings/PrivacyPage";
 import { RoomFiltersPage } from "@/components/settings/RoomFiltersPage";
 import { RoomSortingPage } from "@/components/settings/RoomSortingPage";
@@ -31,6 +32,7 @@ export default async function SettingsRoute({
   if (page === "connected-apps") return <ConnectedAppsPage />;
   if (page === "data-export") return <DataExportPage />;
   if (page === "delete-account") return <DeleteAccountPage />;
+  if (page === "payouts") return <PayoutStatementPage />;
   if (!isSettingsPage(page)) notFound();
   return <SettingsSectionPage section={page} />;
 }

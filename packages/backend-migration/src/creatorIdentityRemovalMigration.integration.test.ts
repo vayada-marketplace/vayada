@@ -317,6 +317,8 @@ const REFERENCES = [
   "identity.organizations <- identity.account_admin_transfer_proofs(organization_id) c",
   "identity.organizations <- identity.organization_roles(organization_id) c",
   "identity.product_entitlements <- finance.billing_entitlements(identity_entitlement_id) n",
+  // 0551 (VAY-2591): who marked a notification done clears with the user; the done mark stays.
+  "identity.users <- booking.host_notification_done(done_by) n",
   // 0514 (VAY-2349): a removed user's notification read marks go with the user.
   "identity.users <- booking.host_notification_reads(user_id) c",
   "identity.users <- distribution.external_api_clients(created_by_user_id) n",
@@ -333,6 +335,18 @@ const REFERENCES = [
   // 0544 (VAY-2436): who approved or disconnected a partner app clears with the user.
   "identity.users <- distribution.partner_connections(approved_by_user_id) n",
   "identity.users <- distribution.partner_connections(revoked_by_user_id) n",
+  // 0550 (VAY-2504): an account's AI budget and usage records go with the account; the person
+  // behind a call or a budget change clears with the user.
+  "identity.organizations <- platform.ai_budgets(organization_id) c",
+  "identity.organizations <- platform.ai_usage_ledger(organization_id) c",
+  "identity.users <- platform.ai_budgets(updated_by_user_id) n",
+  "identity.users <- platform.ai_usage_ledger(user_id) n",
+  // 0552 (VAY-2518): assistant chats go with the account and with the user who wrote them.
+  "identity.organizations <- platform.ai_conversations(organization_id) c",
+  "identity.users <- platform.ai_conversations(user_id) c",
+  // 0553 (VAY-2524): an AI change, with the text it carries, goes with the account and the user.
+  "identity.organizations <- platform.ai_operations(organization_id) c",
+  "identity.users <- platform.ai_operations(user_id) c",
   // 0540 (VAY-2457): the agency page's header image clears with its media.
   "platform.media_objects <- booking.account_booking_pages(header_image_media_object_id) n",
   "platform.media_objects <- booking.booking_settings(header_logo_media_object_id) n",

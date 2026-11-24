@@ -81,7 +81,8 @@ const CORE_NAV_ITEMS: Omit<NavItem, "badge">[] = [
     labelKey: "layout.sidebar.reviews",
     href: "/reviews",
     icon: StarIcon,
-    requiredAny: ["pms.operations.read"],
+    // VAY-2575: reviews use the inbox keys, so front desk sees them.
+    requiredAny: ["pms.inbox.read"],
   },
   {
     labelKey: "layout.sidebar.financials",

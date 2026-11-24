@@ -293,15 +293,29 @@ describe("PMS operations command repository", () => {
     const paid = await repository.markCheckoutChargePaid(
       checkoutChargeMarkPaidCommand({ chargeId: create.charge.chargeId }),
     );
+    // VAY-2575: without the owner key, a paid charge can't be waived (it would undo money taken).
+    const deskWaive = await repository.waiveCheckoutCharge(
+      checkoutChargeWaiveCommand({
+        chargeId: create.charge.chargeId,
+        commandId: "cmd-checkout-charge-desk-waive",
+        idempotencyKey: "client-checkout-charge-desk-waive",
+      }),
+    );
     const waived = await repository.waiveCheckoutCharge(
-      checkoutChargeWaiveCommand({ chargeId: create.charge.chargeId }),
+      checkoutChargeWaiveCommand({ chargeId: create.charge.chargeId, allowWaivePaid: true }),
     );
     const replay = await repository.createCheckoutCharge(checkoutChargeCreateCommand());
+    // VAY-2573: a front desk retry of "paid" returns the first answer, even after a later waive.
+    const paidReplay = await repository.markCheckoutChargePaid(
+      checkoutChargeMarkPaidCommand({ chargeId: create.charge.chargeId }),
+    );
 
     expect(listed).toHaveLength(1);
     expect(paid.ok).toBe(true);
+    expect(deskWaive).toMatchObject({ ok: false, code: "invalid_status_transition" });
     expect(waived.ok).toBe(true);
     expect(replay).toEqual({ ...create, replayed: true });
+    expect(paidReplay).toEqual({ ...paid, replayed: true });
     if (!paid.ok || !waived.ok) {
       throw new Error("checkout charge state command unexpectedly failed");
     }
@@ -322,7 +336,8 @@ describe("PMS operations command repository", () => {
     });
     expect(waived.charge).toMatchObject({
       status: "waived",
-      waivedAt: "2026-08-14T17:02:00.000Z",
+      // The refused desk waive above used one clock tick.
+      waivedAt: "2026-08-14T17:03:00.000Z",
       operationalOwnership: { financeSettlementOwner: "finance", providerSettlement: false },
     });
     expect(create.commandMeta.sideEffects).toEqual(["audit_event"]);

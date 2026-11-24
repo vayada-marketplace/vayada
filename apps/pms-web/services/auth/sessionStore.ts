@@ -250,10 +250,20 @@ function persistPmsResourceSelection(session: AuthKitSessionResponse): void {
   const propertyIds = (session.resources?.[PMS_PROPERTY_RESOURCE_KEY] ?? [])
     .map((id) => id.trim())
     .filter(Boolean);
-  const storedPropertyId = [
+  const remembered = [
     localStorage.getItem(SELECTED_PMS_PROPERTY_ID_KEY),
     localStorage.getItem(SELECTED_SHARED_PROPERTY_ID_KEY),
-  ].find((id): id is string => Boolean(id && propertyIds.includes(id)));
+  ];
+  const storedPropertyId = remembered.find((id): id is string =>
+    Boolean(id && propertyIds.includes(id)),
+  );
+  // VAY-2585: a remembered property the login lost access to is forgotten; with several properties
+  // the setup guard then shows the picker instead of opening the first one.
+  if (!storedPropertyId && remembered.some(Boolean) && propertyIds.length > 1) {
+    localStorage.removeItem(SELECTED_SHARED_PROPERTY_ID_KEY);
+    localStorage.removeItem(SELECTED_PMS_PROPERTY_ID_KEY);
+    return;
+  }
   const propertyId = storedPropertyId ?? propertyIds[0];
   if (!propertyId) return;
   localStorage.setItem(SELECTED_SHARED_PROPERTY_ID_KEY, propertyId);

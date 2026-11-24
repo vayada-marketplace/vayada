@@ -38,9 +38,10 @@ import {
 import { GuestNotes } from "@/components/guests/GuestNotes";
 import { useGuestsSectionOn } from "@/lib/guests/useGuestsSectionOn";
 import { useGuestStayTimes } from "@/lib/settings/useGuestStayTimes";
+import { useHasPmsPermission } from "@/lib/settings/PmsAccessContext";
 import { guestDataSettingsService, type GuestDataSettings } from "@/services/guests";
 import { guestProfileEdit, withBookerEdit } from "@/lib/bookings/guestProfileEdit";
-import { isChannelBooking } from "@/lib/bookings/channelLabel";
+import { isChannelBooking, notProvidedByChannel } from "@/lib/bookings/channelLabel";
 import { formatServiceDays } from "@/lib/bookings/serviceDays";
 import { individualRoomsService, Room } from "@/services/rooms";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -1551,6 +1552,12 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
   // VAY-2205: a card deposit was paid when booking; the rest is paid at the hotel, often on arrival
   // or departure, so the stay may show as checked in or out.
+  // VAY-2575: a booking-page bank transfer or PayPal payment reaches the hotel away from the desk;
+  // only the owner key confirms it (the API refuses everyone else).
+  const holdsOwnerKey = useHasPmsPermission("pms.operations.manage");
+  const confirmsRemotePayment =
+    booking?.paymentMethod === "bank_transfer" || booking?.paymentMethod === "paypal";
+  const canConfirmPayment = !confirmsRemotePayment || holdsOwnerKey;
   const cardRestDue =
     booking?.paymentMethod === "card" &&
     booking.paymentStatus === "partially_paid" &&
@@ -1610,6 +1617,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const confirmFromLink = useRef(false);
   useEffect(() => {
     if (confirmFromLink.current || !booking?.awaitingPaymentConfirmation) return;
+    if (!canConfirmPayment) return;
     if (new URLSearchParams(window.location.search).get("confirm") !== "payment") return;
     confirmFromLink.current = true;
     // Reload or Back must not ask again (router.replace keeps the cached URL in Next 16).
@@ -1617,7 +1625,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     const deadline = booking.hostResponseDeadline;
     if (deadline && Date.now() >= new Date(deadline).getTime()) return;
     handleMarkPaid();
-  }, [booking, handleMarkPaid]);
+  }, [booking, canConfirmPayment, handleMarkPaid]);
 
   const handleSaveNote = async () => {
     const body = noteDraft.trim();
@@ -1921,6 +1929,10 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     booking.status === "expired" ||
     booking.status === "no_show";
   const hasDeadline = isPending && booking.hostResponseDeadline;
+  // VAY-2099: a card booking inside its payment window shows that deadline; until the guest's card
+  // is authorised there is nothing for the hotel to accept.
+  const cardNotAuthorised =
+    booking.paymentMethod === "card" && booking.paymentStatus !== "authorized";
   const hasAcceptedBankDeadline =
     booking.status === "confirmed" &&
     booking.paymentMethod === "bank_transfer" &&
@@ -1971,6 +1983,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   );
 
   const channelKey = normalizeChannelKey(booking.channel);
+  // VAY-2577: an email or phone the channel never sent says so, instead of a blank.
+  const contactNotProvided = notProvidedByChannel(booking.channel, t);
   const channelLabel =
     channelKey === "direct"
       ? t("calendar.channelDirect")
@@ -2754,18 +2768,24 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                       <CountdownTimer deadline={booking.hostResponseDeadline!} />
                     </div>
                   ) : null}
-                  <button
-                    onClick={handleMarkPaid}
-                    disabled={
-                      updating || paymentDeadlineExpired || booking.amountStatus === "unverified"
-                    }
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-                  >
-                    <CheckCircleIcon className="h-4 w-4" />
-                    {booking.paymentMethod === "bank_transfer"
-                      ? t("bookings.detail.markBankTransferReceived")
-                      : t("bookings.detail.markPayAtHotelReceived")}
-                  </button>
+                  {canConfirmPayment ? (
+                    <button
+                      onClick={handleMarkPaid}
+                      disabled={
+                        updating || paymentDeadlineExpired || booking.amountStatus === "unverified"
+                      }
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      <CheckCircleIcon className="h-4 w-4" />
+                      {booking.paymentMethod === "bank_transfer"
+                        ? t("bookings.detail.markBankTransferReceived")
+                        : t("bookings.detail.markPayAtHotelReceived")}
+                    </button>
+                  ) : (
+                    <p className="text-xs text-gray-500">
+                      {t("bookings.detail.ownerConfirmsPayment")}
+                    </p>
+                  )}
                 </div>
               )}
             {/* VAY-2205: a card deposit leaves the rest to pay at the hotel. */}
@@ -2877,12 +2897,20 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 </div>
                 <div>
                   <p className="text-xs text-gray-500">{t("bookings.detail.email")}</p>
-                  <p className="font-medium text-gray-900 break-words">{booking.guestEmail}</p>
+                  {!booking.guestEmail && contactNotProvided ? (
+                    <p className="text-gray-500">{contactNotProvided}</p>
+                  ) : (
+                    <p className="font-medium text-gray-900 break-words">{booking.guestEmail}</p>
+                  )}
                 </div>
                 {guestFieldStatus?.phone !== "off" && (
                   <div>
                     <p className="text-xs text-gray-500">{t("bookings.detail.phone")}</p>
-                    <p className="font-medium text-gray-900">{booking.guestPhone || "—"}</p>
+                    {!booking.guestPhone && contactNotProvided ? (
+                      <p className="text-gray-500">{contactNotProvided}</p>
+                    ) : (
+                      <p className="font-medium text-gray-900">{booking.guestPhone || "—"}</p>
+                    )}
                   </div>
                 )}
                 <div
@@ -3243,12 +3271,24 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         {isPending && booking.hostResponseDeadline && (
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
             <p className="mb-2 text-xs text-gray-500">
+              {/* VAY-2099: a booking-page request (pay at property, or a card the guest authorised)
+                  waits for the hotel's answer, not for a payment. */}
               {booking.awaitingPaymentConfirmation
                 ? t("bookings.detail.confirmManualPaymentReceipt")
-                : t("bookings.detail.reviewManualPayment")}
+                : booking.paymentMethod === "pay_at_property"
+                  ? t("bookings.detail.acceptAtPropertyRequest")
+                  : cardNotAuthorised
+                    ? t("bookings.detail.waitingForCardPayment")
+                    : booking.paymentMethod === "card"
+                      ? t("bookings.detail.acceptCardRequest")
+                      : t("bookings.detail.reviewManualPayment")}
             </p>
             <div className="flex flex-wrap gap-3">
-              {booking.paymentMethod === "paypal" || booking.awaitingPaymentConfirmation ? (
+              {cardNotAuthorised ? null : (booking.paymentMethod === "paypal" ||
+                  booking.awaitingPaymentConfirmation) &&
+                !canConfirmPayment ? (
+                <p className="text-xs text-gray-500">{t("bookings.detail.ownerConfirmsPayment")}</p>
+              ) : booking.paymentMethod === "paypal" || booking.awaitingPaymentConfirmation ? (
                 <button
                   onClick={handleMarkPaid}
                   disabled={
@@ -3287,16 +3327,20 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                     ? t("bookings.detail.acceptAtPropertyRequest")
                     : t("bookings.detail.acceptBankTransferRequest")}
             </p>
-            <button
-              onClick={booking.paymentMethod === "paypal" ? handleMarkPaid : handleAccept}
-              disabled={updating}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50"
-            >
-              <CheckCircleIcon className="w-4 h-4" />
-              {booking.paymentMethod === "paypal"
-                ? t("bookings.detail.markAsPaid")
-                : t("bookings.detail.acceptBooking")}
-            </button>
+            {booking.paymentMethod === "paypal" && !canConfirmPayment ? (
+              <p className="text-xs text-gray-500">{t("bookings.detail.ownerConfirmsPayment")}</p>
+            ) : (
+              <button
+                onClick={booking.paymentMethod === "paypal" ? handleMarkPaid : handleAccept}
+                disabled={updating}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50"
+              >
+                <CheckCircleIcon className="w-4 h-4" />
+                {booking.paymentMethod === "paypal"
+                  ? t("bookings.detail.markAsPaid")
+                  : t("bookings.detail.acceptBooking")}
+              </button>
+            )}
           </div>
         )}
 

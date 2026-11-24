@@ -13,6 +13,8 @@ const navItems = [
   { label: "Bookings", href: "/dashboard/bookings", icon: BookingsIcon },
   // VAY-2442 P5: vayada Payment payouts; the page says when vayada Payment is switched off.
   { label: "Payouts", href: "/dashboard/payouts", icon: PayoutsIcon },
+  // VAY-2504: each hotel account's AI spend this month and its monthly AI budget.
+  { label: "AI budgets", href: "/dashboard/ai-budgets", icon: SparklesIcon },
   { label: "Invite Codes", href: "/dashboard/invite-codes", icon: InviteCodesIcon },
   { label: "Settings", href: "/dashboard/settings", icon: SettingsIcon },
 ];
@@ -127,6 +129,23 @@ function UsersIcon({ className }: { className?: string }) {
       <circle cx="9" cy="7" r="4" />
       <path d="M23 21v-2a4 4 0 00-3-3.87" />
       <path d="M16 3.13a4 4 0 010 7.75" />
+    </svg>
+  );
+}
+
+function SparklesIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z" />
+      <path d="M18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" />
     </svg>
   );
 }

@@ -32,6 +32,8 @@ export type PreparedHotelImportRoutesOptions = {
   sourcePath?: string;
   profiles: Pick<SharedHotelSetupStatusRepository, "getPropertyProfile" | "updatePropertyProfile">;
   rooms?: PmsRoomFactsRoutesOptions;
+  /** VAY-2582: an import never moves a live hotel's time zone or country (unset: never moves one). */
+  isLive?: (propertyId: string) => Promise<boolean>;
 };
 
 export async function registerPreparedHotelImportRoutes(
@@ -180,6 +182,11 @@ export async function registerPreparedHotelImportRoutes(
                   const validated = parseCanonicalPropertyProfile(profile, errors);
                   if (!validated || Object.keys(errors).length)
                     throw new Error("incomplete_property_details");
+                  if (
+                    movesTimeZoneOrCountry(current.profile, validated) &&
+                    (!options.isLive || (await options.isLive(propertyId)))
+                  )
+                    throw new Error("live_location_change");
                   // A lost response may follow a committed profile write. Comparing
                   // all fields allows recovery without overwriting subsequent edits.
                   if (JSON.stringify(current.profile) !== JSON.stringify(validated)) {
@@ -200,6 +207,7 @@ export async function registerPreparedHotelImportRoutes(
                       "property_not_found",
                       "incomplete_property_details",
                       "profile_revision_conflict",
+                      "live_location_change",
                     ].includes(error.message)
                       ? error.message
                       : "property_import_failed";
@@ -265,6 +273,16 @@ export async function registerPreparedHotelImportRoutes(
         return reply.status(503).send({ code: "import_temporarily_unavailable" });
       }
     },
+  );
+}
+
+/** VAY-2582: whether an import would change a saved time zone or country. */
+function movesTimeZoneOrCountry(current: PropertyProfile, next: PropertyProfile) {
+  const before = current.location;
+  return (
+    (Boolean(before.timezone) && before.timezone !== next.location.timezone) ||
+    (Boolean(before.countryCode) &&
+      before.countryCode.toUpperCase() !== next.location.countryCode.toUpperCase())
   );
 }
 

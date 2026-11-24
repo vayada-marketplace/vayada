@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { reverseTargetPromoRedemption } from "./domains/currentQuotePromoRedemption.js";
 import { runPartnerBookingSweep } from "./domains/partnerBookingUpdates.js";
 import {
   createPgPartnerConnectionsRepository,
@@ -93,12 +94,19 @@ describe.skipIf(!url)("signed booking updates for partner codes (VAY-2438)", () 
          VALUES ($1, 'guest_booking.created', 'draft', 'confirmed', 'guest', now() - interval '1 hour')`,
         [bookingId],
       );
+    // As checkout records a code since VAY-2566: the application and one more use, together.
     if (withCode)
       await admin.query(
-        `INSERT INTO booking.promo_applications
+        `WITH consumed AS (
+           UPDATE booking.promo_definitions SET current_uses = current_uses + 1
+           WHERE id = $3 RETURNING id
+         )
+         INSERT INTO booking.promo_applications
            (property_id, guest_booking_id, promo_code, application_status, discount_amount, currency,
-            promo_definition_id)
-         VALUES ($1, $2, 'MIA10', 'applied', 46.67, 'EUR', $3)`,
+            promo_definition_id, metadata)
+         SELECT $1, $2, 'MIA10', 'applied', 46.67, 'EUR', id,
+                '{"version":"booking.quote-promo.v1","discountMinor":"4667"}'::jsonb
+         FROM consumed`,
         [hotelId, bookingId, promoCodeId],
       );
     return bookingId;
@@ -247,21 +255,35 @@ describe.skipIf(!url)("signed booking updates for partner codes (VAY-2438)", () 
       bookingId,
     ]);
     await sweep();
-    // As both cancel paths do: the booking is cancelled and its code reversed in one go.
-    await admin.query(
-      "UPDATE booking.guest_bookings SET lifecycle_status = 'canceled' WHERE id = $1",
-      [bookingId],
-    );
-    await admin.query(
-      "UPDATE booking.promo_applications SET application_status = 'reversed' WHERE guest_booking_id = $1",
-      [bookingId],
-    );
-    await admin.query(
-      `INSERT INTO booking.booking_status_events
-         (guest_booking_id, event_type, from_status, to_status, actor_type)
-       VALUES ($1, 'guest_booking.canceled', 'confirmed', 'canceled', 'guest')`,
-      [bookingId],
-    );
+    const uses = async () =>
+      (
+        await admin.query<{ n: number }>(
+          "SELECT current_uses AS n FROM booking.promo_definitions WHERE id = $1",
+          [promoCodeId],
+        )
+      ).rows[0]!.n;
+    const usesBefore = await uses();
+    // As every cancel and lapse path does (VAY-2566): the booking is cancelled and the code's use
+    // given back in one transaction, by the API login.
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "UPDATE booking.guest_bookings SET lifecycle_status = 'canceled' WHERE id = $1",
+        [bookingId],
+      );
+      await client.query(
+        `INSERT INTO booking.booking_status_events
+           (guest_booking_id, event_type, from_status, to_status, actor_type)
+         VALUES ($1, 'guest_booking.canceled', 'confirmed', 'canceled', 'guest')`,
+        [bookingId],
+      );
+      await reverseTargetPromoRedemption(client, hotelId, bookingId, now());
+      await client.query("COMMIT");
+    } finally {
+      client.release();
+    }
+    expect(await uses()).toBe(usesBefore - 1);
     await sweep();
     await deliver();
     // Delivered in any order (they were queued at the same instant); version orders them.

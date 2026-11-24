@@ -75,11 +75,12 @@ import type {
   PmsRoomType,
   PmsSourceFreshness,
 } from "../domains/pmsOperationsReadModel.js";
-import type {
-  PermissionKey,
-  RequestActor,
-  RequestContext,
-  ResourceRelationship,
+import {
+  authorityNarrowing,
+  type PermissionKey,
+  type RequestActor,
+  type RequestContext,
+  type ResourceRelationship,
 } from "@vayada/backend-auth";
 import { hasPermission, type PropertyAccessRepository } from "@vayada/backend-authorization";
 import { enforceRoutePolicy } from "./policy.js";
@@ -456,6 +457,13 @@ export type PmsBookingLifecycleCommand = {
   audit: PmsOperationsCommandAudit;
   /** Mark paid only: the method staff chose; without it the booking's own method is recorded. */
   settlementMethod?: PmsDeskSettlementMethod;
+  /**
+   * Mark paid only (VAY-2575): the caller holds the owner key (`pms.operations.manage`), so it may
+   * confirm a booking-page bank transfer or PayPal payment. Without it, only money the desk took
+   * itself (cash or the hotel's card terminal) is recorded on those bookings. Not part of the retry
+   * fingerprint.
+   */
+  allowRemoteConfirmation?: boolean;
 };
 
 export type PmsCheckOutCommand = {
@@ -619,6 +627,11 @@ export type PmsCheckoutChargeMarkPaidCommand = {
 
 export type PmsCheckoutChargeWaiveCommand = PmsCheckoutChargeMarkPaidCommand & {
   reason?: string;
+  /**
+   * VAY-2575: only holders of the owner key may waive a charge that is already paid, which undoes
+   * money taken like a refund. Front desk waives open charges only. Not part of the retry fingerprint.
+   */
+  allowWaivePaid?: boolean;
 };
 
 export type PmsAssignmentCommandResponse = {
@@ -791,6 +804,12 @@ export type PmsOperationalCommandResult =
       ok: false;
       statusCode: 400;
       code: "invalid_body" | "invalid_status_transition";
+      message: string;
+    }
+  | {
+      ok: false;
+      statusCode: 403;
+      code: "missing_permission";
       message: string;
     }
   | {
@@ -1052,6 +1071,7 @@ export type PmsOperationsCommandRepository = {
 export type PmsOperationsRoutesOptions = {
   repository: PmsOperationsReadRepository;
   propertyAccessRepository?: PropertyAccessRepository;
+  /** Rehearsal-only switch (VAY-810): true refuses desk-charge "paid". Off unless set (VAY-2573). */
   checkoutChargeMarkPaidFreezeEnabled?: boolean;
   commandRepository?: PmsOperationsCommandRepository;
   roomClosureRepository?: PmsRoomClosureRepository;
@@ -2833,6 +2853,7 @@ export async function registerPmsOperationsRoutes(
               correlationId: context.audit.correlationId ?? context.audit.requestId,
               requestedAt: context.audit.receivedAt,
             },
+            narrowing: authorityNarrowing(context),
           });
           if (!result.ok) return sendInboxTriageError(reply, result.error);
           if (!validInboxTriageResult(result.value, propertyId, threadId, action, input.value))
@@ -3400,6 +3421,23 @@ export async function registerPmsOperationsRoutes(
     );
   }
 
+  /**
+   * VAY-2575: recording a payment at the desk (booking mark-paid, desk charge paid or waived) needs
+   * `pms.reservation.update`, the key front desk holds for check-in and check-out, on the member's
+   * own properties. Owners hold it too. Two steps also need the owner key `pms.operations.manage`,
+   * checked in the command: waiving a charge that is already paid, and confirming a booking-page
+   * bank transfer or PayPal payment.
+   */
+  function recordsDeskPayment(request: FastifyRequest, reply: FastifyReply, propertyId: string) {
+    return enforcePmsPropertyAccessPolicy(
+      request,
+      reply,
+      propertyId,
+      "pms.reservation.update",
+      options.propertyAccessRepository,
+    );
+  }
+
   async function handleCheckoutChargeMarkPaid(
     request: FastifyRequest<{
       Params: PmsCheckoutChargeParams;
@@ -3416,13 +3454,15 @@ export async function registerPmsOperationsRoutes(
       });
     }
     const { propertyId, guestBookingId, chargeId } = request.params;
-    if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+    // VAY-2575: the desk key front desk holds for check-in and check-out, on the member's properties.
+    if (!(await recordsDeskPayment(request, reply, propertyId))) return reply;
 
     const commandInput = toCheckoutChargeMarkPaidCommandMetadata(request.body);
     if ("error" in commandInput) return sendPmsOperationsError(reply, commandInput.error);
 
-    const freezeEnabled = options.checkoutChargeMarkPaidFreezeEnabled ?? true;
-    if (freezeEnabled) {
+    // VAY-2573: production never set this, so a default of "on" refused every desk charge paid at
+    // check-in and check-out. The charge itself is PMS state; Finance has never read desk charges.
+    if (options.checkoutChargeMarkPaidFreezeEnabled === true) {
       return sendPmsOperationsError(reply, {
         statusCode: 409,
         code: "finance_bridge_required",
@@ -3767,12 +3807,16 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId, chargeId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        const context = await recordsDeskPayment(request, reply, propertyId);
+        if (!context) return reply;
 
         const command = toCheckoutChargeWaiveCommand(propertyId, guestBookingId, chargeId, request);
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
 
-        const result = await commandRepository.waiveCheckoutCharge(command.value);
+        const result = await commandRepository.waiveCheckoutCharge({
+          ...command.value,
+          allowWaivePaid: hasPermission(context, "pms.operations.manage"),
+        });
         if (!result.ok) return sendPmsCheckoutChargeCommandError(reply, result);
 
         return {
@@ -4242,7 +4286,8 @@ export async function registerPmsOperationsRoutes(
           });
         }
         const { propertyId, guestBookingId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        const context = await recordsDeskPayment(request, reply, propertyId);
+        if (!context) return reply;
         const command = toBookingLifecycleCommand(
           propertyId,
           guestBookingId,
@@ -4267,6 +4312,8 @@ export async function registerPmsOperationsRoutes(
           ...(settlementMethod
             ? { settlementMethod: settlementMethod as PmsDeskSettlementMethod }
             : {}),
+          // VAY-2575: confirming a booking-page bank transfer or PayPal payment stays with the owner.
+          allowRemoteConfirmation: hasPermission(context, "pms.operations.manage"),
         });
         if (!result.ok) return sendPmsOperationalCommandError(reply, result);
         return {
@@ -4747,9 +4794,11 @@ function sendPmsOperationalCommandError(
     category:
       result.statusCode === 400
         ? "validation"
-        : result.statusCode === 404
-          ? "not_found"
-          : "conflict",
+        : result.statusCode === 403
+          ? "authorization"
+          : result.statusCode === 404
+            ? "not_found"
+            : "conflict",
     message: result.message,
   });
 }

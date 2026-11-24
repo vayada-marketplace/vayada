@@ -3,7 +3,8 @@ import type { Page } from "@playwright/test";
 /**
  * VAY-2462: a stand-in for Stripe.js, so a spec can go through the card step without Stripe: its
  * Payment Element mounts nothing, and `confirmPayment` succeeds at once, keeping what it was asked
- * (the connected account it was made for and the return link) for the spec to read.
+ * (the publishable key and connected account it was made for, and the return link) for the spec
+ * to read. No request ever reaches Stripe.
  */
 const STRIPE_FAKE = `
 (() => {
@@ -33,6 +34,7 @@ const STRIPE_FAKE = `
       confirmCardPayment: async () => ({}),
       async confirmPayment(args) {
         window.__stripeConfirm = {
+          key: key,
           account: options && options.stripeAccount,
           returnUrl: args.confirmParams && args.confirmParams.return_url,
           redirect: args.redirect,

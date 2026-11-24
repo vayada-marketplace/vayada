@@ -1,3 +1,4 @@
+import { defaultMonthlyBudgetFromEnv, usdToMicroUsd } from "./ai/usage/budgetGate.js";
 import { loadAirbnbImportConfig } from "./airbnbImportRuntime.js";
 import { parseWebhookSigningKey } from "./domains/partnerWebhooks.js";
 import { CHANNEX_RESERVED_TEST_IDS } from "./domains/channexOwnershipGate.js";
@@ -202,17 +203,38 @@ export type ApiConfig = {
   /** VAY-2442: the Stripe account vayada Payment charges guests on, separate from the Connect
    * platform: its test-mode keys (VAYADA_PAYMENT_STRIPE_*), for every hotel not on the live list. */
   vayadaPaymentStripe?: { secretKey: string; publishableKey: string; webhookSecret?: string };
-  /** VAY-2442: the same account's live-mode keys (VAYADA_PAYMENT_STRIPE_LIVE_*), real money, only
-   * for the hotels on vayadaPaymentLivePropertyIds. */
+  /** VAY-2442: the same account's live-mode keys (VAYADA_PAYMENT_STRIPE_LIVE_*), real money: new
+   * charges of the hotels on vayadaPaymentLivePropertyIds, and every payment made in live mode
+   * (VAY-2569). */
   vayadaPaymentStripeLive?: { secretKey: string; publishableKey: string; webhookSecret?: string };
-  /** VAY-2442: the hotels whose vayada Payment money is real (VAYADA_PAYMENT_LIVE_PROPERTY_IDS:
-   * property UUIDs, never "*"). Their charges, refunds and captures all go to the live keys, never
-   * to the test ones. A hotel stays on it once it has taken live money, so its refunds keep
-   * working; to stop its new charges, take it off VAYADA_PAYMENT_PROPERTY_IDS. */
-  vayadaPaymentLivePropertyIds: readonly string[];
+  /** VAY-2442: the hotels whose new vayada Payment charges are real money
+   * (VAYADA_PAYMENT_LIVE_PROPERTY_IDS: property UUIDs, or "*" for every hotel except the test
+   * hotels below). Their new charges go to the live keys, never to the test ones. A payment already
+   * made keeps the keys of the mode it was made in for its reads, cancels and refunds (VAY-2569), so
+   * this list can change without stranding older payments; a test hold is never captured once its
+   * hotel is live. A hotel that has taken live money takes no test charge again: left off this list,
+   * its card checkouts are refused, so keep it here while it sells. To stop its new charges, put it on
+   * VAYADA_PAYMENT_STOPPED_PROPERTY_IDS: the owner can still turn card off and fix the payout
+   * account (VAY-2570). Taking it off VAYADA_PAYMENT_PROPERTY_IDS also stops the charges but locks
+   * the owner out of both. */
+  vayadaPaymentLivePropertyIds: readonly string[] | "all";
+  /** VAY-2442: Vayada's own test hotels (VAYADA_PAYMENT_TEST_PROPERTY_IDS), which stay on the test
+   * keys when the live list is "*". Never on an explicit live list. */
+  vayadaPaymentTestPropertyIds: readonly string[];
+  /** VAY-2442: hotels that take no new vayada Payment charges even when the charge list is "*"
+   * (VAYADA_PAYMENT_STOPPED_PROPERTY_IDS): the per-hotel stop. Refunds, disputes and payouts of
+   * money already taken keep working. */
+  vayadaPaymentStoppedPropertyIds: readonly string[];
   /** VAY-2442: Vayada's vayada Payment fee, in percent of each card payment, on top of the plan's
    * fee and kept on refunds. Default 6 (Flamur, 2026-10-31). */
   vayadaPaymentFeePercent: number;
+  /** VAY-2572: Stripe's "dispute countered fee" in euro cents (VAYADA_PAYMENT_DISPUTE_COUNTERED_FEE_EUR,
+   * euros, default 20; 0 turns it off). Stripe charges it on Vayada's EUR account when Vayada answers
+   * a dispute and keeps it when Vayada loses, but sends neither the fee nor its amount with the
+   * dispute, so the price list's amount is used: a dispute that closes lost after Vayada answered it
+   * takes this from the hotel's next payout (in the stay's currency), and gives it back if the loss
+   * is later overturned. */
+  vayadaPaymentDisputeCounteredFeeMinor: number;
   /** Browser origins allowed on the identity privacy routes. */
   identityPrivacyAllowedOrigins: string[];
   /** Browser origins allowed to post the public contact form (VAY-2286: vayada.com). */
@@ -242,6 +264,16 @@ export type ApiConfig = {
   /** VAY-2247: mounts GET/POST /api/hotel-setup/properties/:id/first-run for the new setup. Off by default. */
   hotelFirstRunEnabled: boolean;
   bookingHostBase?: string;
+  /** VAY-2568: Cloudflare for SaaS (zone vayada.com) for hotels' own booking domains; without it
+   * a domain check answers "could not be checked". The token needs SSL and Certificates: Edit. */
+  bookingCustomDomainCloudflare?: { apiToken: string; zoneId: string };
+  /** VAY-2568: hotel domains the ALB sends to the new booking frontend, each with the property it
+   * belongs to (platform's next_booking_custom_domains). Only these can be verified. */
+  bookingCustomDomainRoutes: ReadonlyMap<string, string>;
+  /** VAY-2589: the browser Maps key (projects/<project>/locations/global/keys/<id>) and the JSON key of
+   * the service account that may read and update it. With both, next-api adds hotels' booking domains
+   * to the key's website list; without them, nothing is added. */
+  googleMapsKeyEditor?: { keyName: string; credentialsJson: string };
   platformMediaServing?: PlatformMediaServingConfig;
   platformMediaCleanupEnabled: boolean;
   platformMediaCleanupIntervalMs: number;
@@ -271,6 +303,18 @@ export type ApiConfig = {
   pricingPaymentRepublishIntervalMs: number;
   /** VAY-2286: vayada.com contact-form messages are emailed here (Reply-To: the visitor). */
   contactNotificationRecipient?: string;
+  /** VAY-2504: the monthly AI budget of every hotel account staff have not set; 0 = no AI. */
+  aiDefaultMonthlyBudgetMicroUsd: number;
+  /**
+   * VAY-2524: AI changes (Ask first): the Yes/No routes, the one executor and its recovery job.
+   * Off by default; nothing asks for a change until the assistant and MCP do.
+   */
+  aiChangesEnabled: boolean;
+  /** VAY-2504: one email a month when vayada's total AI spend passes the threshold; unset sends none. */
+  aiSpendAlertEmail?: string;
+  aiSpendAlertThresholdMicroUsd: number;
+  /** VAY-2518: mounts the in-app assistant's API. Off unless AI_ASSISTANT_ENABLED=true. */
+  aiAssistantEnabled: boolean;
   providerWebhooks: ProviderWebhookConfig;
   airbnbImport?: ReturnType<typeof loadAirbnbImportConfig>;
   airbnbAlterations?: { propertyIds: readonly string[] };
@@ -312,6 +356,30 @@ function loadPlatformMediaRetiredPurgeConfig(
     );
   }
   return { cdnDistributionId };
+}
+
+function readBookingCustomDomainCloudflare(
+  env: NodeJS.ProcessEnv,
+): ApiConfig["bookingCustomDomainCloudflare"] {
+  const apiToken = readOptionalEnv(env, "CLOUDFLARE_API_TOKEN");
+  const zoneId = readOptionalEnv(env, "CLOUDFLARE_ZONE_ID");
+  return apiToken && zoneId ? { apiToken, zoneId } : undefined;
+}
+
+function readGoogleMapsKeyEditor(env: NodeJS.ProcessEnv): ApiConfig["googleMapsKeyEditor"] {
+  const keyName = readOptionalEnv(env, "GOOGLE_MAPS_BROWSER_KEY_NAME");
+  const credentialsJson = readOptionalEnv(env, "GOOGLE_MAPS_KEY_EDITOR_CREDENTIALS");
+  return keyName && credentialsJson ? { keyName, credentialsJson } : undefined;
+}
+
+/** "host=propertyId,host=propertyId"; Terraform validates it, so a malformed entry is skipped. */
+function readBookingCustomDomainRoutes(env: NodeJS.ProcessEnv): ReadonlyMap<string, string> {
+  const routes = new Map<string, string>();
+  for (const entry of (readOptionalEnv(env, "BOOKING_CUSTOM_DOMAIN_ROUTES") ?? "").split(",")) {
+    const [host, propertyId, ...rest] = entry.split("=").map((part) => part.trim().toLowerCase());
+    if (host && propertyId && rest.length === 0) routes.set(host.replace(/\.$/, ""), propertyId);
+  }
+  return routes;
 }
 
 function readOptionalEnv(env: NodeJS.ProcessEnv, key: string): string | undefined {
@@ -463,13 +531,12 @@ export function replacementPricingManualPaymentMethods(
   ];
 }
 
-/** VAY-2442: whether a hotel gets vayada Payment: the switch is on, the hotel is on
- * VAYADA_PAYMENT_PROPERTY_IDS and the Stripe keys of its mode are set (live keys for a hotel on
- * VAYADA_PAYMENT_LIVE_PROPERTY_IDS, test keys otherwise). Choosing it, the payout account and new
- * card charges all ask this, so a hotel can't be set up for charges that would fail; refunds,
- * disputes and payouts of money already taken do not. Card readiness doesn't (no Vayada approval
- * since 2026-11-03): a hotel taken off the list keeps showing card until it turns card off, and
- * its card checkouts are refused before any money is taken. */
+/** VAY-2442: whether a hotel takes new vayada Payment card charges: vayadaPaymentManageableFor
+ * (the switch, the hotel on VAYADA_PAYMENT_PROPERTY_IDS or "*", the Stripe keys of its mode) and the
+ * hotel not on VAYADA_PAYMENT_STOPPED_PROPERTY_IDS. New card charges ask this; refunds, disputes and
+ * payouts of money already taken do not. Card readiness doesn't (no Vayada approval since
+ * 2026-11-03): a stopped hotel can't put card on with vayada Payment (VAY-2570), and its checkouts
+ * are refused before any money is taken. */
 export function vayadaPaymentOpenFor(
   config: Pick<
     ApiConfig,
@@ -477,6 +544,28 @@ export function vayadaPaymentOpenFor(
     | "vayadaPaymentPropertyIds"
     | "vayadaPaymentStripe"
     | "vayadaPaymentLivePropertyIds"
+    | "vayadaPaymentTestPropertyIds"
+    | "vayadaPaymentStoppedPropertyIds"
+    | "vayadaPaymentStripeLive"
+  >,
+): (propertyId: string) => boolean {
+  const stopped = config.vayadaPaymentStoppedPropertyIds;
+  const manageable = vayadaPaymentManageableFor(config);
+  return (propertyId) => manageable(propertyId) && !stopped.includes(propertyId.toLowerCase());
+}
+
+/** VAY-2570: whether a hotel may manage its vayada Payment setup (choose it in its payment settings,
+ * save those settings, read and replace its payout bank account): vayadaPaymentOpenFor without the
+ * stop list. A stopped hotel keeps this, so its owner can still turn card off and fix the bank
+ * account its live money is paid out to; its new card charges stay refused (vayadaPaymentOpenFor). */
+export function vayadaPaymentManageableFor(
+  config: Pick<
+    ApiConfig,
+    | "vayadaPaymentEnabled"
+    | "vayadaPaymentPropertyIds"
+    | "vayadaPaymentStripe"
+    | "vayadaPaymentLivePropertyIds"
+    | "vayadaPaymentTestPropertyIds"
     | "vayadaPaymentStripeLive"
   >,
 ): (propertyId: string) => boolean {
@@ -493,13 +582,62 @@ export function vayadaPaymentOpenFor(
       : config.vayadaPaymentStripe !== undefined);
 }
 
-/** VAY-2442: whether a hotel's vayada Payment money is real (Stripe live mode): every Stripe call
- * for its payments goes to the live keys. */
+/** VAY-2442: whether a hotel's new vayada Payment charges are real money (Stripe live mode): they
+ * go to the live keys. Stored payments keep the mode they were made in (VAY-2569); only one with
+ * no recorded mode follows this. With the live list "*", every hotel is live except
+ * Vayada's own test hotels (VAYADA_PAYMENT_TEST_PROPERTY_IDS), so new hotels take real money too. */
 export function vayadaPaymentLiveFor(
-  config: Pick<ApiConfig, "vayadaPaymentLivePropertyIds">,
+  config: Pick<ApiConfig, "vayadaPaymentLivePropertyIds" | "vayadaPaymentTestPropertyIds">,
 ): (propertyId: string) => boolean {
   const ids = config.vayadaPaymentLivePropertyIds;
-  return (propertyId) => ids.includes(propertyId.toLowerCase());
+  const test = config.vayadaPaymentTestPropertyIds;
+  return ids === "all"
+    ? (propertyId) => !test.includes(propertyId.toLowerCase())
+    : (propertyId) => ids.includes(propertyId.toLowerCase());
+}
+
+/** VAY-2442: the vayada Payment hotel lists, with the rules that keep test money and real money
+ * apart: a test hotel is never on an explicit live list; with the live keys set the charge list
+ * "*" needs the live list "*" (or a real hotel missing from the live list would take test-mode
+ * charges: a confirmed booking for no money); and with the test keys set the live list "*" needs
+ * the test hotels named (or a lost test list would make Vayada's own test hotels take live
+ * charges; their stored test payments keep the test keys either way, VAY-2569). */
+function loadVayadaPaymentLists(
+  env: NodeJS.ProcessEnv,
+  liveKeysSet: boolean,
+  testKeysSet: boolean,
+) {
+  const all = (key: string) => readOptionalEnv(env, key) === "*";
+  const lists = {
+    vayadaPaymentPropertyIds: all("VAYADA_PAYMENT_PROPERTY_IDS")
+      ? ("all" as const)
+      : readPropertyIdAllowlistEnv(env, "VAYADA_PAYMENT_PROPERTY_IDS"),
+    vayadaPaymentLivePropertyIds: all("VAYADA_PAYMENT_LIVE_PROPERTY_IDS")
+      ? ("all" as const)
+      : readPropertyIdAllowlistEnv(env, "VAYADA_PAYMENT_LIVE_PROPERTY_IDS"),
+    vayadaPaymentTestPropertyIds: readPropertyIdAllowlistEnv(
+      env,
+      "VAYADA_PAYMENT_TEST_PROPERTY_IDS",
+    ),
+    vayadaPaymentStoppedPropertyIds: readPropertyIdAllowlistEnv(
+      env,
+      "VAYADA_PAYMENT_STOPPED_PROPERTY_IDS",
+    ),
+  };
+  const live = lists.vayadaPaymentLivePropertyIds;
+  if (live !== "all" && lists.vayadaPaymentTestPropertyIds.some((id) => live.includes(id)))
+    throw new Error(
+      "VAYADA_PAYMENT_TEST_PROPERTY_IDS and VAYADA_PAYMENT_LIVE_PROPERTY_IDS must not share a hotel",
+    );
+  if (liveKeysSet && lists.vayadaPaymentPropertyIds === "all" && live !== "all")
+    throw new Error(
+      'VAYADA_PAYMENT_PROPERTY_IDS="*" with live keys needs VAYADA_PAYMENT_LIVE_PROPERTY_IDS="*"',
+    );
+  if (testKeysSet && live === "all" && lists.vayadaPaymentTestPropertyIds.length === 0)
+    throw new Error(
+      'VAYADA_PAYMENT_LIVE_PROPERTY_IDS="*" with test keys needs VAYADA_PAYMENT_TEST_PROPERTY_IDS',
+    );
+  return lists;
 }
 
 function loadVayadaPaymentStripe(
@@ -524,6 +662,16 @@ function loadVayadaPaymentStripe(
       `${prefix}SECRET_KEY and ${prefix}PUBLISHABLE_KEY must both be Stripe ${mode}-mode keys`,
     );
   return { secretKey, publishableKey, ...(webhookSecret ? { webhookSecret } : {}) };
+}
+
+function readVayadaPaymentDisputeCounteredFeeMinor(env: NodeJS.ProcessEnv): number {
+  const value = readOptionalEnv(env, "VAYADA_PAYMENT_DISPUTE_COUNTERED_FEE_EUR");
+  if (value === undefined) return 2000;
+  if (!/^\d{1,3}(\.\d{1,2})?$/.test(value) || Number(value) > 100)
+    throw new Error(
+      "VAYADA_PAYMENT_DISPUTE_COUNTERED_FEE_EUR must be an amount in euros from 0 to 100",
+    );
+  return Math.round(Number(value) * 100);
 }
 
 function readVayadaPaymentFeePercent(env: NodeJS.ProcessEnv): number {
@@ -679,7 +827,10 @@ function readCalendarAutoOpenSchedulerIntervalEnv(env: NodeJS.ProcessEnv): numbe
 // One recipient; the email goes through the booking email provider and sender.
 function readSingleRecipientEnv(
   env: NodeJS.ProcessEnv,
-  key: "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL" | "CONTACT_NOTIFICATION_RECIPIENT",
+  key:
+    | "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL"
+    | "CONTACT_NOTIFICATION_RECIPIENT"
+    | "AI_SPEND_ALERT_EMAIL",
   emailConfigured: boolean,
 ): string | undefined {
   const value = readOptionalEnv(env, key);
@@ -689,6 +840,15 @@ function readSingleRecipientEnv(
   }
   if (!emailConfigured) throw new Error(`${key} requires RESEND_API_KEY and BOOKING_EMAIL_FROM`);
   return value;
+}
+
+// Flamur, 2026-11-20: an email when vayada's AI spend passes $100 in a month.
+function readAiSpendAlertThreshold(env: NodeJS.ProcessEnv): number {
+  const value = readOptionalEnv(env, "AI_SPEND_ALERT_USD") ?? "100";
+  const microUsd = usdToMicroUsd(value);
+  if (microUsd === null || microUsd === 0)
+    throw new Error("AI_SPEND_ALERT_USD must be dollars above 0, e.g. 100");
+  return microUsd;
 }
 
 // Each run briefly locks every published property in turn, so it never repeats within ten minutes.
@@ -1389,17 +1549,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     pmsInboxSendingEnabled: readBooleanEnv(env, "PMS_INBOX_SENDING_ENABLED", true),
     financeBankTransferKms: loadBankTransferKms(env),
     vayadaPaymentEnabled: readBooleanEnv(env, "VAYADA_PAYMENT_ENABLED"),
-    vayadaPaymentPropertyIds:
-      readOptionalEnv(env, "VAYADA_PAYMENT_PROPERTY_IDS") === "*"
-        ? "all"
-        : readPropertyIdAllowlistEnv(env, "VAYADA_PAYMENT_PROPERTY_IDS"),
     vayadaPaymentStripe: loadVayadaPaymentStripe(env, "test"),
     vayadaPaymentStripeLive: loadVayadaPaymentStripe(env, "live"),
-    vayadaPaymentLivePropertyIds: readPropertyIdAllowlistEnv(
+    ...loadVayadaPaymentLists(
       env,
-      "VAYADA_PAYMENT_LIVE_PROPERTY_IDS",
+      loadVayadaPaymentStripe(env, "live") !== undefined,
+      loadVayadaPaymentStripe(env, "test") !== undefined,
     ),
     vayadaPaymentFeePercent: readVayadaPaymentFeePercent(env),
+    vayadaPaymentDisputeCounteredFeeMinor: readVayadaPaymentDisputeCounteredFeeMinor(env),
     identityPrivacyAllowedOrigins: readOptionalCsvEnv(env, "IDENTITY_PRIVACY_ALLOWED_ORIGINS"),
     // VAY-2286: its own list, so the landing origin stays out of the identity and app CORS lists.
     contactIntakeAllowedOrigins: readOptionalCsvEnv(env, "CONTACT_INTAKE_ALLOWED_ORIGINS", [
@@ -1442,6 +1600,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ),
     hotelFirstRunEnabled: readBooleanEnv(env, "HOTEL_FIRST_RUN_ENABLED"),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
+    bookingCustomDomainCloudflare: readBookingCustomDomainCloudflare(env),
+    bookingCustomDomainRoutes: readBookingCustomDomainRoutes(env),
+    googleMapsKeyEditor: readGoogleMapsKeyEditor(env),
     platformMediaServing,
     platformMediaCleanupEnabled: readBooleanEnv(env, "PLATFORM_MEDIA_CLEANUP_ENABLED", true),
     platformMediaCleanupIntervalMs: readPositiveIntegerEnv(
@@ -1514,6 +1675,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "CONTACT_NOTIFICATION_RECIPIENT",
       Boolean(bookingEmailDelivery),
     ),
+    aiDefaultMonthlyBudgetMicroUsd: defaultMonthlyBudgetFromEnv(env),
+    aiChangesEnabled: readBooleanEnv(env, "AI_CHANGES_ENABLED", false),
+    aiSpendAlertEmail: readSingleRecipientEnv(
+      env,
+      "AI_SPEND_ALERT_EMAIL",
+      Boolean(bookingEmailDelivery),
+    ),
+    aiSpendAlertThresholdMicroUsd: readAiSpendAlertThreshold(env),
+    aiAssistantEnabled: readBooleanEnv(env, "AI_ASSISTANT_ENABLED"),
     providerWebhooks: prospectiveConfig.providerWebhooks,
     channexManagement,
     airbnbImport: loadAirbnbImportConfig(env),

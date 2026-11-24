@@ -897,9 +897,12 @@ export const bookingsService = {
   },
 
   markCheckoutChargePaid: async (id: string, chargeId: string) => {
+    // VAY-2573: one key per charge, so a retry after a lost answer gets the first result back
+    // instead of "invalid status transition" for a charge that is already paid.
+    const commandId = `pms.checkout-charge.paid:${encodeURIComponent(chargeId)}:v1`;
     const response = await pmsOperationsClient.post<PmsCheckoutChargeCommandResponse>(
       await reservationEndpoint(id, `/checkout-charges/${encodeURIComponent(chargeId)}/paid`),
-      commandMetadata("pms.checkout-charge.paid"),
+      { commandId, idempotencyKey: commandId },
       pmsOperationsRequestOptions,
     );
     return toCheckoutCharge(response.charge, id);

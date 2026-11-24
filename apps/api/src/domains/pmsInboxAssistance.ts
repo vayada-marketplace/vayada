@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import pg, { type QueryResult, type QueryResultRow } from "pg";
+import { insertAiToolCall } from "../ai/actionLog/actionLog.js";
 import { lockPmsInboxRolePermissions } from "./pmsInboxRolePermissions.js";
 
 import type { PmsInboxAssistanceError, PmsInboxAssistancePort } from "./pmsInbox.js";
@@ -128,6 +129,7 @@ export function createPgPmsInboxAssistancePort(config: {
         fingerprint,
         result,
         acceptedInstant(now),
+        acceptedAt,
       );
     },
 
@@ -206,6 +208,7 @@ async function finalize(
   fingerprint: string,
   result: Result,
   acceptedAt: Date,
+  startedAt: Date,
 ): Promise<Result> {
   const client = await pool.connect();
   try {
@@ -225,6 +228,7 @@ async function finalize(
       ? await storeAssistanceResult(client, input, result, idempotencyId, acceptedAt)
       : null;
     await insertEvidence(client, input, result, idempotencyId, keyHash, acceptedAt);
+    await insertAiAction(client, input, result, acceptedAt, startedAt);
     await completeIdempotency(client, idempotencyId, result, assistanceResultId, acceptedAt);
     await client.query("COMMIT");
     return result;
@@ -629,6 +633,45 @@ async function insertEvidence(
       }),
     ],
   );
+}
+
+// VAY-2508: one AI action log row per press that reached the model, in the same transaction as
+// the audit row and with the same request and correlation ids. The message text is never logged.
+async function insertAiAction(
+  client: PmsInboxAssistanceClient,
+  input: Input,
+  result: Result,
+  acceptedAt: Date,
+  startedAt: Date,
+): Promise<void> {
+  const readsGuestText = input.kind !== "translate_draft";
+  await insertAiToolCall(client, {
+    occurredAt: acceptedAt,
+    organizationId: input.organizationId,
+    propertyId: input.propertyId,
+    userId: input.actorUserId,
+    surface: "inbox_assist",
+    client: "pms_inbox",
+    action: `inbox_${input.kind}`,
+    group: readsGuestText ? "R2" : "R1",
+    sensitive: readsGuestText,
+    arguments:
+      "throughMessageId" in input
+        ? { kind: input.kind, throughMessageId: input.throughMessageId }
+        : { kind: input.kind, targetLanguage: input.targetLanguage },
+    argumentKinds: {
+      kind: { oneOf: ["translate_message", "translate_draft", "summarize", "draft_reply"] },
+      targetLanguage: "language",
+      throughMessageId: "id",
+    },
+    recordsRead: [{ type: "message_thread", id: input.threadId }],
+    outcome: result.ok ? "ok" : "failed",
+    errorCode: result.ok ? null : result.error.code,
+    latencyMs: Math.max(0, acceptedAt.getTime() - startedAt.getTime()),
+    requestId: input.audit.requestId,
+    correlationId: input.audit.correlationId,
+    idempotencyKey: input.idempotencyKey,
+  });
 }
 
 async function completeIdempotency(

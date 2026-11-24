@@ -78,6 +78,9 @@
     "apply": "Terapkan",
     "availableAccommodations": "Akomodasi Tersedia",
     "roomsUnavailable": "Kami tidak dapat menampilkan kamar kami saat ini. Silakan coba lagi sebentar lagi.",
+    "noWayToPayTitle": "Pemesanan online sedang tidak tersedia",
+    "noWayToPayText": "Hotel belum dapat menerima pemesanan online saat ini. Silakan hubungi hotel secara langsung untuk memesan masa inap Anda.",
+    "noWayToPayWhatsapp": "WhatsApp",
     "popularFilters": "Filter Populer",
     "includeBreakfast": "Termasuk Sarapan",
     "freeCancellation": "Pembatalan Gratis",
@@ -110,8 +113,7 @@
     "nonRefundableRate": "Tarif Tidak Dapat Dikembalikan",
     "nonRefundableDesc": "Tidak dapat dikembalikan",
     "off": "-15% DISKON",
-    "perNightly": "{price} / per malam",
-    "youPay": "Anda membayar {price}",
+    "taxesIncluded": "termasuk pajak & biaya",
     "includes": "Termasuk:",
     "dailyBreakfast": "Sarapan harian untuk {count}",
     "welcomeDrink": "Minuman selamat datang",
@@ -136,7 +138,7 @@
       "availabilityUnavailableTooltip": "Ketersediaan tidak dapat dimuat"
     },
     "choice": {
-      "freeCancellation": "Pembatalan gratis",
+      "freeCancellation": "Tarif fleksibel",
       "nonRefundable": "Tidak dapat dikembalikan",
       "partialRefund": "Pengembalian sebagian",
       "mealNonRefundable": "{meal}, tidak dapat dikembalikan",
@@ -144,8 +146,8 @@
       "freeUntil": "Pembatalan gratis hingga {date}, 23.59 (waktu setempat)",
       "noRefund": "Tidak ada pengembalian dana jika Anda membatalkan atau tidak datang",
       "partialRefundTerms": "Jika Anda membatalkan, kami mengembalikan sebagian harga. Lihat ketentuan kami di langkah berikutnya",
-      "windowPassed": "Pembatalan gratis berakhir {days} hari sebelum kedatangan. Untuk tanggal ini, tidak ada pengembalian dana jika Anda membatalkan atau tidak datang",
-      "refundsPassed": "Pengembalian dana berakhir {days} hari sebelum kedatangan. Untuk tanggal ini, tidak ada pengembalian dana jika Anda membatalkan atau tidak datang",
+      "windowPassed": "Tidak ada pembatalan gratis untuk tanggal ini",
+      "refundsPassed": "Tidak ada pengembalian dana untuk tanggal ini",
       "freeEnded": "Pembatalan gratis sudah berakhir",
       "refundsEnded": "Tidak ada pengembalian dana lagi",
       "meal": {
@@ -589,7 +591,7 @@
       "freeEnded": "Pembatalan gratis berakhir pada {date}.",
       "noRefund": "Pengembalian dana berakhir pada {date}.",
       "nonRefundable": "Tidak dapat dikembalikan.",
-      "lateBooking": "Tidak dapat dikembalikan: dipesan kurang dari {days} sebelum kedatangan.",
+      "lateBooking": "Tidak ada pembatalan gratis: dipesan kurang dari {days} sebelum kedatangan.",
       "days": "{count} hari",
       "payFull": "Jika Anda membatalkan atau tidak datang, Anda membayar jumlah penuh ({amount}).",
       "beforeAccept": "Gratis ditarik sampai kami menjawab.",
@@ -612,7 +614,8 @@
         "refundsUntil": "{rooms}: pengembalian dana hingga akhir {date}.",
         "freeEnded": "{rooms}: pembatalan gratis telah berakhir.",
         "noRefund": "{rooms}: tidak ada pengembalian dana lagi.",
-        "nonRefundable": "{rooms}: tidak dapat dikembalikan."
+        "nonRefundable": "{rooms}: tidak dapat dikembalikan.",
+        "lateBooking": "{rooms}: tidak ada pembatalan gratis."
       }
     },
     "extras": {
@@ -838,8 +841,8 @@
       "pay_at_property": {
         "title": "Bayar di hotel",
         "summary": "Tidak ada pembayaran sekarang · bayar saat tiba",
-        "explain": "Tidak ada biaya yang ditagih sekarang. Anda membayar {total} di hotel saat tiba. Pemesanan Anda langsung dikonfirmasi.",
-        "explainRequest": "Tidak ada biaya sekarang. Jika hotel menerima permintaan Anda, Anda membayar {total} saat tiba. Hotel menjawab dalam 24 jam.",
+        "explain": "Tidak ada biaya yang ditagih sekarang. Anda membayar di hotel saat tiba. Pemesanan Anda langsung dikonfirmasi.",
+        "explainRequest": "Tidak ada biaya sekarang. Jika hotel menerima permintaan Anda, Anda membayar saat tiba. Hotel menjawab dalam 24 jam.",
         "boxNow": "Bayar sekarang",
         "boxLater": "Di hotel",
         "phrase": "di hotel"
@@ -848,10 +851,10 @@
         "title": "Bayar dengan kartu",
         "summary": "Ditagih saat memesan",
         "summaryRequest": "Ditagih hanya jika hotel menerima",
-        "explain": "Kami menagih {now} ke kartu Anda saat Anda mengonfirmasi. Anda memasukkan data kartu di langkah berikutnya.",
-        "explainSplit": "Kami menagih {now} ke kartu Anda saat Anda mengonfirmasi dan sisanya, {later}, Anda bayar di hotel. Anda memasukkan data kartu di langkah berikutnya.",
-        "explainRequest": "Kami menahan {now} di kartu Anda. Jika hotel menolak atau tidak menjawab dalam 24 jam, penahanan dilepas. Anda memasukkan data kartu di langkah berikutnya.",
-        "explainRequestSplit": "Kami menahan {now} di kartu Anda dan sisanya, {later}, Anda bayar di hotel. Jika hotel menolak atau tidak menjawab dalam 24 jam, penahanan dilepas. Anda memasukkan data kartu di langkah berikutnya.",
+        "explain": "Kami menagih total ke kartu Anda saat Anda mengonfirmasi. Anda memasukkan data kartu di langkah berikutnya.",
+        "explainSplit": "Kami menagih jumlah yang jatuh tempo sekarang ke kartu Anda saat Anda mengonfirmasi dan sisanya Anda bayar di hotel. Anda memasukkan data kartu di langkah berikutnya.",
+        "explainRequest": "Kami menahan total di kartu Anda. Jika hotel menolak atau tidak menjawab dalam 24 jam, penahanan dilepas. Anda memasukkan data kartu di langkah berikutnya.",
+        "explainRequestSplit": "Kami menahan jumlah yang jatuh tempo sekarang di kartu Anda dan sisanya Anda bayar di hotel. Jika hotel menolak atau tidak menjawab dalam 24 jam, penahanan dilepas. Anda memasukkan data kartu di langkah berikutnya.",
         "boxNow": "Ditagih sekarang",
         "boxHold": "Ditahan sekarang",
         "boxCharged": "Ditagih",
@@ -901,7 +904,8 @@
       "continueShort": "Lanjut",
       "priceDetails": "Rincian harga",
       "taxes": "Pajak & biaya",
-      "included": "Termasuk"
+      "included": "Termasuk",
+      "chargedIn": "Hotel menagih dalam {currency}: <b>{amount}</b>. {shown} yang ditampilkan memakai kurs hari ini."
     },
     "checkingPrice": "Memeriksa harga…",
     "busyConfirm": "Mengonfirmasi pemesanan…",
@@ -933,6 +937,8 @@
     "agree": "Saya menyetujui kebijakan pembatalan, aturan tamu, serta syarat & ketentuan.",
     "agreeNonRefundable": "Saya memahami bahwa pemesanan ini tidak dapat dikembalikan dananya. Jika saya membatalkan atau tidak datang, seluruh masa menginap akan ditagih.",
     "agreeSomeNonRefundable": "Saya memahami bahwa beberapa kamar ini tidak dapat dikembalikan dananya. Jika saya membatalkan atau tidak datang, harga penuhnya akan ditagih.",
+    "agreeNoFreeCancellation": "Saya memahami bahwa saya tidak dapat membatalkan pemesanan ini secara gratis. Jika saya membatalkan atau tidak datang, seluruh masa menginap akan ditagih.",
+    "agreeSomeNoFreeCancellation": "Saya memahami bahwa beberapa kamar ini tidak dapat dibatalkan secara gratis. Jika saya membatalkan atau tidak datang, harga penuhnya akan ditagih.",
     "agreeNoTerms": "Saya menyetujui kebijakan pembatalan dan aturan tamu.",
     "agreeMissing": "Silakan centang kotak untuk mengonfirmasi pemesanan Anda.",
     "hintDetails": "Isi data Anda untuk memesan.",
@@ -949,6 +955,9 @@
         "refundsUntil": "Pengembalian dana hingga {date}",
         "freeEnded": "Pembatalan gratis berakhir",
         "nonRefundable": "Tidak dapat dikembalikan",
+        "lateBooking": "Tidak ada pembatalan gratis",
+        "lateBookingOnceAccepted": "Tidak ada pembatalan gratis setelah hotel menerima",
+        "lateBookingOncePaid": "Tidak ada pembatalan gratis setelah dibayar",
         "noRefund": "Tidak ada pengembalian dana lagi",
         "notRefundableOnceAccepted": "Tidak dapat dikembalikan setelah hotel menerima",
         "notRefundableOncePaid": "Tidak dapat dikembalikan setelah dibayar"

@@ -87,6 +87,8 @@ export async function runBookingEmailDeliveryJobs(
     limit?: number;
     pool?: BookingEmailPool;
     bankTransfers?: BankTransferBookingOperations;
+    /** VAY-2099: PMS web origin (AUTH_PMS_WEB_ORIGIN): a request's hotel email links to it. */
+    pmsWebOrigin?: string;
   } = {},
 ): Promise<{ processed: number; failed: number }> {
   const ownsPool = !options.pool;
@@ -118,6 +120,8 @@ export async function runBookingEmailDeliveryJobs(
           if (!instructions) throw new Error("Bank transfer instructions unavailable.");
           input.text += `\n\nBank transfer instructions:\n${instructions}`;
         }
+        const pmsLink = pmsBookingLink(options.pmsWebOrigin, job.payload["pmsBookingPath"]);
+        if (pmsLink) input.text += `\n\nOpen the request in your PMS: ${pmsLink}`;
         const client = await pool.connect();
         let due = true;
         try {
@@ -214,6 +218,18 @@ async function claimBookingEmailJob(
     );
   }
   return job;
+}
+
+/** VAY-2099: `${origin}/bookings/<id>` for a job that names its PMS booking page; nothing without
+ * an origin (local runs) or a well-formed path. */
+function pmsBookingLink(origin: string | undefined, path: unknown): string | null {
+  if (!origin || typeof path !== "string" || !/^\/bookings\/[A-Za-z0-9_-]+$/.test(path))
+    return null;
+  try {
+    return new URL(path, origin).toString();
+  } catch {
+    return null;
+  }
 }
 
 function emailInput(job: BookingEmailJob): Parameters<BookingEmailDelivery["send"]>[0] {

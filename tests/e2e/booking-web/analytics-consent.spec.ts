@@ -8,7 +8,9 @@ test("opens from the footer only, accepts and withdraws optional analytics witho
   await mockBookingApis(page);
   const events: { sessionId: string; analyticsConsent: boolean; consentVersion: number }[] = [];
   await page.route("**/api/booking-web/events", (route) => {
-    events.push(route.request().postDataJSON());
+    // VAY-2592: anonymous page views are sent without consent; this spec is about the rest.
+    const event = route.request().postDataJSON();
+    if (event.eventType !== "page_view") events.push(event);
     return route.fulfill({ status: 204 });
   });
   const identifiers = () =>
@@ -77,7 +79,9 @@ test("treats a choice saved under the earlier consent text as no choice", async 
   await mockBookingApis(page);
   const events: unknown[] = [];
   await page.route("**/api/booking-web/events", (route) => {
-    events.push(route.request().postDataJSON());
+    // VAY-2592: anonymous page views are sent without consent; this spec is about the rest.
+    const event = route.request().postDataJSON();
+    if (event.eventType !== "page_view") events.push(event);
     return route.fulfill({ status: 204 });
   });
   // A version-1 "Allow" and the analytics session it started.

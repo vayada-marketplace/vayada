@@ -13,9 +13,12 @@ export type FinanceReplacementPricingReadiness =
 
 /** Finance-owned, read-only port inside the caller's authorized property transaction.
  * Pricing and terms must be loaded/verified through their owners before calling.
- * Method capability is not checkout or publication approval. No v1 pricing revision is fabricated. */
+ * Method capability is not checkout or publication approval. No v1 pricing revision is fabricated.
+ * `proposed` (VAY-2583): the methods a payment-settings change would leave, judged by the same rules
+ * without writing anything; its evidence is never stored. */
 export async function lockFinanceReplacementPricingReadiness(client: PoolClient, input: {
   propertyId: string; currency: string; pricingRevision: number; terms: readonly ReplacementOfferTerms[]; expectedEvidenceId?: string;
+  proposed?: { paymentsEnabled: boolean; acceptedMethods: readonly string[] };
 }): Promise<FinanceReplacementPricingReadiness> {
   const unavailable = (reason: Extract<FinanceReplacementPricingReadiness, { kind: "unavailable" }>["reason"]): FinanceReplacementPricingReadiness => ({ kind: "unavailable", reason });
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -24,9 +27,10 @@ export async function lockFinanceReplacementPricingReadiness(client: PoolClient,
   const terms = Array.from(input.terms, parseBookingPricingOfferTerms);
   if (terms.some((t) => !t) || new Set(terms.map((t) => JSON.stringify([t!.roomTypeId, t!.offerId]))).size !== terms.length) return unavailable("invalid");
   const request = structuredClone({ ...input, propertyId: input.propertyId.toLowerCase(), terms: terms as ReplacementOfferTerms[] });
-  const settings = (await client.query(`SELECT payments_enabled,accepted_methods,default_currency,provider_account_id,
+  const stored = (await client.query(`SELECT payments_enabled,accepted_methods,default_currency,provider_account_id,
     payment_methods_revision,online_card_readiness_revision FROM finance.payment_settings WHERE property_id=$1 FOR SHARE`, [request.propertyId])).rows[0];
-  if (!settings) return unavailable("settings_missing");
+  if (!stored) return unavailable("settings_missing");
+  const settings = input.proposed ? { ...stored, payments_enabled: input.proposed.paymentsEnabled, accepted_methods: [...input.proposed.acceptedMethods] } : stored;
   if (!settings.payments_enabled) return unavailable("payments_disabled");
   if (settings.default_currency !== request.currency) return unavailable("currency_mismatch");
   if (!Array.isArray(settings.accepted_methods) || new Set(settings.accepted_methods).size !== settings.accepted_methods.length) return unavailable("invalid");

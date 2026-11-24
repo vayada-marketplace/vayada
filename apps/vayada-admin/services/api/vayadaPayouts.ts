@@ -50,6 +50,8 @@ export type PayoutEntry = {
     | "refund"
     | "dispute"
     | "dispute_reversal"
+    | "dispute_fee"
+    | "dispute_fee_returned"
     | "payout"
     | "payout_returned"
     | "adjustment";
@@ -197,6 +199,9 @@ export const ENTRY_LABELS: Record<PayoutEntry["kind"], string> = {
   refund: "Refund",
   dispute: "Dispute",
   dispute_reversal: "Dispute won",
+  // VAY-2572: Stripe's fee for answering a dispute that was then lost.
+  dispute_fee: "Dispute fee (answered, lost)",
+  dispute_fee_returned: "Dispute fee returned",
   payout: "Payout",
   payout_returned: "Payout returned",
   adjustment: "Adjustment",

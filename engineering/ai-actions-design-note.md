@@ -71,10 +71,30 @@ table ([§4.4](#44-action-policy-table)) disagree, the table wins.
 
 ## 2. The action registry
 
-The registry lives next to the routes in `apps/api` (`src/ai/actions`). It is curated and
-job-shaped: about 10 read actions at the MCP launch and about 30 actions after the first change
-batch, not one tool per route. Composite actions hide multi-step flows; for example one price
-action runs the four pricing-v2 steps (prepare, draft, charges, publish).
+The registry lives next to the routes in `apps/api` (`src/ai/actions`).
+
+**Decision of 2026-11-20 (full parity):** the AI can do everything a user can do in the website,
+with exactly that user's rights, so actions are **generated from next-api's own routes**, not
+hand-picked (this replaces "about 10 read actions at launch, about 30 after the first change
+batch"):
+
+- **Route list:** `src/ai/routeManifest.generated.ts` is captured from the real app (every route
+  module switched on, every route recorded by Fastify's `onRoute` hook) and checked in. CI fails
+  when a route is added, renamed or removed without regenerating it, and a static scan of the
+  route files cross-checks that the capture missed nothing.
+- **Sorting:** `src/ai/routeClassification.ts` sorts every route that is not an action's exactly
+  once: `never` ([§6](#6-the-never-list)), `ask_first_later` (rare setup tasks, decided one by one
+  when their screen becomes an action), `not_for_ai` (machine traffic, public guest pages, partner
+  apps, broken, dead or duplicate routes, reads with side effects, deny-listed reads, owner-session
+  gates) or `later` (a hotel route that is not an action yet; VAY-2567 ranks the order). CI fails on
+  an unsorted route and reports how many hotel routes are actions.
+- **One action per route** (`defineRouteAction`): the route, its method and its path parameters
+  come from the route list; a person writes the description, the output allow-list, the permission,
+  the tier or group and the surfaces, and is named as the reviewer. Composite actions hide
+  multi-step flows (for example the four pricing-v2 steps) and call base actions, never routes
+  directly.
+- **Generated safety tests** run every action through its real route on fake storage
+  (`src/ai/actions/actionSafety.test.ts`); an action without a fixture fails CI.
 
 ### 2.1 Fields
 
@@ -93,6 +113,7 @@ action runs the four pricing-v2 steps (prepare, draft, charges, publish).
 | `permission`     | The key the route **really** checks, so the action is never shown to a role the route refuses.                                                                              |
 | `authoritySites` | Changes only: the in-transaction and SQL-side checks the route hits ([§5.4](#54-write-delegation-through-authority-sites)).                                                 |
 | `surfaces`       | `mcp`, `in_app` or both. Concierge calls its domain services directly; the registry wraps the same services as actions (e.g. availability, [§3.2](#32-projections)).        |
+| `reviewedBy`     | Who reviewed the description, the output allow-list and the group (plan v3.7 `source`; the route itself is the action's `route`).                                           |
 | `idempotency`    | How a retry is made safe.                                                                                                                                                   |
 
 ### 2.2 Registration rules
@@ -102,11 +123,13 @@ An action cannot be registered when:
 - it is `do` without an `undo` that covers every effect in `effects`;
 - it changes something and has no `idempotency`, no `businessKey` or no preconditions;
 - it calls a route outside its `routeCalls`, or a read calls a non-`GET` route;
-- any `routeCalls` entry is a never-listed route (inventory
-  [F](ai-actions-authority-inventory.md#f-never-list-routes) says which), a deny-listed read
-  ([§3.2](#32-projections)), or behind a gate in inventory sections
-  [A](ai-actions-authority-inventory.md#a-owner-session-gates) to
-  [D](ai-actions-authority-inventory.md#d-sql-side-owner-checks);
+- its route is sorted in `src/ai/routeClassification.ts` at all (never, ask first later, not for
+  AI, or still `later`): the registry throws at module load, so the app does not start;
+- (since 2026-11-20) `ownerOnly` routes and role-key owner gates are no longer refused as a class:
+  an action may use one only through the route's own owner check, so only an owner's delegation
+  passes; routes behind an owner-session gate (inventory
+  [A](ai-actions-authority-inventory.md#a-owner-session-gates)) are sorted `not_for_ai` until
+  VAY-2567 decides each;
 - it changes something and an `authoritySites` entry does not take the delegation yet
   ([§5.4](#54-write-delegation-through-authority-sites));
 - the route has no frontend caller today, until it is hardened and tested (e.g. the refund route).
@@ -116,8 +139,8 @@ and promo create, guest profile edit and merge, and a required key on change/ext
 
 ### 2.3 Contract tests
 
-- Never-list: no action reaches an `ownerOnly` route, an owner-session gate, a role-key owner gate,
-  `identity.staff.manage`, `platform.*` routes or `platform.*` audit, job and event rows.
+- Never-list: no action's route is sorted `never`; one real route per never area is pinned in the
+  classification test; the auth hook accepts only registered actions' routes.
 - Method allow-list enforced; MCP and in-app list identical schemas for the same action.
 - Cross-tenant denial for every action: other organization, other property, assigned-only member.
 - Output fixtures fail on any unknown key.
@@ -220,10 +243,17 @@ owner's opt-in.
 
 Four facts every read action must handle:
 
-- **Property scope.** Some reads check only the organization's property links, not the member's
-  assigned properties: Channex ([`pmsChannexManagement.ts:473-491`](../apps/api/src/routes/pmsChannexManagement.ts#L473)),
-  operating calendar, pricing source, flexible rate plan and the booking-settings check. The action
-  checks the member's scope itself before calling them.
+- **Property scope.** Every route that checks a property link also checks the member's assigned
+  properties (VAY-2574). The shared link check, `hasActiveLinkedResource`
+  ([`backend-authorization/src/index.ts`](../packages/backend-authorization/src/index.ts)), refuses
+  a property outside a limited member's scope. That covers routes that check only the
+  organization's links, such as Channex
+  ([`pmsChannexManagement.ts:473-491`](../apps/api/src/routes/pmsChannexManagement.ts#L473)), the
+  operating calendar, pricing source, flexible rate plan and booking settings. Two routes that
+  read the links directly (shared setup, property deletion) call `isPropertyInMemberScope`. A
+  limited member is refused a legacy alias id (a legacy booking hotel id, or a `pms_hotel`), even for
+  an assigned property, because the request carries no alias-to-property map. Booking Admin sends
+  property ids only. The delegated context still narrows its links as well (§5.2).
 - **Locks.** Every pricing-v2 read and every public stay-price read takes the inventory lock and
   `identity.organizations ... FOR UPDATE`
   ([`replacementPricingAuthorization.ts:58-63`](../apps/api/src/domains/replacementPricingAuthorization.ts#L58)),
@@ -406,6 +436,81 @@ running with an expired lease --> resumed by the recovery job (same steps, same 
 - A Yes is refused, and the row closed, when the connection was revoked, the conversation closed
   or an AI kill switch is on.
 
+**Built (VAY-2524 PR1): the record.** `platform.ai_operations` (migration 0553) and its store
+([`apps/api/src/ai/executor/operationStore.ts`](../apps/api/src/ai/executor/operationStore.ts)):
+
+- **Business key:** a hash of the account, property, user, surface, connection or conversation, the
+  action and version, and exactly the JSON of the change's arguments as stored (keys sorted). This
+  one rule covers the per-action keys of plan 3.4.0; an action can get a narrower key when one needs
+  it. Copies sent at once write one row (advisory lock on the key), and at most one row of a key is
+  pending or running (unique index).
+- **Which retries join:** a pending (until it expires) or running change always, from any turn, so
+  one change never has two live cards. A change that ended done, declined, revoked, with AI switched
+  off, or failed after it sent a request or gave up (outcome unknown) is joined only by a retry in
+  the same request scope (the in-app turn: a regenerated step stays in its turn, a new question is a
+  new turn), within 10 minutes of its end (2 minutes without a scope, i.e. MCP), and only if nothing
+  new was asked in its conversation or connection after it ended (its own turn's other changes don't
+  count). So a deliberate repeat (block, release, block again) asks again, and a resumed turn that
+  retries its two answered changes joins both. The cost on MCP: a same-arguments request within 2
+  minutes of a No gets the No back, not a new card. After an expiry or a "changed" close the same
+  request always asks again; a new preview digest (compared only when both sides bring one, so the
+  digest must cover only the preview's content) closes the old card as `changed`.
+- **States** as above, enforced by the table's checks. `start` moves a pending change to running for
+  exactly one caller; every other caller gets the row and joins the run. Each start and take-over
+  gets a new lease token, handed only to the winner or the recovery job, and only that token renews,
+  records a step (request id, key hash, status code: no answer text; a replayed step replaces its
+  record) or finishes, so a stalled worker can't write after a take-over. The recovery job takes over a run whose lease ran out, once, with the same
+  step keys (`op_<id>:<step>`, bound to the action); after 5 attempts it gives up (`failed`,
+  `gave_up`). `failed` otherwise means the change certainly did not happen; an outcome the executor
+  can't be sure of stays running for the recovery job.
+- **Expiry:** 15 minutes, or sooner when the route's own preview expires sooner; the row keeps that
+  preview's digest for the Yes. An answer after the expiry closes the row as `expired`; No, revoke,
+  AI switched off and "changed since" (a stale preview at the Yes) close it with their reason.
+- **Arguments** must be plain JSON for the change's property (no NUL, no broken characters, at most
+  16 KB of JSON text, which stays under the table's 32 KB of `jsonb` text); an answer that can't be
+  kept is dropped and the change still counts as done; database errors are rethrown without the
+  row, so the text never reaches a log. The
+  preconditions travel inside the arguments (the action's expected-version fields); the undo record
+  (VAY-2559) will point to its operation.
+- **Retention:** 90 days (plan 3.6), by the AI retention worker; with the account, the property or the
+  user the rows go at once.
+
+**Built (VAY-2524 PR2): the executor.**
+[`apps/api/src/ai/executor/executor.ts`](../apps/api/src/ai/executor/executor.ts) runs a started
+operation (the Yes's winner, or the recovery job's take-over) and is the only code that mints a
+delegation that writes:
+
+- the delegation is the user's own, resolved again at the run (a member who left, or lost the
+  property, can't change anything), narrowed to the operation's property, on the operation's channel,
+  with `op_<id>` as its tool-call and correlation id;
+- the request is `changeRequest(action, arguments, "op_<id>:<step>")`, so the route sees the key
+  `op_<id>:<step>:<action>` on every attempt. Before it goes out the lease is renewed and a "sent"
+  step (no status yet) is recorded; the lease is renewed while the request runs, and the executor
+  stops waiting before the lease could run out (the run stays running);
+- the route's answer decides the outcome. 2xx is `done` with the action's allow-listed answer. A
+  run with no recorded "sent" step never sent anything (a first attempt, or a take-over of a worker
+  that died before sending): it fails on the route's refusal (another 4xx, e.g.
+  `thread_version_conflict` after a person's edit), or before any request on an unknown action
+  (`unknown_action`), arguments that no longer fit (`invalid_input`) or a user who is no longer
+  allowed (`not_allowed`). A 5xx, a 429, a thrown request, a timeout or a
+  "try again / key already used" code (`busy_try_again`, `command_in_progress`,
+  `idempotency_conflict`, `idempotency_key_conflict`) leaves the run running for the recovery job,
+  which sends the same key again. Once a request may have gone out, only the route's success ends
+  the run: "failed" always means the change certainly did not happen, and a run that never gets a
+  success gives up after 5 attempts (`gave_up`, outcome unknown);
+- every request writes one `ai_tool_calls` row with the operation id, `op_<id>` as correlation id,
+  the key's hash (the same hash as the route's `platform.idempotency_keys` row) and, when done, the
+  records it touched, typed as the routes' own audit rows type them (`message_thread`,
+  `physical_room_unit`, `room_block`, `booking_note_private`; from the path, or from the answer where
+  the path names none). The route's own audit row carries `op_<id>` as correlation id and the logged
+  request id as causation.
+
+The recovery job (`recoveryWorker.ts`) closes unanswered changes and takes over expired runs, one
+at a time, every 30 seconds; the API wires it with the answer endpoint (PR 3, §4.7), which also
+checks who answers, the kill switch and a revoked connection before it calls `startAndRun`. One known limit: the inbox routes answer
+any command error with a 500, so a rare refusal inside the command's own transaction is retried until
+the run gives up (`gave_up`, outcome unknown) instead of failing at once.
+
 ### 4.7 Ask first: the Yes/No
 
 The card is rendered by vayada from the stored operation: what will happen, to whom, the exact
@@ -419,6 +524,41 @@ for the person's answer"; the turn ends. **Yes** is
 Origin and CSRF checks), same user and organization, with permission re-checked, the conversation
 still active, no kill switch on, and the digest and revisions unchanged (otherwise "this changed,
 ask me again"). A second click, another tab or a resumed turn joins the same run.
+
+**Built (VAY-2524 PR3): the Yes/No back end** (`apps/api/src/ai/changes/`), on with
+`AI_CHANGES_ENABLED` (off by default):
+
+- `proposeChange` is how the tool layers ask: with the tool call's own delegated context, only for
+  a change offered on that surface (none is yet), with valid input, on a property in the
+  delegation and with the person's rights now. It stores one `pending` operation and logs one
+  `ai_tool_calls` row (outcome `ok`, the operation id); it never runs anything.
+- `GET /api/ai/pending-actions/:id` returns the card's state and vayada's text (`changeCard.ts`):
+  a question, the details, what else happens and the Yes label, for each change action (a test
+  keeps one card per action). The names on it (room numbers, room types, the guest, the booking)
+  come from the app's own read routes, as the person who answers. A record that is gone closes the
+  question as `changed`; one the person can't read shows "not allowed".
+- `POST /api/ai/pending-actions/:id/answer` takes `{ answer: "no" }` or
+  `{ answer: "yes", cardSha256 }`. Only a vayada session answers: the verifier admits only the
+  app's own `client_id`, the token must carry a session id (no machine token), the Origin must be a
+  vayada app, and any AI context is refused (the routes are also on the never-list). Staff signed in
+  as the person (WorkOS impersonation, an `act` claim on the token) see the card without the digest
+  and get 403 `impersonated` for a Yes or a No. Access tokens
+  travel in the Authorization header, which another site can't send, so a CSRF cookie adds
+  nothing. Same user and selected account; the person's permissions and property now; AI on for
+  the account (budget above 0, else closed `ai_switched_off`); the conversation or connection still
+  there (else `revoked`; until VAY-2518 and VAY-2528 bring them, MCP never and in-app always); and
+  the card's digest unchanged (else closed `changed`). Then the one executor runs it; a double
+  click or a second tab joins the run. A person's edit meanwhile is refused by the route's own
+  revision check and shows as "changed".
+- Switching AI off for an account (staff set its budget to 0) closes its waiting changes at once
+  (`ai_switched_off`); a change the person already said yes to runs to its end.
+- The card names what makes one change differ from another: the rooms (each once), the nights
+  (counted, however long), linked room types that share the rooms, the conversation's channel and
+  last message. An ask the card could never show (a last night before the first) is refused as
+  invalid input when the AI asks.
+- Card states: `needs_answer`, `running`, `done`, `declined`, `expired`, `changed`, `not_allowed`,
+  `stopped` (AI off or connection gone), `failed` (nothing changed) and `unsure` (gave up, outcome
+  unknown).
 
 **MCP (D4a):** every Ask-first action, for every client, is answered on a **one-tap vayada page**:
 the same card on its own small page, signed-in vayada session whose user must equal the token's
@@ -495,6 +635,27 @@ The action calls the existing route in-process with Fastify `app.inject()` insid
   and on an MCP token `sid` is a WorkOS consent id. The consent id is stored on the connection
   instead.
 - The delegation can only narrow: fewer properties, read-only. It never adds a permission.
+- **Read or change (VAY-2522).** `delegation.access` is `"read"` for every context
+  `resolveDelegatedContext` returns; the caller cannot set it. Only `resolveDelegatedChangeContext`
+  returns `"change"`, and only the one executor of AI changes (`apps/api/src/ai/executor/`,
+  VAY-2524) may call it (a boundary test enforces this). `injectAsDelegate` and the auth hook refuse
+  POST, PUT, PATCH and DELETE on a read delegation. A change sends exactly one `Idempotency-Key`
+  (8-128 characters of `A-Za-z0-9._:-`) and, if any, a plain JSON object or array of at most 64 KiB;
+  a read sends neither. Only routes that read the header use that key: a route that takes its key
+  from the body, or has none, is made retry-safe by its action (VAY-2524, VAY-2523). The route gate
+  still allows only the routes of registered actions, so no write route is reachable until a change
+  action is registered.
+- **Limits inside the transaction (VAY-2522).** A command that checks the user's rights again inside
+  its transaction reads them from the database, which knows nothing of the delegation. So the route
+  passes `authorityNarrowing(context)` (`{ access, propertyIds }`, null for a person's request) in
+  the command, and the check refuses a `"read"` narrowing or a property it does not list
+  (`narrowingAllowsChange`). Threaded so far, for the first change batch: the inbox triage scope
+  lock (thread done / follow-up / reopen) and `lockAuthorizedPmsPhysicalRoomScope` (room status via
+  physical-room management). Room status also brings the calendar along afterwards, through three
+  more checks on the same property; that follow-up runs only where the narrowing allows a change.
+  The room-label and room-count routes share the room lock but refuse AI requests until their
+  commands carry the narrowing. Each later batch threads its own sites
+  ([inventory E](ai-actions-authority-inventory.md#e-in-transaction-permission-re-reads)).
 
 ### 5.3 What delegation never passes
 
@@ -538,6 +699,42 @@ Two things to know when doing this (VAY-2522):
   `lockMemberPermissions` (booking page publish,
   [`bookingPublicationCommandRepository.ts:346`](../apps/api/src/domains/bookingPublicationCommandRepository.ts#L346));
   and `lockPmsManageScope` (closures, operating calendar).
+
+**Built (VAY-2522 PR3): change actions.** `defineChangeAction`
+([`apps/api/src/ai/actions/defineChangeAction.ts`](../apps/api/src/ai/actions/defineChangeAction.ts))
+makes one change from one write route on one property (`:propertyId` is required, so an account-wide
+write can not escape a delegation narrowed to fewer properties). Beside the read fields it declares:
+
+- `body`: what the AI may send; the AI's input is one strict object of path parameters and these
+  body fields, so the route's other fields (a room's number on the room update) stay out of reach;
+- `idempotency`: where the route reads its retry key, the `Idempotency-Key` header or body fields
+  (notes and room blocks take `commandId` and `idempotencyKey`); the executor fills it, bound to the
+  action (`<key>:<action name>`), and the AI can never send it;
+- `preconditions`: body fields the route compares with the current state (expected versions); only
+  a POST declared `addsNew` (a note, a new block) has none. No read action returns these versions
+  yet: VAY-2524 decides who fills them (captured when the Ask-first card is shown, so the person's
+  Yes binds to what they saw) and, if the executor does, takes them out of the AI's input before any
+  surface offers a change; the reads that expose them come with their batch;
+- `authoritySites`: every rights check inside the transaction, from
+  [`authoritySites.ts`](../apps/api/src/ai/actions/authoritySites.ts); only checks that already take
+  the AI's limits may be listed, so a change through any other can not be registered;
+- `permission` and `alsoNeeds`: every key the route checks;
+- `group: "ask"`: every AI change asks first until Undo exists (plan row 39).
+
+`changeRequest(action, input, key)` builds the one request a change makes; the executor (VAY-2524)
+sends it with the user's change delegation. On the server, the delegation gate lets an AI write
+reach only a change's route, and the app then holds every delegated write to that change before the
+route runs (`delegatedWriteProblem`, a `preValidation` hook): no query, no field the change does not
+let the AI send, the retry key bound to the change and, for body keys, the request's own. One route
+has at most one change.
+
+The first batch (plan row 50): `booking_note_add`, `room_block_create`, `room_block_release`,
+`room_status_set`, `thread_mark_done`, `thread_follow_up`, `thread_reopen`. No surface offers them
+until the executor exists (the registry refuses one), and only the executor can mint a delegation
+that writes. `changeSafety.test.ts` runs each through its real route and the default gate: the owner's
+change delegation runs it with the AI's limits reaching the command's own check; a read delegation, a
+property outside the delegation, an assigned-only member on another property, another account, a user
+without one of the route's keys and a request that is not exactly the change are refused.
 
 ### 5.5 MCP connections
 
@@ -609,31 +806,46 @@ paid still check the broad `pms.operations.manage`; the AI layer does not paper 
 
 ## 6. The never-list
 
-A hard rule (D5): no action exists for these, for any role, on any surface.
+A hard rule (D5): no action exists for these, for any role, on any surface. **Flamur's list of
+2026-11-20** (it replaces the longer list this section had before):
 
-- billing and plan; payout destination; the guest bank-transfer account
-- Stripe and Xendit onboarding, dashboard and portal links; payout dispatch
-- payment-settings changes and payment windows
-- staff invites, roles, member removal, account-admin transfer
-- property deletion and account deletion
-- custom domain
-- Channex connect, disconnect and iframe session
-- Feature Hub module activation
-- platform and admin routes
-- GDPR export and delete
-- auth and AI-connection management
+- bank accounts and payouts (payout destination, the guest bank-transfer account, Stripe and Xendit
+  provider accounts and links, payout dispatch, payout reconciliation)
+- team members and permissions (staff invites, roles, member removal, account-admin transfer,
+  joining an account)
+- deleting a property
+- login and security settings
+- accepting legal terms (agreements, consent, the mandatory-charges statement)
+- billing and plan
 - bulk exports
-- guest ID document data
-- shortening data retention
-- the Google Maps link resolver
-- reading `platform.*` audit, job and event rows (their tables carry `CHECK (ai_visible = FALSE)`,
-  e.g. [`0010_platform_jobs_events_audit.sql:754`](../packages/backend-migration/migrations/0010_platform_jobs_events_audit.sql#L754))
+- privacy (GDPR) export and delete
+- guest ID documents
+- login and AI-connection management
+- partner-app approvals
+- platform and vayada staff routes, including reading `platform.*` audit, job and event rows
+  (their tables carry `CHECK (ai_visible = FALSE)`, e.g.
+  [`0010_platform_jobs_events_audit.sql:754`](../packages/backend-migration/migrations/0010_platform_jobs_events_audit.sql#L754))
+
+**Ask first later** (no action now; each becomes Ask first when its screen becomes an action,
+decided one by one): custom domain, Channex connect and disconnect (and the Airbnb import), product
+tracks and Feature Hub modules, payment settings and windows, data retention. A guest review on
+Airbnb written by the AI is Ask first, never Just do it.
+
+**Outside AI apps (MCP)** get no guest names, contact details or money until the owner turns them
+on (VAY-2529), even though the user's rights are the ceiling: `defineRouteAction` refuses an MCP
+action whose allow-list keeps a field named like one.
+
+The Google Maps link resolver and media imports (the server fetches a URL the caller gives) are
+`not_for_ai`.
 
 Owner-only and in-app-only, later and on demand: no-show reports, folio finalise and delete, guest
 merge, currency change. Card refunds and refunding cancellations are **not** on the list: they are
 Ask first (VAY-2560) for the roles that may refund today.
 
-The routes behind each item are in inventory [F](ai-actions-authority-inventory.md#f-never-list-routes).
+The routes behind each item are listed in `apps/api/src/ai/neverList.ts`, a file of its own: the
+registry checks it directly, no classification entry can override it, and a test keeps a floor on
+its size, so taking a route off it is a visible decision. Inventory
+[F](ai-actions-authority-inventory.md#f-never-list-routes) has the evidence for each.
 
 ## 7. Audit and attribution
 

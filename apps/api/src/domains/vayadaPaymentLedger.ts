@@ -156,6 +156,80 @@ export async function recordVayadaPaymentDispute(
   });
 }
 
+/** Stripe's "dispute countered fee" on a vayada Payment charge (VAY-2572): charged when Vayada
+ * answers a dispute and kept when Vayada loses, returned if the loss is later overturned. Stripe
+ * sends neither the fee nor its amount, so the caller gives the price list's fee in the stay's
+ * currency. "charged" (the dispute closed lost after Vayada answered it) books it on its own line,
+ * taken from the hotel's next payout; "returned" (the lost dispute's money was reinstated) gives
+ * back exactly what was booked. Like the dispute fee itself, it follows the dispute's withdrawal:
+ * when that took nothing from the hotel (the payment was refunded in full first, Flamur
+ * 2026-11-01) or the hotel was never credited the payment, Vayada bears it ("not_owed"). Inside the
+ * caller's transaction; each phase books once per dispute however often Stripe sends it. */
+export async function recordVayadaPaymentDisputeCounteredFee(
+  client: Pick<pg.PoolClient, "query">,
+  input: {
+    propertyId: string;
+    guestBookingId: string;
+    paymentId: string;
+    disputeId: string;
+    phase: "charged" | "returned";
+    currency: string;
+    /** The fee in the stay's currency (used when charged); null when it couldn't be priced, so the
+     * caller learns whether the hotel owes it ("unpriced") before asking a person to take it. */
+    feeMinor: number | null;
+    livemode: boolean;
+  },
+): Promise<"recorded" | "already_recorded" | "not_owed" | "unpriced"> {
+  if (input.feeMinor !== null && (!Number.isSafeInteger(input.feeMinor) || input.feeMinor < 0))
+    throw new Error("vayada Payment dispute fee is invalid for the payout ledger.");
+  const state = await paymentExposure(client, input);
+  if (!state) return "not_owed";
+  const chargedKey = `dispute:${input.disputeId}:countered_fee`;
+  const sourceKey =
+    input.phase === "charged" ? chargedKey : `dispute:${input.disputeId}:countered_fee_returned`;
+  if (state.sourceKeys.has(sourceKey)) return "already_recorded";
+  let fee: bigint;
+  if (input.phase === "charged") {
+    const withdrawn = state.withdrawn.get(input.disputeId);
+    if (!withdrawn) {
+      if (!state.charged) return "not_owed";
+      // The withdrawal is still on its way (Stripe retries failed events); this one is retried too.
+      throw new Error("vayada Payment dispute closed before its withdrawal was recorded.");
+    }
+    // Nothing taken (refunded in full first) or its money already came back (the loss was
+    // overturned, which returns the fee too; Stripe's events can arrive in any order).
+    if (
+      withdrawn.taken <= 0n ||
+      input.feeMinor === 0 ||
+      state.sourceKeys.has(`dispute:${input.disputeId}:reinstated`)
+    )
+      return "not_owed";
+    if (input.feeMinor === null) return "unpriced";
+    fee = BigInt(input.feeMinor);
+  } else {
+    const booked = await client.query<{ fee: string }>(
+      `SELECT fee_minor::text AS fee FROM finance.hotel_payout_ledger
+       WHERE source_key=$1 AND property_id=$2::uuid AND entry_kind='dispute_fee'`,
+      [chargedKey, input.propertyId],
+    );
+    if (booked.rowCount !== 1) return "not_owed";
+    fee = -BigInt(booked.rows[0]!.fee);
+  }
+  const recorded = await insertEntry(client, {
+    propertyId: input.propertyId,
+    kind: input.phase === "charged" ? "dispute_fee" : "dispute_fee_returned",
+    currency: input.currency,
+    gross: 0n,
+    fee,
+    guestBookingId: input.guestBookingId,
+    paymentId: input.paymentId,
+    livemode: input.livemode,
+    sourceKey,
+    onConflict: "ignore",
+  });
+  return recorded === "no_charge" ? "not_owed" : recorded;
+}
+
 const min = (a: bigint, b: bigint) => (a < b ? a : b);
 const positive = (value: bigint) => (value > 0n ? value : 0n);
 
@@ -217,7 +291,7 @@ async function insertEntry(
   client: Pick<pg.PoolClient, "query">,
   entry: {
     propertyId: string;
-    kind: "refund" | "dispute" | "dispute_reversal";
+    kind: "refund" | "dispute" | "dispute_reversal" | "dispute_fee" | "dispute_fee_returned";
     currency: string;
     gross: bigint;
     fee: bigint;

@@ -62,8 +62,9 @@ export function RoomDetails({ site }: { site: HotelSite }) {
 }
 
 function roomLink(bookingUrl: string, room: SiteRoom): string {
-  if (!room.roomTypeId) return bookingUrl;
+  const first = room.roomTypeIds?.[0];
+  if (!first) return bookingUrl;
   const url = new URL(bookingUrl);
-  url.searchParams.set("room", room.roomTypeId);
+  url.searchParams.set("room", first);
   return url.href;
 }

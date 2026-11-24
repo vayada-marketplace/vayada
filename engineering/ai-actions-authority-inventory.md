@@ -232,6 +232,20 @@ hit are:
 - `lockPmsManageScope`: closures, operating calendar;
 - if exposed later, the room type locks in E2.
 
+Threaded with the delegation's narrowing (VAY-2522 PR2; design note §5.2):
+
+- the inbox triage scope lock (`lockActorScope` in `pmsInboxTriageCommand.ts`, before
+  `lockPmsInboxRolePermissions`);
+- `lockAuthorizedPmsPhysicalRoomScope` for physical-room management (room status);
+- the calendar follow-up after a room change (`followRoomChangesInCalendar` in
+  `pmsOperatingCalendarRoomRefresh.ts`): its impact preview (`lockAuthorizedScope` in
+  `pmsOperatingCalendarImpact.ts`), calendar save (`lockPmsManageScope`) and inventory build
+  (`pmsInventoryMaterializationAuthorization.ts`) check the user's rights without the narrowing, on
+  the command's property only, so the follow-up runs only where the narrowing allows a change.
+
+The operational-label and reconcile routes share the room lock but refuse AI requests until their
+commands carry the narrowing.
+
 ## F. Never-list routes
 
 Every `apps/api` route behind each never-list item in design note
@@ -265,7 +279,7 @@ Gate shorthand used in the tables:
 | FR-owner, FW-owner | the same with `{ ownerOnly: true }`                                                                                          | `finance.billing.manage` ([B](#b-owneronly-route-policies))                                                                       |
 | PF-read, PF-manage | `authorizePlatformFinance`, [`financePlatformAuthorization.ts:6`](../apps/api/src/routes/financePlatformAuthorization.ts#L6) | `platform.finance.read` / `.manage`, platform organization                                                                        |
 | PMS(key)           | `enforcePmsPropertyAccessPolicy`, [`pmsOperations.ts:4611`](../apps/api/src/routes/pmsOperations.ts#L4611)                   | the key, `pms:property-management`, owner, operator or front desk                                                                 |
-| CHX(key)           | `enforcePmsChannexPolicy`, [`pmsChannexManagement.ts:473`](../apps/api/src/routes/pmsChannexManagement.ts#L473)              | the key, `pms:property-management`, owner, operator or front desk; no member property scope                                       |
+| CHX(key)           | `enforcePmsChannexPolicy`, [`pmsChannexManagement.ts:473`](../apps/api/src/routes/pmsChannexManagement.ts#L473)              | the key, `pms:property-management`, owner, operator or front desk; member property scope through the shared link check (VAY-2574) |
 | STAFF              | `authorize` hook, [`staffInvitations.ts:107`](../apps/api/src/routes/staffInvitations.ts#L107)                               | `identity.staff.manage`; active hotel-group membership                                                                            |
 
 #### F1. Billing / plan (Vayada subscription)
@@ -380,11 +394,12 @@ Gate shorthand used in the tables:
 
 #### F9. Custom domain
 
-| Method | Path                                         | Registration                                                                       | Gate                                                                                                                                                                                                                                                                                                                                                |
-| ------ | -------------------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/api/booking/hotels/:hotelId/custom-domain` | [`bookingCustomDomain.ts:294`](../apps/api/src/routes/bookingCustomDomain.ts#L294) | `enforceBookingCustomDomainAccess` ([`bookingCustomDomain.ts:438`](../apps/api/src/routes/bookingCustomDomain.ts#L438)) → `booking.settings.manage` ([`:445`](../apps/api/src/routes/bookingCustomDomain.ts#L445), [`:451`](../apps/api/src/routes/bookingCustomDomain.ts#L451)), entitlement `booking:booking-engine`, relationship owner/operator |
-| PUT    | `/api/booking/hotels/:hotelId/custom-domain` | [`bookingCustomDomain.ts:326`](../apps/api/src/routes/bookingCustomDomain.ts#L326) | same                                                                                                                                                                                                                                                                                                                                                |
-| DELETE | `/api/booking/hotels/:hotelId/custom-domain` | [`bookingCustomDomain.ts:379`](../apps/api/src/routes/bookingCustomDomain.ts#L379) | same                                                                                                                                                                                                                                                                                                                                                |
+| Method | Path                                               | Registration                                                                       | Gate                                                                                                                                                                                                                                                                                                                                                |
+| ------ | -------------------------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/booking/hotels/:hotelId/custom-domain`       | [`bookingCustomDomain.ts:294`](../apps/api/src/routes/bookingCustomDomain.ts#L294) | `enforceBookingCustomDomainAccess` ([`bookingCustomDomain.ts:438`](../apps/api/src/routes/bookingCustomDomain.ts#L438)) → `booking.settings.manage` ([`:445`](../apps/api/src/routes/bookingCustomDomain.ts#L445), [`:451`](../apps/api/src/routes/bookingCustomDomain.ts#L451)), entitlement `booking:booking-engine`, relationship owner/operator |
+| PUT    | `/api/booking/hotels/:hotelId/custom-domain`       | [`bookingCustomDomain.ts:326`](../apps/api/src/routes/bookingCustomDomain.ts#L326) | same                                                                                                                                                                                                                                                                                                                                                |
+| DELETE | `/api/booking/hotels/:hotelId/custom-domain`       | [`bookingCustomDomain.ts:379`](../apps/api/src/routes/bookingCustomDomain.ts#L379) | same                                                                                                                                                                                                                                                                                                                                                |
+| POST   | `/api/booking/hotels/:hotelId/custom-domain/check` | `bookingCustomDomain.ts` (VAY-2568, added after this snapshot)                     | same                                                                                                                                                                                                                                                                                                                                                |
 
 #### F10. Channex connect / disconnect / iframe session
 
@@ -527,7 +542,7 @@ Gate shorthand used in the tables:
 | GET    | `/api/finance/properties/:propertyId/financials/exports/:exportId`                       | [`financeFolios.ts:235`](../apps/api/src/routes/financeFolios.ts#L235)               | `pms.finance.read` ([`financeFolios.ts:139`](../apps/api/src/routes/financeFolios.ts#L139))                                      |
 | GET    | `/api/pms/properties/:propertyId/reservations/:guestBookingId/confirmation-email/:jobId` | [`pmsConfirmationEmails.ts:57`](../apps/api/src/routes/pmsConfirmationEmails.ts#L57) | `pms.reservation.update`, owner/operator/front_desk (pmsConfirmationEmails.ts:29-36)                                             |
 | GET    | `/api/pms/properties/:propertyId/messaging/threads/:threadId`                            | [`pmsOperations.ts:2381`](../apps/api/src/routes/pmsOperations.ts#L2381)             | PMS(`pms.inbox.read`) ([`:2387-2391`](../apps/api/src/routes/pmsOperations.ts#L2387))                                            |
-| GET    | `/api/pms/properties/:propertyId/calendar-auto-open`                                     | [`pmsCalendarAutoOpen.ts:51`](../apps/api/src/routes/pmsCalendarAutoOpen.ts#L51)     | `pms.operations.manage`, owner/operator ([`pmsCalendarAutoOpen.ts:178-197`](../apps/api/src/routes/pmsCalendarAutoOpen.ts#L178)) |
+| GET    | `/api/pms/properties/:propertyId/calendar-auto-open`                                     | [`pmsCalendarAutoOpen.ts:109`](../apps/api/src/routes/pmsCalendarAutoOpen.ts#L109)   | `pms.operations.manage`, owner/operator ([`pmsCalendarAutoOpen.ts:236-255`](../apps/api/src/routes/pmsCalendarAutoOpen.ts#L236)) |
 
 #### F20. Owner-only and in-app-only, later and on demand
 

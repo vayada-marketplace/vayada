@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
+  PMS_WEB_OWNER_PERMISSIONS,
   PMS_WEB_PROPERTY_ID,
   PMS_WEB_RESERVATION_ID,
   mockPmsWebAuthenticatedSession,
@@ -95,6 +96,33 @@ test.describe("PMS awaiting payment (VAY-2348)", () => {
     await expect(page.getByRole("button", { name: "Mark received" })).toBeVisible();
     // The link's ?confirm=payment is used once: a reload doesn't ask again.
     await expect(page).toHaveURL(new RegExp(`/bookings/${PMS_WEB_RESERVATION_ID}$`));
+    await assertHealthy();
+  });
+
+  // VAY-2575: confirming the transfer is the owner's. Staff without the owner key see the held room
+  // and the deadline, but no confirm link, and who can confirm it.
+  test("leaves the card's confirmation to the owner for staff without the owner key", async ({
+    page,
+  }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await page.route("**/api/identity/staff/self-access", (route) =>
+      route.fulfill({
+        json: {
+          membershipId: "pms-front-desk-membership",
+          roleKey: "front_desk",
+          permissions: PMS_WEB_OWNER_PERMISSIONS.filter(
+            (permission) => permission !== "pms.operations.manage",
+          ),
+        },
+      }),
+    );
+    await page.goto("/calendar");
+    await page.locator('[data-bar="booking"]', { hasText: "awaiting payment" }).click();
+    const card = page.getByRole("dialog", { name: "Ada Lovelace" });
+    await expect(card.getByText(/^Pay by .*13.*15:30$/)).toBeVisible();
+    await expect(card.getByRole("link", { name: "Open booking" })).toBeVisible();
+    await expect(card.getByRole("link", { name: "Mark transfer received" })).toHaveCount(0);
+    await expect(card.getByText("Only the account owner can confirm this payment.")).toBeVisible();
     await assertHealthy();
   });
 });

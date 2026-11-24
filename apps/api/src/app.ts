@@ -90,9 +90,24 @@ import type {
   BookingSettingsWriteRepository,
 } from "./routes/bookingSettings.js";
 import type { BookingPublicationRefreshPort } from "./domains/bookingPublicationProductionRuntime.js";
+import { aiActionRouteGate, delegatedWriteProblem } from "./ai/actions/registry.js";
 import { registerAiHotelRoutes } from "./routes/aiHotels.js";
+import {
+  registerPendingActionRoutes,
+  type PendingActionRouteOptions,
+} from "./ai/changes/pendingActions.js";
+import { registerAiActivityRoutes } from "./routes/aiActivity.js";
+import type { AiActivityStore } from "./ai/actionLog/aiActivity.js";
+import type { AiActionLog } from "./ai/actionLog/actionLog.js";
+import { createAssistantRuntime } from "./ai/assistant/assistantRuntime.js";
+import type { ConversationStore } from "./ai/assistant/conversationStore.js";
+import { delegatedAssistantTools } from "./ai/assistant/registryTools.js";
+import type { AiProvider } from "./ai/provider/aiProvider.js";
+import { routeKey } from "./ai/provider/catalog.js";
+import { registerAssistantRoutes } from "./routes/assistant.js";
 import { registerAuthSessionRoutes } from "./routes/authSession.js";
 import type { BookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
+import type { BookingCustomDomainVerifier } from "./domains/bookingCustomDomainVerification.js";
 import { registerBookingRoutes, type BookingRoutesOptions } from "./routes/booking.js";
 import type { BookingAddonItemsRepository } from "./routes/bookingAddonItems.js";
 import type { BookingPromoCodesRepository } from "./routes/bookingPromoCodes.js";
@@ -185,6 +200,7 @@ import { registerFinanceProfitLossRoutes } from "./routes/financeProfitLoss.js";
 import { registerFinanceRevenueRoutes } from "./routes/financeRevenue.js";
 import { registerFinanceBankTransferRoutes } from "./routes/financeBankTransfer.js";
 import { registerFinancePayoutDestinationRoutes } from "./routes/financePayoutDestination.js";
+import { registerFinancePayoutStatementRoutes } from "./routes/financePayoutStatement.js";
 import { registerVayadaPaymentWebhookRoutes } from "./routes/vayadaPaymentWebhooks.js";
 import { registerVayadaPaymentPayoutRoutes } from "./routes/vayadaPaymentPayouts.js";
 import { registerFinancePaymentWindowsRoutes } from "./routes/financePaymentWindows.js";
@@ -202,6 +218,10 @@ import {
   type PlatformAdminDashboardRepository,
   type PlatformAdminDashboardRoutesOptions,
 } from "./routes/platform/admin/dashboard/bookingCompatible.js";
+import {
+  registerPlatformAiBudgetRoutes,
+  type PlatformAiBudgetRoutesOptions,
+} from "./routes/platform/admin/aiBudgets.js";
 import {
   registerPlatformPropertyLifecycleRoutes,
   type PlatformPropertyLifecycleRoutesOptions,
@@ -328,6 +348,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   >;
   /** Owner-only hotel-detail edits on the ordinary login; unset keeps the sparse writer. */
   hotelSetupProfileCommand?: import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate;
+  /** VAY-2582: whether guests can book the hotel (published page or Channex); imports keep its location. */
+  isHotelLive?: (propertyId: string) => Promise<boolean>;
   /** VAY-2247 first run (GET/POST /api/hotel-setup/properties/:id/first-run); unset: not mounted. */
   hotelFirstRun?: import("./routes/hotelFirstRun.js").HotelFirstRunRouteOptions["createService"];
   /** VAY-2247 wave 2: the setup checklist; mounted with the first run (it reads the first run's state). */
@@ -400,6 +422,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   financialsActivationPropertyIds?: readonly string[];
   pmsReviewRepository?: PmsReviewRepository;
   pmsChannexManagement?: PmsChannexManagementRoutesOptions;
+  /** Rehearsal only: true refuses desk-charge "paid" (VAY-810). Off unless set (VAY-2573). */
   pmsCheckoutChargeMarkPaidFreezeEnabled?: boolean;
   pmsOperationsCommandRepository?: PmsOperationsCommandRepository;
   pmsRoomClosureRepository?: PmsRoomClosureRepository;
@@ -413,6 +436,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   pmsRoomAssignmentSettings?: PmsRoomAssignmentSettingsPort;
   pmsRoomAssignmentHistory?: PmsRoomAssignmentOptimizationHistoryPort;
   pmsCalendarAutoOpenSettings?: PmsCalendarAutoOpenSettingsPort;
+  /** VAY-2582: PMS Settings › Calendar's "Save calendar again". */
+  pmsOperatingCalendarRefresh?: import("./routes/pmsCalendarAutoOpen.js").PmsCalendarAutoOpenRoutesOptions["refreshCalendar"];
   pmsRoomPublication?: PmsRoomPublicationRoutesOptions;
   replacementPricing?: ReplacementPricingRoutesOptions;
   channexOfferPreview?: ChannexOfferPreviewRoutesOptions;
@@ -437,7 +462,23 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   publicBookabilityPublisher?: PublicBookabilityPublicationCommandPort;
   bookingPublicationRefresh?: BookingPublicationRefreshPort;
   bookingCustomDomainRepository?: BookingCustomDomainRepository;
+  bookingCustomDomainVerifier?: BookingCustomDomainVerifier;
   publicHotelProfileRepository?: PublicHotelProfileRepository;
+  /** VAY-2508: the AI action log behind GET /api/ai/activity. */
+  aiActivityStore?: AiActivityStore;
+  /** VAY-2524: the person's Yes or No to AI changes (AI_CHANGES_ENABLED). */
+  aiPendingActions?: Omit<PendingActionRouteOptions, "root">;
+  /**
+   * VAY-2518: the in-app assistant (/api/ai/assistant/*); needs `auth`. It answers "AI is off"
+   * until the provider has a route switched on (AI_PROVIDERS_ENABLED).
+   */
+  assistant?: {
+    store: ConversationStore;
+    provider: Pick<AiProvider, "routeFor" | "step">;
+    actionLog: AiActionLog;
+    /** The property's IANA time zone, for the assistant's "today". */
+    timeZoneOf?: (propertyId: string) => Promise<string | null | undefined>;
+  };
   hotelAccountInviteCodeRepository?: HotelAccountInviteCodeRepository;
   hotelAccountInvites?: Omit<HotelAccountInviteRoutesOptions, "trackCommandRepository">;
   /** Approved public profile images for the auth session (platform media). */
@@ -478,6 +519,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   platformPropertyLifecycle?: PlatformPropertyLifecycleRoutesOptions;
   hotelPropertyDeletion?: HotelPropertyDeletionRoutesOptions;
   platformPropertySlug?: PlatformPropertySlugRoutesOptions;
+  /** VAY-2504: vayada staff set each hotel account's monthly AI budget. */
+  platformAiBudgets?: PlatformAiBudgetRoutesOptions;
   identityPrivacyAllowedOrigins?: string[];
   bookingWebCheckoutAdapter?: BookingWebCheckoutAdapter;
   bookingWebAttributionSink?: BookingWebAttributionSink;
@@ -493,6 +536,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   financeRevenue?: Parameters<typeof registerFinanceRevenueRoutes>[1];
   financeBankTransfer?: Parameters<typeof registerFinanceBankTransferRoutes>[1];
   financePayoutDestination?: Parameters<typeof registerFinancePayoutDestinationRoutes>[1];
+  financePayoutStatement?: Parameters<typeof registerFinancePayoutStatementRoutes>[1];
   /** VAY-2442: events from vayada Payment's own Stripe account. */
   vayadaPaymentWebhooks?: Parameters<typeof registerVayadaPaymentWebhookRoutes>[1];
   /** VAY-2442: the live-mode endpoint, registered only with the live webhook secret. */
@@ -562,6 +606,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   registerBrowserCors(app, options.browserAllowedOrigins ?? []);
 
+  // The auth plugin's resolver; the in-app assistant resolves its delegated contexts with it too.
+  let authorizationResolver: ReturnType<typeof createAuthorizationResolver> | undefined;
   if (options.auth) {
     const {
       rolePermissionRepository,
@@ -569,15 +615,38 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       propertyAccessRepository,
       ...authOptions
     } = options.auth;
+    authorizationResolver = createAuthorizationResolver(
+      rolePermissionRepository,
+      entitlementRepository,
+      propertyAccessRepository,
+    );
     app.register(backendAuthPlugin, {
       ...authOptions,
+      // AI actions may run exactly the routes of registered actions as the user (VAY-2506/2507).
+      delegation: authOptions.delegation ?? aiActionRouteGate,
       // Partner apps send their own tokens to /partner; they are never WorkOS tokens (VAY-2436).
       skipPathPrefixes: ["/partner/"],
-      authorizationResolver: createAuthorizationResolver(
-        rolePermissionRepository,
-        entitlementRepository,
-        propertyAccessRepository,
-      ),
+      authorizationResolver,
+    });
+    // The gate lets an AI write reach the route of an AI change; this holds the request itself to
+    // that change, so the AI never reaches the route's other fields (VAY-2522).
+    app.addHook("preValidation", async (request, reply) => {
+      if (!request.authContext?.delegation || request.method === "GET") return;
+      const header = request.headers["idempotency-key"];
+      const problem = delegatedWriteProblem({
+        method: request.method,
+        routeUrl: request.routeOptions.url,
+        // find-my-way's params object has its own prototype: hand over a plain copy.
+        params: { ...(request.params as Record<string, unknown>) },
+        query: request.query,
+        body: request.body,
+        idempotencyKey: typeof header === "string" ? header : undefined,
+      });
+      if (problem) {
+        return reply
+          .status(403)
+          .send({ code: "delegation_refused", message: `Delegated request refused: ${problem}.` });
+      }
     });
   }
 
@@ -616,6 +685,42 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     });
   }
   app.register(registerRouteGroups, { prefix: "/api" });
+  if (options.aiActivityStore) {
+    app.register(registerAiActivityRoutes, { prefix: "/api/ai", store: options.aiActivityStore });
+  }
+  if (options.aiPendingActions) {
+    app.register(registerPendingActionRoutes, {
+      prefix: "/api/ai",
+      ...options.aiPendingActions,
+      root: app,
+    });
+  }
+  if (options.assistant && !(options.auth && authorizationResolver)) {
+    app.log.warn("The in-app assistant needs auth: its routes are not mounted");
+  } else if (options.assistant && options.auth && authorizationResolver) {
+    const { store, provider, actionLog, timeZoneOf } = options.assistant;
+    const runtime = createAssistantRuntime({
+      store,
+      provider,
+      ...(timeZoneOf ? { timeZoneOf } : {}),
+      toolsFor: delegatedAssistantTools(app, {
+        identityRepository: options.auth.repository,
+        authorizationResolver,
+        log: actionLog,
+        model: () => {
+          const route = provider.routeFor("assistant_chat");
+          return route ? routeKey(route) : null;
+        },
+      }),
+      log: app.log,
+    });
+    app.register(registerAssistantRoutes, { prefix: "/api/ai", runtime });
+    // A root hook added while the app is built, so it runs before the other preClose hooks: from
+    // the start of a shutdown, running turns start no new step or tool (DRAIN_GRACE_MS).
+    app.addHook("preClose", async () => {
+      await runtime.drain();
+    });
+  }
   if (options.publicHotelProfileRepository) {
     app.register(registerAiHotelRoutes, {
       prefix: "/api/ai",
@@ -694,6 +799,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       repository: options.preparedImportRepository,
       profiles: options.sharedHotelSetupStatusRepository,
       rooms: options.pmsRoomSetup?.facts,
+      isLive: options.isHotelLive,
     });
   }
   if (options.sharedHotelSetupStatusRepository) {
@@ -853,6 +959,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     publicPageRefresh: options.publicPageRefresh,
     inventoryPublicOfferProjector: options.pmsInventoryPublicOfferProjector,
     customDomainRepository: options.bookingCustomDomainRepository,
+    customDomainVerifier: options.bookingCustomDomainVerifier,
     changeRequestRepository: options.bookingChangeRequestRepository,
   });
   if (options.bookingGuestChoices)
@@ -964,6 +1071,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       settings: options.pmsCalendarAutoOpenSettings,
       propertyAccessRepository: options.auth.propertyAccessRepository,
       allowedOrigins: options.pmsOperationsAllowedOrigins,
+      refreshCalendar: options.pmsOperatingCalendarRefresh,
     });
   }
   if (options.pmsRoomPublication) {
@@ -1122,6 +1230,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPmsReviewRoutes, {
       prefix: "/api/pms",
       repository: options.pmsReviewRepository,
+      propertyAccessRepository: options.auth?.propertyAccessRepository,
     });
   }
   if (options.pmsChannexManagement) {
@@ -1223,6 +1332,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       propertyAccessRepository: options.auth?.propertyAccessRepository,
     });
   }
+  // VAY-2584: the hotel owner's own payout statement, only while vayada Payment is switched on.
+  if (options.financePayoutStatement) {
+    app.register(registerFinancePayoutStatementRoutes, {
+      prefix: "/api",
+      ...options.financePayoutStatement,
+      propertyAccessRepository: options.auth?.propertyAccessRepository,
+    });
+  }
   // VAY-2442 P5: vayada Payment payouts for Vayada staff, only while the switch is on.
   if (options.vayadaPaymentPayouts) {
     app.register(registerVayadaPaymentPayoutRoutes, {
@@ -1258,6 +1375,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPlatformPropertySlugRoutes, {
       prefix: "/api/platform/admin",
       ...options.platformPropertySlug,
+    });
+  }
+  if (options.platformAiBudgets) {
+    app.register(registerPlatformAiBudgetRoutes, {
+      prefix: "/api/platform/admin",
+      ...options.platformAiBudgets,
     });
   }
   if (options.platformMedia) {

@@ -93,6 +93,14 @@ test.describe("booking-admin page-view timeline", () => {
 
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByText("Page-view data could not be loaded.")).toBeVisible();
+    // VAY-2590: the backdrop covers the whole window, its top edge included (no white strip).
+    const backdrop = await dialog.boundingBox();
+    expect(backdrop).toMatchObject({ x: 0, y: 0, height: page.viewportSize()!.height });
+    expect(
+      await dialog.evaluate((element) => element.contains(document.elementFromPoint(640, 1))),
+    ).toBe(true);
+    // Focus moves into the window, and back to the card when it closes.
+    await expect(dialog.getByRole("button", { name: "Close" })).toBeFocused();
     timelineMode = "success";
     const retry = dialog.getByRole("button", { name: "Try again" }).click();
     await timelineRequested;
@@ -112,8 +120,9 @@ test.describe("booking-admin page-view timeline", () => {
 
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
+    await expect(pageViewsCard).toBeFocused();
     dashboardRefreshFails = true;
-    await page.getByRole("button", { name: "This week" }).click();
+    await page.getByRole("button", { name: "7 days", exact: true }).click();
     await expect(pageViewsCard).toContainText("--");
     await expect(pageViewsCard).not.toContainText("28");
   });

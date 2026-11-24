@@ -13,6 +13,11 @@ export type ManagePhysicalRoomCommand = {
   expectedRevision: number;
   idempotencyKey: string;
   audit: RoomFactsCommandAudit;
+  /**
+   * An AI request's limits, checked again inside the transaction; null for a person (VAY-2522).
+   * Same shape as backend-auth's AuthorityNarrowing.
+   */
+  narrowing: { readonly access: "read" | "change"; readonly propertyIds: readonly string[] } | null;
 } & (
   | { action: "create"; changes: PhysicalRoomChanges & { operationalLabel: string } }
   | { action: "update"; roomUnitId: string; changes: PhysicalRoomChanges }

@@ -26,7 +26,7 @@ import { useTranslation } from "@/lib/i18n";
 import { useHasPmsPermission } from "@/lib/settings/PmsAccessContext";
 import { countLabel } from "@/lib/checkin/labels";
 import { BIRTH_DATE_PLACEHOLDER, birthDateInput } from "@/lib/checkin/birthDate";
-import { bookingChannelLabel } from "@/lib/bookings/channelLabel";
+import { bookingChannelLabel, notProvidedByChannel } from "@/lib/bookings/channelLabel";
 import { formatCurrency } from "@/lib/formatCurrency";
 import {
   formatGuestDate,
@@ -175,6 +175,14 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
     }
   };
 
+  // VAY-2577: a guest who only booked through one channel gets "Not provided by Airbnb". A channel
+  // sends the booker's contact only, so a stay as someone's additional guest keeps the plain text.
+  const stayChannels = Array.from(new Set(guest.stays.map((stay) => stay.channel)));
+  const contactNotProvided =
+    (stayChannels.length === 1 &&
+      guest.stays.every((stay) => stay.role !== "additional_guest") &&
+      notProvidedByChannel(stayChannels[0], t)) ||
+    t("guests.notProvided");
   const fieldValue = (field: keyof GuestFields): ReactNode => {
     const value = guest.fields[field];
     if (!value)
@@ -184,7 +192,9 @@ export default function GuestProfilePage({ params }: { params: Promise<{ id: str
             ? HIDDEN_GUEST_CONTACT
             : !guest.canReadContact && CONTACT_FIELDS.includes(field)
               ? t("guests.hidden")
-              : t("guests.notProvided")}
+              : field === "email" || field === "phone"
+                ? contactNotProvided
+                : t("guests.notProvided")}
         </span>
       );
     if (field === "countryCode") return nationalityLabel(value) ?? value;

@@ -78,6 +78,9 @@
     "apply": "Anwenden",
     "availableAccommodations": "Verfügbare Unterkünfte",
     "roomsUnavailable": "Wir können unsere Zimmer gerade nicht anzeigen. Bitte versuchen Sie es gleich noch einmal.",
+    "noWayToPayTitle": "Online-Buchung ist gerade nicht möglich",
+    "noWayToPayText": "Das Hotel nimmt im Moment keine Online-Buchungen an. Bitte kontaktieren Sie das Hotel direkt, um Ihren Aufenthalt zu buchen.",
+    "noWayToPayWhatsapp": "WhatsApp",
     "popularFilters": "Beliebte Filter",
     "includeBreakfast": "Mit Frühstück",
     "freeCancellation": "Kostenlose Stornierung",
@@ -110,8 +113,7 @@
     "nonRefundableRate": "Nicht erstattbarer Tarif",
     "nonRefundableDesc": "Nicht erstattbar",
     "off": "-15% RABATT",
-    "perNightly": "{price} / pro Nacht",
-    "youPay": "Sie zahlen {price}",
+    "taxesIncluded": "inkl. Steuern & Gebühren",
     "includes": "Inklusive:",
     "dailyBreakfast": "Tägliches Frühstück für {count}",
     "welcomeDrink": "Willkommensgetränk",
@@ -136,7 +138,7 @@
       "availabilityUnavailableTooltip": "Verfügbarkeit derzeit nicht abrufbar"
     },
     "choice": {
-      "freeCancellation": "Kostenlose Stornierung",
+      "freeCancellation": "Flexibler Tarif",
       "nonRefundable": "Nicht erstattbar",
       "partialRefund": "Teilerstattung",
       "mealNonRefundable": "{meal}, nicht erstattbar",
@@ -144,8 +146,8 @@
       "freeUntil": "Kostenlose Stornierung bis {date}, 23:59 Uhr (Ortszeit)",
       "noRefund": "Keine Erstattung bei Stornierung oder Nichterscheinen",
       "partialRefundTerms": "Bei Stornierung erstatten wir einen Teil des Preises. Unsere Bedingungen sehen Sie im nächsten Schritt",
-      "windowPassed": "Die kostenlose Stornierung endet {days, plural, one {# Tag} other {# Tage}} vor der Anreise. Für diese Daten gibt es keine Erstattung bei Stornierung oder Nichterscheinen",
-      "refundsPassed": "Erstattungen enden {days, plural, one {# Tag} other {# Tage}} vor der Anreise. Für diese Daten gibt es keine Erstattung bei Stornierung oder Nichterscheinen",
+      "windowPassed": "Keine kostenlose Stornierung für diese Daten",
+      "refundsPassed": "Keine Erstattung für diese Daten",
       "freeEnded": "Die kostenlose Stornierung ist abgelaufen",
       "refundsEnded": "Keine Erstattung mehr",
       "meal": {
@@ -590,7 +592,7 @@
       "freeEnded": "Die kostenlose Stornierung ist am {date} abgelaufen.",
       "noRefund": "Die Erstattung ist am {date} abgelaufen.",
       "nonRefundable": "Nicht erstattbar.",
-      "lateBooking": "Nicht erstattbar: weniger als {days} vor der Anreise gebucht.",
+      "lateBooking": "Keine kostenlose Stornierung: weniger als {days} vor der Anreise gebucht.",
       "days": "{count, plural, one {# Tag} other {# Tage}}",
       "payFull": "Wenn Sie stornieren oder nicht anreisen, zahlen Sie den Gesamtbetrag ({amount}).",
       "beforeAccept": "Bis wir antworten, können Sie kostenlos zurückziehen.",
@@ -613,7 +615,8 @@
         "refundsUntil": "{rooms}: Erstattung bis Ende {date}.",
         "freeEnded": "{rooms}: kostenlose Stornierung abgelaufen.",
         "noRefund": "{rooms}: keine Erstattung mehr.",
-        "nonRefundable": "{rooms}: nicht erstattbar."
+        "nonRefundable": "{rooms}: nicht erstattbar.",
+        "lateBooking": "{rooms}: keine kostenlose Stornierung."
       }
     },
     "extras": {
@@ -839,8 +842,8 @@
       "pay_at_property": {
         "title": "Im Hotel bezahlen",
         "summary": "Jetzt nichts zahlen · Zahlung bei Ankunft",
-        "explain": "Jetzt wird nichts berechnet. Sie zahlen {total} bei Ankunft im Hotel. Ihre Buchung ist sofort bestätigt.",
-        "explainRequest": "Jetzt wird nichts berechnet. Wenn das Hotel Ihre Anfrage annimmt, zahlen Sie {total} bei Ankunft. Das Hotel antwortet innerhalb von 24 Stunden.",
+        "explain": "Jetzt wird nichts berechnet. Sie zahlen bei Ankunft im Hotel. Ihre Buchung ist sofort bestätigt.",
+        "explainRequest": "Jetzt wird nichts berechnet. Wenn das Hotel Ihre Anfrage annimmt, zahlen Sie bei Ankunft. Das Hotel antwortet innerhalb von 24 Stunden.",
         "boxNow": "Jetzt zahlen",
         "boxLater": "Im Hotel",
         "phrase": "im Hotel"
@@ -849,10 +852,10 @@
         "title": "Mit Karte bezahlen",
         "summary": "Abbuchung bei der Buchung",
         "summaryRequest": "Abbuchung erst, wenn das Hotel annimmt",
-        "explain": "Wir belasten Ihre Karte mit {now}, wenn Sie bestätigen. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
-        "explainSplit": "Wir belasten Ihre Karte mit {now}, wenn Sie bestätigen; den Rest von {later} zahlen Sie im Hotel. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
-        "explainRequest": "Wir blockieren {now} auf Ihrer Karte. Lehnt das Hotel ab oder antwortet es nicht innerhalb von 24 Stunden, wird die Blockierung aufgehoben. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
-        "explainRequestSplit": "Wir blockieren {now} auf Ihrer Karte; den Rest von {later} zahlen Sie im Hotel. Lehnt das Hotel ab oder antwortet es nicht innerhalb von 24 Stunden, wird die Blockierung aufgehoben. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
+        "explain": "Wir belasten Ihre Karte mit dem Gesamtbetrag, wenn Sie bestätigen. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
+        "explainSplit": "Wir belasten Ihre Karte mit dem jetzt fälligen Betrag, wenn Sie bestätigen; den Rest zahlen Sie im Hotel. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
+        "explainRequest": "Wir blockieren den Gesamtbetrag auf Ihrer Karte. Lehnt das Hotel ab oder antwortet es nicht innerhalb von 24 Stunden, wird die Blockierung aufgehoben. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
+        "explainRequestSplit": "Wir blockieren den jetzt fälligen Betrag auf Ihrer Karte; den Rest zahlen Sie im Hotel. Lehnt das Hotel ab oder antwortet es nicht innerhalb von 24 Stunden, wird die Blockierung aufgehoben. Ihre Kartendaten geben Sie im nächsten Schritt ein.",
         "boxNow": "Jetzt belastet",
         "boxHold": "Jetzt blockiert",
         "boxCharged": "Abbuchung",
@@ -902,7 +905,8 @@
       "continueShort": "Weiter",
       "priceDetails": "Preisdetails",
       "taxes": "Steuern und Gebühren",
-      "included": "Inklusive"
+      "included": "Inklusive",
+      "chargedIn": "Das Hotel rechnet in der Währung {currency} ab: <b>{amount}</b>. Die angezeigten {shown} beruhen auf dem heutigen Wechselkurs."
     },
     "checkingPrice": "Preis wird geprüft …",
     "busyConfirm": "Buchung wird bestätigt …",
@@ -934,6 +938,8 @@
     "agree": "Ich stimme den Stornierungsbedingungen, Hausregeln und Allgemeinen Geschäftsbedingungen zu.",
     "agreeNonRefundable": "Mir ist bewusst, dass diese Buchung nicht erstattbar ist. Wenn ich storniere oder nicht anreise, wird der gesamte Aufenthalt berechnet.",
     "agreeSomeNonRefundable": "Mir ist bewusst, dass einige dieser Zimmer nicht erstattbar sind. Wenn ich storniere oder nicht anreise, wird ihr voller Preis berechnet.",
+    "agreeNoFreeCancellation": "Mir ist bewusst, dass ich diese Buchung nicht kostenlos stornieren kann. Wenn ich storniere oder nicht anreise, wird der gesamte Aufenthalt berechnet.",
+    "agreeSomeNoFreeCancellation": "Mir ist bewusst, dass einige dieser Zimmer nicht kostenlos storniert werden können. Wenn ich storniere oder nicht anreise, wird ihr voller Preis berechnet.",
     "agreeNoTerms": "Ich stimme den Stornierungsbedingungen und Hausregeln zu.",
     "agreeMissing": "Bitte setzen Sie das Häkchen, um Ihre Buchung zu bestätigen.",
     "hintDetails": "Geben Sie Ihre Daten ein, um zu buchen.",
@@ -950,6 +956,9 @@
         "refundsUntil": "Erstattung bis {date}",
         "freeEnded": "Kostenlose Stornierung abgelaufen",
         "nonRefundable": "Nicht erstattbar",
+        "lateBooking": "Keine kostenlose Stornierung",
+        "lateBookingOnceAccepted": "Keine kostenlose Stornierung, sobald das Hotel annimmt",
+        "lateBookingOncePaid": "Nach der Zahlung keine kostenlose Stornierung",
         "noRefund": "Keine Erstattung mehr",
         "notRefundableOnceAccepted": "Nicht erstattbar, sobald das Hotel annimmt",
         "notRefundableOncePaid": "Nach der Zahlung nicht erstattbar"

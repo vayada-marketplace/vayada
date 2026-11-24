@@ -12,6 +12,7 @@ export const BOOKING_CUSTOM_DOMAIN_PATH = "/api/booking/hotels/:hotelId/custom-d
 
 type BookingCustomDomainReadApiClient = Pick<ApiClient, "get">;
 type BookingCustomDomainWriteApiClient = Pick<ApiClient, "put" | "delete">;
+type BookingCustomDomainCheckApiClient = Pick<ApiClient, "post">;
 
 export type BookingCustomDomainStatus = "not_configured" | "pending" | "verified" | "failed";
 export type BookingCustomDomainSslStatus = "not_configured" | "pending" | "active" | "failed";
@@ -21,6 +22,21 @@ export interface BookingCustomDomainDnsRecord {
   name: string;
   value: string;
   status: "pending" | "verified" | "failed";
+  /** The name to type in the hotel's DNS panel ("booking"), known after a check. */
+  host?: string;
+}
+
+export type BookingCustomDomainIssueCode =
+  | "dns_record_missing"
+  | "dns_record_wrong_target"
+  | "certificate_pending"
+  | "routing_pending"
+  | "hostname_rejected"
+  | "check_unavailable";
+
+export interface BookingCustomDomainIssue {
+  code: BookingCustomDomainIssueCode;
+  foundTarget: string | null;
 }
 
 export interface BookingCustomDomainResponse {
@@ -32,6 +48,7 @@ export interface BookingCustomDomainResponse {
   sslStatus: BookingCustomDomainSslStatus;
   dnsRecords: BookingCustomDomainDnsRecord[];
   verificationErrors: string[];
+  verificationIssue: BookingCustomDomainIssue | null;
   checkedAt: string | null;
   updatedAt: string | null;
 }
@@ -87,6 +104,22 @@ export async function upsertBookingCustomDomain(
     return await client.put<BookingCustomDomainResponse>(
       buildBookingCustomDomainEndpoint(input),
       { domain: input.domain },
+      omitHotelContext,
+    );
+  } catch (error) {
+    throw toBookingCustomDomainClientError(error, "write");
+  }
+}
+
+/** Checks the domain's DNS record and certificate now and stores the outcome (VAY-2568). */
+export async function checkBookingCustomDomain(
+  input: BookingCustomDomainInput,
+  client: BookingCustomDomainCheckApiClient = apiClient,
+): Promise<BookingCustomDomainResponse> {
+  try {
+    return await client.post<BookingCustomDomainResponse>(
+      `${buildBookingCustomDomainEndpoint(input)}/check`,
+      {},
       omitHotelContext,
     );
   } catch (error) {

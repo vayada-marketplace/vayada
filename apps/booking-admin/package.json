@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@vayada/assistant-ui": "*",
     "@vayada/domain-booking": "*",
     "@vayada/domain-finance": "*",
     "@vayada/domain-hotels": "*",
@@ -23,6 +24,7 @@
     "@vayada/fonts": "*",
     "@vayada/product-onboarding": "*",
     "@vayada/settings-ui": "*",
+    "@vayada/web-security": "*",
     "@vayada/locale-constants": "*",
     "clsx": "^2.0.0",
     "next": "16.2.6",

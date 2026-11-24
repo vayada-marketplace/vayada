@@ -1301,6 +1301,41 @@ describe("api config", () => {
     ).toBe("booking.localhost");
   });
 
+  it("loads the custom-domain Cloudflare settings only as a pair (VAY-2568)", () => {
+    expect(loadConfig({}).bookingCustomDomainCloudflare).toBeUndefined();
+    expect(
+      loadConfig({ CLOUDFLARE_API_TOKEN: " token ", CLOUDFLARE_ZONE_ID: "zone" })
+        .bookingCustomDomainCloudflare,
+    ).toEqual({ apiToken: "token", zoneId: "zone" });
+    expect(
+      loadConfig({ CLOUDFLARE_API_TOKEN: "token" }).bookingCustomDomainCloudflare,
+    ).toBeUndefined();
+  });
+
+  it("loads the Maps key editor only with both the key name and the credentials (VAY-2589)", () => {
+    const keyName = "projects/vayada-maps/locations/global/keys/key-1";
+    expect(loadConfig({}).googleMapsKeyEditor).toBeUndefined();
+    expect(
+      loadConfig({
+        GOOGLE_MAPS_BROWSER_KEY_NAME: ` ${keyName} `,
+        GOOGLE_MAPS_KEY_EDITOR_CREDENTIALS: '{"type":"service_account"}',
+      }).googleMapsKeyEditor,
+    ).toEqual({ keyName, credentialsJson: '{"type":"service_account"}' });
+    expect(
+      loadConfig({ GOOGLE_MAPS_BROWSER_KEY_NAME: keyName }).googleMapsKeyEditor,
+    ).toBeUndefined();
+  });
+
+  it("reads the custom domains routed to the new booking frontend with their properties", () => {
+    expect(loadConfig({}).bookingCustomDomainRoutes).toEqual(new Map());
+    expect(
+      loadConfig({
+        BOOKING_CUSTOM_DOMAIN_ROUTES:
+          " WWW.Booking.Hotel.example =AAAA0000-0000-4000-8000-000000000001,bad,x=y=z,",
+      }).bookingCustomDomainRoutes,
+    ).toEqual(new Map([["www.booking.hotel.example", "aaaa0000-0000-4000-8000-000000000001"]]));
+  });
+
   it("keeps platform media serving inactive by default", () => {
     expect(loadConfig({}).platformMediaServing).toBeUndefined();
   });
@@ -1411,6 +1446,45 @@ describe("api config", () => {
       loadConfig({ PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL: "ops@example.test" }),
     ).toThrow(
       "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL requires RESEND_API_KEY and BOOKING_EMAIL_FROM",
+    );
+  });
+
+  it("keeps the in-app assistant's API off unless AI_ASSISTANT_ENABLED is true (VAY-2518)", () => {
+    expect(loadConfig({}).aiAssistantEnabled).toBe(false);
+    expect(loadConfig({ AI_ASSISTANT_ENABLED: "false" }).aiAssistantEnabled).toBe(false);
+    expect(loadConfig({ AI_ASSISTANT_ENABLED: "true" }).aiAssistantEnabled).toBe(true);
+  });
+
+  it("reads the AI budget default and the monthly AI spend alert (VAY-2504)", () => {
+    expect(loadConfig({})).toMatchObject({
+      aiDefaultMonthlyBudgetMicroUsd: 0,
+      aiSpendAlertThresholdMicroUsd: 100_000_000,
+      // VAY-2524: AI changes stay off unless switched on.
+      aiChangesEnabled: false,
+    });
+    expect(loadConfig({ AI_CHANGES_ENABLED: "true" }).aiChangesEnabled).toBe(true);
+    expect(loadConfig({}).aiSpendAlertEmail).toBeUndefined();
+    const email = { RESEND_API_KEY: "test-key", BOOKING_EMAIL_FROM: "sender@example.test" };
+    expect(
+      loadConfig({
+        ...email,
+        AI_DEFAULT_MONTHLY_BUDGET_USD: "2.50",
+        AI_SPEND_ALERT_EMAIL: "owner@example.test",
+        AI_SPEND_ALERT_USD: "250",
+      }),
+    ).toMatchObject({
+      aiDefaultMonthlyBudgetMicroUsd: 2_500_000,
+      aiSpendAlertEmail: "owner@example.test",
+      aiSpendAlertThresholdMicroUsd: 250_000_000,
+    });
+    expect(() => loadConfig({ AI_SPEND_ALERT_EMAIL: "owner@example.test" })).toThrow(
+      "AI_SPEND_ALERT_EMAIL requires RESEND_API_KEY and BOOKING_EMAIL_FROM",
+    );
+    expect(() => loadConfig({ AI_SPEND_ALERT_USD: "0" })).toThrow(
+      "AI_SPEND_ALERT_USD must be dollars above 0",
+    );
+    expect(() => loadConfig({ AI_DEFAULT_MONTHLY_BUDGET_USD: "five" })).toThrow(
+      "AI_DEFAULT_MONTHLY_BUDGET_USD must be dollars",
     );
   });
 

@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
 import {
+  isRegisteredChannexRatePlan,
   resolveChannexOfferRatePlan,
   type ChannexOfferLink,
 } from "./channexOfferRateResolution.js";
@@ -17,7 +18,10 @@ import {
 
 export type ChannexRoomStay = {
   externalRoomTypeId: string;
+  /** The rate plan id the booking room names (an occupancy option or derived plan: its own id). */
   externalRatePlanId: string;
+  /** VAY-2108: the room's meta.parent_rate_plan_id (UUIDs only), the plan behind that option. */
+  externalParentRatePlanId?: string;
   checkIn: string;
   checkOut: string;
   adults: number;
@@ -145,14 +149,37 @@ export async function persistChannexAssignments(
         });
       // VAY-2108: a plan with no legacy mapping may be one our published offers own.
       // The staging import and repair keep their own catalog evidence.
-      if (mapped.length === 0 && !input.bootstrapHash && !input.repair)
-        mapped = await resolveChannexOfferRatePlan(client, {
+      if (mapped.length === 0 && !input.bootstrapHash && !input.repair) {
+        const offerScope = {
           propertyId,
           connectionId: input.connectionId,
           externalRoomTypeId: room.externalRoomTypeId,
-          externalRatePlanId: room.externalRatePlanId,
           priorTargetIds: priorOfferTargetIds,
+        };
+        mapped = await resolveChannexOfferRatePlan(client, {
+          ...offerScope,
+          externalRatePlanId: room.externalRatePlanId,
         });
+        // Our offer plans sell per person: Channex books a non-primary occupancy option (or a
+        // plan derived from ours) under its own id and names our plan in
+        // meta.parent_rate_plan_id. Only this offer path reads the parent, only for a booked id
+        // the registry does not hold (a known plan that fails above stays refused), and the
+        // parent must pass every check of the resolver. The link keeps the booked id, as
+        // channexStay does, so the read model still names the offer.
+        const parent = room.externalParentRatePlanId;
+        if (
+          mapped.length === 0 &&
+          parent &&
+          parent !== room.externalRatePlanId &&
+          !(await isRegisteredChannexRatePlan(client, input.connectionId, room.externalRatePlanId))
+        )
+          mapped = (
+            await resolveChannexOfferRatePlan(client, { ...offerScope, externalRatePlanId: parent })
+          ).map((row) => ({
+            ...row,
+            channexOffer: { ...row.channexOffer, externalRatePlanId: room.externalRatePlanId },
+          }));
+      }
       if (mapped.length !== 1)
         throw new ChannexAssignmentConflict("operational_mapping_unavailable");
       stays.push({ ...room, ...mapped[0]! });
@@ -356,6 +383,11 @@ async function releaseUnfitAutoAssignedUnits(
   }
 }
 
+/**
+ * Compares the booked rate plan id, never externalParentRatePlanId: an occupancy option belongs
+ * to one plan, so the booked id already decides the parent. Stays saved before intake read the
+ * parent have none, so comparing it would rewrite them (or refuse a repair or a touched room).
+ */
 function sameStay(a: ChannexRoomStay | null, b: ChannexRoomStay): boolean {
   return Boolean(
     a &&

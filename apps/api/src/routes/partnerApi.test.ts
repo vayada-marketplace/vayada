@@ -13,6 +13,7 @@ import {
 import {
   checkRedirectUri,
   parsePartnerAppRegistrationArgs,
+  refuseWebhookWithoutSigningKey,
 } from "../platform/partnerAppRegistration.js";
 import { basicCredentials, bearerToken, registerPartnerApiRoutes } from "./partnerApi.js";
 
@@ -306,9 +307,55 @@ describe("partner app registration (VAY-2436)", () => {
       webhookUrl: "https://partner.example/hooks",
       contactEmail: null,
       termsVersion: "partner-contract-2026-10-31",
-      secretFile: null,
+      secretName: null,
       apply: true,
     });
+    expect(
+      parsePartnerAppRegistrationArgs([
+        "--name",
+        "Creator Links",
+        "--redirect-uri",
+        "http://localhost:3000/admin/connect/vayada",
+        "--redirect-uri",
+        "http://localhost:3000/hotel/connect/vayada",
+        "--secret-name",
+        "partner-apps/prod/creator-links-test",
+      ]),
+    ).toMatchObject({
+      redirectUris: [
+        "http://localhost:3000/admin/connect/vayada",
+        "http://localhost:3000/hotel/connect/vayada",
+      ],
+      secretName: "partner-apps/prod/creator-links-test",
+      apply: false,
+    });
+    for (const secretName of [
+      "creator-links",
+      "partner-apps/creator-links",
+      "other/prod/x",
+      "partner-apps/prod/X",
+    ])
+      expect(() =>
+        parsePartnerAppRegistrationArgs([
+          "--name",
+          "X",
+          "--redirect-uri",
+          "https://a.example/cb",
+          "--secret-name",
+          secretName,
+        ]),
+      ).toThrow(/--secret-name/);
+    // An app with a webhook gets a signing secret derived from PARTNER_WEBHOOK_SIGNING_KEY (VAY-2438).
+    expect(() =>
+      refuseWebhookWithoutSigningKey({ webhookUrl: "https://partner.example/hooks" }, null),
+    ).toThrow(/PARTNER_WEBHOOK_SIGNING_KEY/);
+    expect(() =>
+      refuseWebhookWithoutSigningKey(
+        { webhookUrl: "https://partner.example/hooks" },
+        Buffer.alloc(32, 1),
+      ),
+    ).not.toThrow();
+    expect(() => refuseWebhookWithoutSigningKey({ webhookUrl: null }, null)).not.toThrow();
     expect(checkRedirectUri("http://localhost:3000/callback")).toBe(true);
     expect(checkRedirectUri("http://partner.example/callback")).toBe(false);
     expect(checkRedirectUri("https://partner.example/callback#x")).toBe(false);

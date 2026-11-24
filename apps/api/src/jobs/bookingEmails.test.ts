@@ -299,12 +299,28 @@ describe("booking lifecycle email jobs", () => {
         { ...stay(["Double", free]), bookedOn: "2026-10-10" },
         "2026-10-09T18:30:00.000Z",
       ),
-    ).toContain(`Cancellation: Non-refundable: booked less than 3 days before arrival. ${payFull}`);
+    ).toContain(
+      `Cancellation: No free cancellation: booked less than 3 days before arrival. ${payFull}`,
+    );
     expect(await text("final_confirmation", stay(["Double", none]))).toContain(
       `Cancellation: Non-refundable. ${payFull}`,
     );
     expect(await text("final_confirmation", stay(["Double", free], ["Suite $$", none]))).toContain(
       "Cancellation: Your rooms cancel differently. Double: free until the end of Fri, 9 Oct 2026. Suite $$: non-refundable.",
+    );
+    // VAY-2587: a Flexible room booked after its free cancellation ended isn't called non-refundable.
+    const freeOneDay = {
+      kind: "flexible",
+      terms: { flexibleCancellationType: "free", freeCancellationDeadlineDays: 1 },
+    } as unknown as Terms;
+    expect(
+      await text(
+        "final_confirmation",
+        { ...stay(["Double", free], ["Suite", freeOneDay]), bookedOn: "2026-10-10" },
+        "2026-10-09T18:30:00.000Z",
+      ),
+    ).toContain(
+      "Cancellation: Your rooms cancel differently. Double: no free cancellation. Suite: free until the end of Sun, 11 Oct 2026.",
     );
     // Without trusted pricing terms, and in the other emails, nothing is said about cancelling.
     expect(await text("final_confirmation", null)).not.toContain("Cancellation:");
@@ -725,6 +741,75 @@ describe("booking lifecycle email jobs", () => {
     ) as { text: string };
     expect(text).toMatch(/Stay: Sat, 12 Sept? 2026 to Tue, 15 Sept? 2026/);
     expect(text).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+  });
+
+  // VAY-2099: the hotel learns by when to answer a request (in hotel time) and the sender gets the
+  // PMS booking page to link to; a confirmed booking's email is unchanged.
+  it("tells the hotel by when to answer a booking request, and names its PMS page", async () => {
+    const target = createTargetEmailStore();
+    const input = bookingEmailInput({
+      kind: "host_review_required",
+      recipient: { role: "host", email: "reservations@alpenrose.test" },
+    });
+    input.booking.propertyTimeZone = "Asia/Makassar";
+    input.booking.propertyName = "Hotel Alpenrose";
+    input.booking.bookingMetadata = {
+      hostResponseDeadlineAt: "2026-09-02T10:00:00.000Z",
+      // A card request's payment window; the hotel's deadline wins.
+      pendingExpiresAt: "2026-09-01T10:30:00.000Z",
+    };
+    await enqueueBookingLifecycleEmailJob(target, input);
+    const payload = JSON.parse(
+      String(target.requiredCall("INSERT INTO platform.jobs").values?.[8]),
+    ) as { text: string; pmsBookingPath?: string };
+    expect(payload.text).toMatch(
+      /Accept or reject it in your PMS by Wed, 2 Sept? 2026, 18:00 GMT\+8\. If you don't answer by then, the request expires and the rooms are released\./,
+    );
+    expect(payload.text).toContain("\n\nProperty: Hotel Alpenrose\n\n");
+    expect(payload.pmsBookingPath).toBe(
+      `/bookings/${encodeURIComponent(input.booking.guestBookingId)}`,
+    );
+
+    // An older target request: only the expiry the pending-booking sweep reads.
+    const older = createTargetEmailStore();
+    const olderInput = bookingEmailInput({
+      kind: "host_review_required",
+      recipient: { role: "host", email: "reservations@alpenrose.test" },
+    });
+    olderInput.booking.propertyTimeZone = "Asia/Makassar";
+    olderInput.booking.bookingMetadata = { pendingExpiresAt: "2026-09-03T01:00:00.000Z" };
+    await enqueueBookingLifecycleEmailJob(older, olderInput);
+    expect(
+      JSON.parse(String(older.requiredCall("INSERT INTO platform.jobs").values?.[8])).text,
+    ).toMatch(/Accept or reject it in your PMS by Thu, 3 Sept? 2026, 09:00 GMT\+8\./);
+
+    for (const bookingMetadata of [undefined, { hostResponseDeadlineAt: "not a date" }]) {
+      const noDeadline = createTargetEmailStore();
+      const noDeadlineInput = bookingEmailInput({
+        kind: "host_review_required",
+        recipient: { role: "host", email: "reservations@alpenrose.test" },
+      });
+      noDeadlineInput.booking.bookingMetadata = bookingMetadata;
+      await enqueueBookingLifecycleEmailJob(noDeadline, noDeadlineInput);
+      expect(
+        JSON.parse(String(noDeadline.requiredCall("INSERT INTO platform.jobs").values?.[8])).text,
+      ).toMatch(/\n\nAccept or reject it in your PMS\.$/);
+    }
+
+    const confirmed = createTargetEmailStore();
+    await enqueueBookingLifecycleEmailJob(
+      confirmed,
+      bookingEmailInput({
+        kind: "host_new_booking",
+        recipient: { role: "host", email: "reservations@alpenrose.test" },
+      }),
+    );
+    const confirmedPayload = JSON.parse(
+      String(confirmed.requiredCall("INSERT INTO platform.jobs").values?.[8]),
+    ) as { text: string; pmsBookingPath?: string };
+    expect(confirmedPayload.text).not.toContain("Accept or reject");
+    expect(confirmedPayload.text).not.toContain("Property:");
+    expect(confirmedPayload.pmsBookingPath).toBeUndefined();
   });
 
   it("reads the hotel's time zone with the booking", async () => {

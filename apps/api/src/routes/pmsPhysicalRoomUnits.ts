@@ -1,4 +1,4 @@
-import { UnauthorizedError } from "@vayada/backend-auth";
+import { UnauthorizedError, authorityNarrowing } from "@vayada/backend-auth";
 import { AuthorizationError } from "@vayada/backend-authorization";
 import {
   parseReconcilePhysicalRoomUnitsCommand,
@@ -50,6 +50,7 @@ export async function registerPmsPhysicalRoomUnitRoutes(
     { onRequest: authorize },
     async (request, reply) => {
       const scope = requireAuthorizedScope(authorized, request);
+      if (scope.context.delegation) return refuseAiRequest(reply);
       const roomTypeId = readRoomTypeId(request.params, reply);
       if (!roomTypeId) return reply;
       const idempotencyKey = readIdempotencyKey(request);
@@ -115,6 +116,7 @@ export async function registerPmsPhysicalRoomOperationalLabelRoutes(
     { onRequest: authorize },
     async (request, reply) => {
       const scope = requireAuthorizedScope(authorized, request);
+      if (scope.context.delegation) return refuseAiRequest(reply);
       if (!isExactObject(request.query, [])) {
         return invalidRequest(reply, "The operational-label route does not accept query fields.");
       }
@@ -216,15 +218,23 @@ export async function registerPmsPhysicalRoomManagementRoutes(
         if (!parsed.success || !isExactObject(request.query, [])) {
           return invalidRequest(reply, "The physical-room command body is invalid.");
         }
-        const command = {
+        // Typed, so none can be left out, and spread last, so no body field stands in for one.
+        const scoped: Pick<
+          ManagePhysicalRoomCommand,
+          "organizationId" | "propertyId" | "roomTypeId" | "idempotencyKey" | "audit" | "narrowing"
+        > = {
           organizationId: scope.context.selectedOrganization.organizationId,
           propertyId: scope.propertyId,
           roomTypeId,
           idempotencyKey,
           audit: commandAudit(scope.context),
+          narrowing: authorityNarrowing(scope.context),
+        };
+        const command = {
           ...parsed.data,
           action,
           ...(action !== "create" ? { roomUnitId } : {}),
+          ...scoped,
         } as ManagePhysicalRoomCommand;
         const result = await options.commandPort.managePhysicalRoom(command);
         if (result.ok) {
@@ -287,6 +297,17 @@ function authorizeRequest(request: FastifyRequest, reply: FastifyReply): Authori
     }
     throw error;
   }
+}
+
+/**
+ * Room counts and room labels share the physical-room rights check, but their commands don't carry
+ * an AI request's limits into it yet: until they do, they take no AI request (VAY-2522).
+ */
+function refuseAiRequest(reply: FastifyReply) {
+  return reply.status(403).send({
+    code: "delegation_refused",
+    message: "This room change is not available to AI yet.",
+  });
 }
 
 function commandAudit(context: AuthorizedScope["context"]): RoomFactsCommandAudit {

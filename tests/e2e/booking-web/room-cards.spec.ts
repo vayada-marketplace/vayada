@@ -141,9 +141,12 @@ for (const width of [1440, 390]) {
     expect(plainTitle.height).toBe(20);
     expect(plainTerms.y - (plainTitle.y + plainTitle.height)).toBe(6);
     await expect(choices.nth(0)).toContainText("€268");
-    await expect(choices.nth(0)).toContainText("€134 / per night");
+    // VAY-2588: the stay's price, taxes and fees included, under it (no per-night price).
+    await expect(choices.nth(0)).toContainText("2 nights · incl. taxes & fees");
+    await expect(choices.nth(0)).not.toContainText("per night");
     await expect(choices.nth(0)).toHaveAttribute("aria-pressed", "true");
-    await expect(choices.nth(1)).toContainText("Free cancellation");
+    // VAY-2587: the Flexible rate goes by the PMS's name, its deadline under it.
+    await expect(choices.nth(1)).toContainText("Flexible rate");
     await expect(choices.nth(1)).toContainText(/Free cancellation until 3 Nov/);
     await expect(choices.nth(2)).toContainText("Breakfast included");
     await expect(choices.nth(2)).toContainText("Breakfast every morning");
@@ -174,8 +177,8 @@ for (const width of [1440, 390]) {
   });
 }
 
-for (const width of [1440, 390]) {
-  test(`leads with the guest display currency and says what the guest pays at ${width}px (VAY-2390)`, async ({
+for (const width of [1440, 820, 390]) {
+  test(`shows prices only in the guest's currency, rounded, on the cards and in the details at ${width}px (VAY-2588)`, async ({
     page,
   }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
@@ -188,32 +191,74 @@ for (const width of [1440, 390]) {
         ),
       { slug: SEEDED_BOOKING_SLUG, version: CONSENT },
     );
-    await mockBookingApis(page, { displayDefaultCurrency: "USD" });
+    await mockBookingApis(page, {
+      displayDefaultCurrency: "USD",
+      displayCurrencies: ["EUR", "USD", "CHF"],
+    });
+    await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/exchange-rates`, (route) =>
+      route.fulfill({
+        json: {
+          base: "EUR",
+          rates: { USD: 1.1, CHF: 0.93 },
+          attribution: {
+            label: "Rates By Exchange Rate API",
+            url: "https://www.exchangerate-api.com",
+          },
+        },
+      }),
+    );
     await mockRooms(page);
     await mockAnyPrice(page);
     await page.goto(STAY);
 
-    const note = page.getByTestId("approximate-amounts-note");
-    await expect(note).toContainText(
-      "We charge in EUR. Amounts marked ≈ are approximate conversions.",
-    );
-    const choices = page.getByTestId("room-card-deluxe").locator("[data-offer-key]");
-    // €268 at 1.1: what the guest sees first, then what they pay in its place of the night price.
-    await expect(choices.nth(0)).toContainText("≈ US$295");
-    await expect(choices.nth(0)).toContainText("You pay €268");
-    await expect(choices.nth(0)).not.toContainText("per night");
+    const deluxe = page.getByTestId("room-card-deluxe");
+    const choices = deluxe.locator("[data-offer-key]");
+    // €268 at 1.1 is US$294.80: the guest's currency only, to the whole dollar, for the stay.
+    await expect(choices.nth(0)).toContainText("US$295");
+    await expect(choices.nth(0)).toContainText("2 nights · incl. taxes & fees");
+    // The price column never squeezes a rate's name: "Flexible rate" keeps one 20px line, on a
+    // tablet too, where the card's photo sits beside it.
+    expect((await choices.nth(1).locator("p").first().boundingBox())!.height).toBe(20);
+    for (const hidden of ["≈", "€", "You pay", "per night"])
+      await expect(deluxe).not.toContainText(hidden);
+    // The "We charge in EUR" line above the rooms is gone; the footer credits the rates.
+    await expect(page.getByTestId("approximate-amounts-note")).toHaveCount(0);
+    await expect(page.getByText("We charge in")).toHaveCount(0);
+    const credit = page.locator("footer").getByRole("link", { name: "Rates By Exchange Rate API" });
+    await expect(credit).toHaveAttribute("href", "https://www.exchangerate-api.com");
     await page.screenshot({
       path: testInfo.outputPath(`room-cards-usd-${width}.png`),
       fullPage: true,
+      animations: "disabled",
     });
 
+    // Room Details: the same price, "incl. taxes & fees" under it, and on the button.
+    await deluxe.getByRole("button", { name: "View Details" }).first().click();
+    const dialog = page.getByRole("dialog");
+    const detailRates = dialog.locator("[data-offer-key]");
+    await expect(detailRates.nth(0)).toContainText("US$295");
+    await expect(detailRates.nth(0)).toContainText("incl. taxes & fees");
+    await expect(dialog.getByRole("button", { name: "Select This Rate · US$295" })).toBeVisible();
+    for (const hidden of ["≈", "€", "You pay"]) await expect(dialog).not.toContainText(hidden);
+    await page.screenshot({
+      path: testInfo.outputPath(`room-details-usd-${width}.png`),
+      animations: "disabled",
+    });
+    await page.keyboard.press("Escape");
+
     if (width === 1440) {
-      // A guest who picks the hotel currency sees its plain prices, and keeps that choice.
+      // Swiss francs: €268 at 0.93 is CHF 249.24.
       const nav = page.locator("nav");
       await nav.getByRole("button", { name: "USD", exact: true }).click();
+      await nav.getByRole("button", { name: /Swiss Franc/ }).click();
+      await expect(choices.nth(0)).toContainText("CHF 249");
+      await expect(deluxe).not.toContainText("€");
+      // The hotel's own currency: its exact prices, no credit for rates it doesn't use.
+      await nav.getByRole("button", { name: "CHF", exact: true }).click();
       await nav.getByRole("button", { name: "€ Euro" }).click();
-      await expect(choices.nth(0)).toContainText("€134 / per night");
-      await expect(note).toHaveCount(0);
+      await expect(choices.nth(0)).toContainText("€268");
+      await expect(choices.nth(0)).toContainText("2 nights · incl. taxes & fees");
+      await expect(credit).toHaveCount(0);
       await page.reload();
       await expect(nav.getByRole("button", { name: "EUR", exact: true })).toBeVisible();
       await expect(choices.nth(0)).toContainText("€268");
@@ -223,7 +268,7 @@ for (const width of [1440, 390]) {
 }
 
 for (const width of [1440, 390]) {
-  test(`names free cancellation non-refundable once its last day has passed at ${width}px (VAY-2392)`, async ({
+  test(`keeps the Flexible rate's name once its free cancellation has passed at ${width}px (VAY-2587)`, async ({
     page,
   }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
@@ -237,28 +282,36 @@ for (const width of [1440, 390]) {
       { slug: SEEDED_BOOKING_SLUG, version: CONSENT },
     );
     await mockBookingApis(page);
-    // The Garden Suite's one choice is free cancellation until 3 days before arrival.
+    // The Garden Suite's one choice is the Flexible rate, free until 3 days before arrival.
     await mockRooms(page, undefined, { kind: "free_until_days_before_arrival", days: 3 });
+    await mockAnyPrice(page);
     // 4 Nov: for a stay from 6 Nov, free cancellation ended with 3 Nov.
     await page.clock.setFixedTime(new Date("2026-11-04T08:00:00Z"));
     await page.goto(STAY);
 
-    // Free cancellation now has the same terms as non-refundable at a higher price: only the
-    // cheaper one shows, with its saving.
-    const deluxe = page.getByTestId("room-card-deluxe").locator("[data-offer-key]");
+    // With both rates on, the Flexible rate now has the same terms as the Non-refundable one at a
+    // higher price: only the cheaper one shows, with its saving, and only it says "Non-refundable".
+    const deluxeCard = page.getByTestId("room-card-deluxe");
+    const deluxe = deluxeCard.locator("[data-offer-key]");
     await expect(deluxe).toHaveCount(2);
     await expect(deluxe.nth(0)).toContainText("Non-refundable");
     await expect(deluxe.nth(0)).toContainText("-10% OFF");
-    await expect(deluxe.nth(1)).toContainText("Breakfast included, non-refundable");
+    await expect(deluxe.nth(1)).toContainText("Breakfast included");
     await expect(deluxe.nth(1)).toContainText(
-      "Free cancellation ends 3 days before arrival. For these dates, no refund if you cancel or don't arrive",
+      "Breakfast every morning · No free cancellation for these dates",
     );
+    await expect(deluxe.nth(1)).not.toContainText(/non-refundable/i);
     await expect(deluxe.nth(1)).not.toContainText("OFF");
-    // A room whose one choice is free cancellation reads non-refundable, never "Room only".
-    const garden = page.getByTestId("room-card-garden").locator("[data-offer-key]");
+    await expect(deluxe.filter({ hasText: /non-refundable/i })).toHaveCount(1);
+    // VAY-2587: a hotel with only the Flexible rate still shows it as the Flexible rate, with a
+    // short note, never as "Non-refundable" or "Room only".
+    const gardenCard = page.getByTestId("room-card-garden");
+    const garden = gardenCard.locator("[data-offer-key]");
     await expect(garden).toHaveCount(1);
-    await expect(garden).toContainText("Non-refundable");
-    await expect(garden).toContainText("Free cancellation ends 3 days before arrival.");
+    await expect(garden).toContainText("Flexible rate");
+    await expect(garden).toContainText("No free cancellation for these dates");
+    await expect(garden).not.toContainText(/non-refundable/i);
+    await expect(garden).not.toContainText("For these dates, no refund");
     await expect(garden).not.toContainText("Room only");
     await expect(garden).not.toContainText("OFF");
     await page.screenshot({
@@ -266,10 +319,17 @@ for (const width of [1440, 390]) {
       fullPage: true,
       animations: "disabled",
     });
+
+    // Checkout's summary names it the same.
+    await page.getByTestId("select-rate-garden").click();
+    await expect(page).toHaveURL(/\/(en\/)?book\?/);
+    const summary = page.getByRole("complementary", { name: "Your stay" });
+    await expect(summary).toContainText(/Flexible rate · 2 adults/i);
+    await expect(summary).not.toContainText(/Non-refundable · 2 adults/i);
     await assertHealthy();
   });
 
-  test(`names a partial refund non-refundable once its last refund day has passed at ${width}px (VAY-2406)`, async ({
+  test(`keeps a partial refund's name once its last refund day has passed at ${width}px (VAY-2587)`, async ({
     page,
   }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
@@ -300,14 +360,12 @@ for (const width of [1440, 390]) {
     await expect(deluxe.nth(1)).toContainText("Breakfast included");
     await expect(deluxe.nth(1)).toContainText("Free cancellation until 3 Nov");
     await expect(page.getByTestId("room-card-deluxe")).not.toContainText("Partial refund");
-    // A room whose one choice is that partial refund reads non-refundable, with the reason.
+    // A room whose one choice is that partial refund keeps its name, with a short note.
     const garden = page.getByTestId("room-card-garden").locator("[data-offer-key]");
     await expect(garden).toHaveCount(1);
-    await expect(garden).toContainText("Non-refundable");
-    await expect(garden).toContainText(
-      "Refunds end 7 days before arrival. For these dates, no refund if you cancel or don't arrive",
-    );
-    await expect(garden).not.toContainText("Partial refund");
+    await expect(garden).toContainText("Partial refund");
+    await expect(garden).toContainText("No refund for these dates");
+    await expect(garden).not.toContainText(/non-refundable/i);
     await expect(garden).not.toContainText("OFF");
     await page.screenshot({
       path: testInfo.outputPath(`room-cards-refunds-passed-${width}.png`),
@@ -524,6 +582,36 @@ test("says when the rooms can't be shown, and loads them again", async ({ page }
   await notice.getByRole("button", { name: "Try again" }).click();
   await expect(page.getByTestId("room-card-deluxe")).toBeVisible();
   await expect(notice).toHaveCount(0);
+});
+
+test("tells guests to contact the hotel when no rate can be paid, instead of trying again (VAY-2583)", async ({
+  page,
+}) => {
+  await mockBookingApis(page);
+  await mockRooms(page);
+  // The catalog: rooms exist, but guests can pay for none of their rates with a way the hotel
+  // takes now (Aether: card on, every rate taking only pay at the hotel, pay at hotel off).
+  await page.route("**/pricing-offers", (route) =>
+    route.fulfill({
+      json: { version: "public-pricing-offers.v1", rooms: [], unavailable: "no_payment_method" },
+    }),
+  );
+  await page.goto(STAY);
+  const notice = page.getByTestId("rooms-no-way-to-pay");
+  await expect(notice).toContainText("Online booking isn't available right now");
+  await expect(notice).toContainText("Please contact the hotel directly to book your stay.");
+  // The hotel's own contacts, and no "try again" (nothing would change).
+  await expect(notice.getByRole("link", { name: "+41 44 000 00 00" })).toHaveAttribute(
+    "href",
+    "tel:+41440000000",
+  );
+  await expect(notice.getByRole("link", { name: "stay@alpenrose.test" })).toHaveAttribute(
+    "href",
+    "mailto:stay@alpenrose.test",
+  );
+  await expect(notice.getByRole("button", { name: "Try again" })).toHaveCount(0);
+  await expect(page.getByTestId("rooms-unavailable")).toHaveCount(0);
+  await expect(page.getByText("We can't show our rooms right now.")).toHaveCount(0);
 });
 
 test("shows a room's details with its choices, as the old page did", async ({ page }, testInfo) => {

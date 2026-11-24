@@ -98,8 +98,17 @@ describe("Booking dashboard routes", () => {
     expect(allowed.body).toMatchObject({
       funnel: { steps: [], paymentMethods: [], biggestDrop: null },
     });
+    // The dashboard's last 90 days (VAY-2594), but not a day more.
+    const ninetyDays = await injectJson(app, {
+      method: "GET",
+      url,
+      headers,
+      query: { windowStart: "2026-04-02", windowEnd: "2026-06-30" },
+    });
+    expect(ninetyDays.statusCode).toBe(200);
     for (const query of [
       { windowStart: "2026-02-30", windowEnd: "2026-03-01" },
+      { windowStart: "2026-04-01", windowEnd: "2026-06-30" },
       { windowStart: "2026-01-01", windowEnd: "2026-06-30" },
     ]) {
       expect((await injectJson(app, { method: "GET", url, headers, query })).statusCode).toBe(400);
@@ -148,7 +157,7 @@ describe("Booking dashboard routes", () => {
     ]);
   });
 
-  it("allows an explicitly assigned property", async () => {
+  it("allows an explicitly assigned property by its id, not by a legacy alias (VAY-2574)", async () => {
     const resolvedPropertyIds: string[] = [];
     app = buildDashboardApp({
       propertyScope: {
@@ -157,18 +166,38 @@ describe("Booking dashboard routes", () => {
         accessOrigin: "agency",
         assignedPropertyIds: [canonicalPropertyId],
       },
+      entitlements: [
+        activeBookingEntitlement,
+        {
+          ...activeBookingEntitlement,
+          resource: {
+            product: "booking",
+            resourceType: "booking_hotel",
+            resourceId: canonicalPropertyId,
+          },
+        },
+      ],
       resolvedPropertyIds,
     });
 
     const response = await injectJson(app, {
       method: "GET",
+      url: `/api/booking/properties/${canonicalPropertyId}/dashboard/stats`,
+      headers: { authorization: "Bearer valid-token" },
+      query: dashboardStatsQuery,
+    });
+    expect(response.statusCode).toBe(200);
+
+    // A limited member is refused the legacy alias, as the request carries no alias-to-property
+    // map. Members with every property keep using it (the tests above).
+    const alias = await injectJson(app, {
+      method: "GET",
       url: dashboardStatsUrl,
       headers: { authorization: "Bearer valid-token" },
       query: dashboardStatsQuery,
     });
-
-    expect(response.statusCode).toBe(200);
-    expect(resolvedPropertyIds).toEqual(["prop_alpenrose"]);
+    expect(alias.statusCode).toBe(403);
+    expect(resolvedPropertyIds).toEqual([canonicalPropertyId, "prop_alpenrose"]);
   });
 
   it("returns source mix and sparklines with the dashboard contract version", async () => {

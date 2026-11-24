@@ -1,10 +1,11 @@
 import pg from "pg";
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import type { RequestContext } from "@vayada/backend-auth";
+import { requireAuthContext, type RequestContext } from "@vayada/backend-auth";
+import type { PropertyAccessRepository } from "@vayada/backend-authorization";
 import type { ReviewReplyCommands, ReviewReplyStatus } from "../domains/pmsReviewReplies.js";
 import type { GuestReviewCommands } from "../domains/pmsGuestReviews.js";
 import { parseGuestReviewDraft } from "../integrations/channexGuestReviews.js";
-import { enforceRoutePolicy } from "./policy.js";
+import { enforcePmsPropertyRoutePolicy } from "./pmsPropertyPolicy.js";
 
 export type PmsReview = {
   reviewId: string;
@@ -88,14 +89,18 @@ export function createPgPmsReviewRepository(config: {
 
 export async function registerPmsReviewRoutes(
   app: FastifyInstance,
-  options: { repository: PmsReviewRepository },
+  options: { repository: PmsReviewRepository; propertyAccessRepository?: PropertyAccessRepository },
 ): Promise<void> {
+  const readAccess = (request: FastifyRequest, propertyId: string) =>
+    enforceReviewPolicy(request, propertyId, "pms.inbox.read", options.propertyAccessRepository);
+  const replyAccess = (request: FastifyRequest, propertyId: string) =>
+    enforceReviewPolicy(request, propertyId, "pms.inbox.reply", options.propertyAccessRepository);
   app.addHook("onClose", () => options.repository.close?.());
   app.get<{ Params: { propertyId: string }; Querystring: { page?: string } }>(
     "/properties/:propertyId/guest-reviews",
     async (request) => {
       const { propertyId } = request.params;
-      const context = enforceReviewPolicy(request, propertyId, true);
+      const context = await readAccess(request, propertyId);
       const page = boundedInteger(request.query.page, 1, 1, 2000);
       return (
         options.repository.guestReviews?.list(context, propertyId, page) ?? {
@@ -111,7 +116,7 @@ export async function registerPmsReviewRoutes(
     "/properties/:propertyId/guest-reviews/:reviewId",
     async (request) => {
       const { propertyId, reviewId } = request.params;
-      const context = enforceReviewPolicy(request, propertyId, true);
+      const context = await readAccess(request, propertyId);
       return (
         options.repository.guestReviews?.check(context, propertyId, reviewId) ?? {
           reviewId,
@@ -127,7 +132,7 @@ export async function registerPmsReviewRoutes(
     "/properties/:propertyId/guest-reviews/:reviewId",
     async (request, reply) => {
       const { propertyId, reviewId } = request.params;
-      const context = enforceReviewPolicy(request, propertyId, true);
+      const context = await replyAccess(request, propertyId);
       const draft = parseGuestReviewDraft(request.body);
       if (!draft) return reply.status(400).send({ code: "invalid_guest_review" });
       return (
@@ -145,7 +150,7 @@ export async function registerPmsReviewRoutes(
     "/properties/:propertyId/reviews/:reviewId/reply",
     async (request) => {
       const { propertyId, reviewId } = request.params;
-      const context = enforceReviewPolicy(request, propertyId, true);
+      const context = await readAccess(request, propertyId);
       return (
         options.repository.replies?.check(context, propertyId, reviewId) ?? {
           state: "unavailable",
@@ -158,7 +163,7 @@ export async function registerPmsReviewRoutes(
     "/properties/:propertyId/reviews/:reviewId/reply",
     async (request, reply) => {
       const { propertyId, reviewId } = request.params;
-      const context = enforceReviewPolicy(request, propertyId, true);
+      const context = await replyAccess(request, propertyId);
       const text = request.body?.text;
       // Application request bound; Channex does not publish channel-specific text limits.
       if (
@@ -181,7 +186,7 @@ export async function registerPmsReviewRoutes(
     Querystring: { channel?: string; minRating?: string; limit?: string; offset?: string };
   }>("/properties/:propertyId/reviews", async (request, reply) => {
     const { propertyId } = request.params;
-    const context = enforceReviewPolicy(request, propertyId);
+    const context = await readAccess(request, propertyId);
     const limit = boundedInteger(request.query.limit, 50, 1, 100);
     const offset = boundedInteger(request.query.offset, 0, 0, 100_000);
     const minRating = request.query.minRating
@@ -200,25 +205,25 @@ export async function registerPmsReviewRoutes(
   });
 }
 
-function enforceReviewPolicy(
+/**
+ * VAY-2575: reviews use the inbox keys, so front desk sees reviews (`pms.inbox.read`) and answers
+ * them (`pms.inbox.reply`), only for the member's own properties, as the inbox does.
+ */
+async function enforceReviewPolicy(
   request: FastifyRequest,
   propertyId: string,
-  write = false,
-): RequestContext {
-  return enforceRoutePolicy(request, {
-    permission: write ? "pms.operations.manage" : "pms.operations.read",
-    entitlement: {
-      product: "pms",
-      key: "property-management",
-      resource: { product: "pms", resourceType: "pms_property", resourceId: propertyId },
-    },
-    resource: {
-      product: "pms",
-      resourceType: "pms_property",
-      resourceId: propertyId,
-      allowedRelationships: ["owner", "operator", "front_desk"],
-    },
-  });
+  permission: "pms.inbox.read" | "pms.inbox.reply",
+  repository: PropertyAccessRepository | undefined,
+): Promise<RequestContext> {
+  if (!repository) {
+    requireAuthContext(request);
+    throw new Error("PMS review property access repository is unavailable");
+  }
+  return enforcePmsPropertyRoutePolicy(
+    request,
+    { propertyId, permission, allowedRelationships: ["owner", "operator", "front_desk"] },
+    repository,
+  );
 }
 
 function boundedInteger(value: string | undefined, fallback: number, min: number, max: number) {

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isPropertyLocationChangeRefusal,
   parseCreatePropertyProfileRequest,
   parsePropertyProfileResponse,
+  parsePropertyLocationChangeConfirmation,
   parseUpdatePropertyProfileRequest,
   type PropertyProfileResponse,
 } from "./propertyProfile.js";
@@ -207,5 +209,72 @@ describe("canonical property profile wire contract", () => {
         patch: { location: { addressPublic: true } },
       }),
     ).toBeNull();
+  });
+});
+
+describe("location change refusals (VAY-2582)", () => {
+  it("names the profile save's time zone and country refusals, and nothing else", () => {
+    for (const code of [
+      "location_change_needs_confirmation",
+      "channex_time_zone_mismatch",
+      "channex_time_zone_unavailable",
+    ])
+      expect(isPropertyLocationChangeRefusal(code)).toBe(true);
+    for (const code of ["profile_revision_conflict", "private_contact_conflict", undefined, null])
+      expect(isPropertyLocationChangeRefusal(code)).toBe(false);
+  });
+
+  it("sends the person's confirmation with a save, and nothing but true or false", () => {
+    const save = { expectedProfileRevision: 3, patch: { location: { timezone: "Europe/London" } } };
+    expect(parseUpdatePropertyProfileRequest({ ...save, confirmLocationChange: true })).toEqual({
+      ...save,
+      confirmLocationChange: true,
+    });
+    expect(
+      parseUpdatePropertyProfileRequest({ ...save, confirmLocationChange: false }),
+    ).not.toBeNull();
+    expect(parseUpdatePropertyProfileRequest(save)).toEqual(save);
+    for (const confirmLocationChange of ["true", 1, null])
+      expect(parseUpdatePropertyProfileRequest({ ...save, confirmLocationChange })).toBeNull();
+  });
+
+  it("reads what a live hotel's save asks the person to confirm", () => {
+    const answer = (changes: unknown) => ({
+      code: "location_change_needs_confirmation",
+      detail: "This changes your live hotel's time zone from Asia/Colombo to Europe/London.",
+      changes,
+    });
+    expect(
+      parsePropertyLocationChangeConfirmation(
+        answer({
+          timezone: { from: "Asia/Colombo", to: "Europe/London" },
+          countryCode: { from: "LK", to: "GB" },
+        }),
+      ),
+    ).toEqual({
+      timezone: { from: "Asia/Colombo", to: "Europe/London" },
+      countryCode: { from: "LK", to: "GB" },
+    });
+    expect(
+      parsePropertyLocationChangeConfirmation(answer({ countryCode: { from: "LK", to: "GB" } })),
+    ).toEqual({ countryCode: { from: "LK", to: "GB" } });
+    // Fields a newer server adds don't hide the question.
+    expect(
+      parsePropertyLocationChangeConfirmation(
+        answer({ countryCode: { from: "LK", to: "GB", label: "Sri Lanka" }, city: { from: "a" } }),
+      ),
+    ).toEqual({ countryCode: { from: "LK", to: "GB" } });
+    // Any other answer, or one that names no change, asks nothing.
+    for (const value of [
+      answer({}),
+      answer({ timezone: { from: "Asia/Colombo" } }),
+      answer({ timezone: { from: "", to: "Europe/London" } }),
+      answer({ city: { from: "Dikwella", to: "Sheffield" } }),
+      answer(null),
+      { ...answer({ countryCode: { from: "LK", to: "GB" } }), code: "channex_time_zone_mismatch" },
+      undefined,
+      "location_change_needs_confirmation",
+    ])
+      expect(parsePropertyLocationChangeConfirmation(value)).toBeNull();
   });
 });

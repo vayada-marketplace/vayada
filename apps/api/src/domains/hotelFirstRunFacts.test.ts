@@ -19,6 +19,7 @@ type Hotel = {
   codes?: string[] | null;
   unlabelled?: number;
   plan?: { plan: "commission" | "fixed" | null; checkoutPending: boolean };
+  live?: boolean;
 };
 
 function ports(hotel: Hotel = {}): HotelFirstRunFactsPorts {
@@ -93,6 +94,7 @@ function ports(hotel: Hotel = {}): HotelFirstRunFactsPorts {
               ],
             },
     },
+    lifecycle: { isLive: async () => hotel.live ?? false },
   } as unknown as HotelFirstRunFactsPorts;
 }
 
@@ -101,6 +103,7 @@ const read = (hotel?: Hotel) => createHotelFirstRunFactsReader(ports(hotel)).rea
 describe("first-run facts reader (VAY-2247)", () => {
   it("reads a fresh hotel: a profile and nothing else", async () => {
     expect(await read()).toMatchObject({
+      live: false,
       firstRunRoomTypeIds: [],
       language: "de",
       profile: {
@@ -203,7 +206,12 @@ describe("first-run setup progress for the checklist (VAY-2247 incident)", () =>
     createHotelFirstRunFactsReader({ ...ports(hotel), ...override }).readSetupProgress(actor);
 
   it("says how guests pay isn't done on a fresh hotel", async () => {
-    expect(await progress()).toEqual({ guestPayment: false });
+    expect(await progress()).toEqual({ guestPayment: false, live: false });
+  });
+
+  it("says a live hotel is live, whatever its first run saved (VAY-2582)", async () => {
+    expect(await progress({ live: true })).toEqual({ guestPayment: false, live: true });
+    expect(await read({ live: true })).toMatchObject({ live: true });
   });
 
   it("says it is done after a complete first run, without the readiness or any pricing or room read", async () => {
@@ -226,12 +234,14 @@ describe("first-run setup progress for the checklist (VAY-2247 incident)", () =>
     } as unknown as HotelFirstRunFactsPorts["roomRead"];
     expect(await progress({ set: true }, { readiness, pricing, roomRead })).toEqual({
       guestPayment: true,
+      live: false,
     });
   });
 
   it("keeps how guests pay open while the Fixed Fee checkout is pending", async () => {
     expect(await progress({ set: true, plan: { plan: null, checkoutPending: true } })).toEqual({
       guestPayment: false,
+      live: false,
     });
   });
 });

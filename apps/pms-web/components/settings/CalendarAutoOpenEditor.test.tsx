@@ -3,10 +3,11 @@ import { act, create } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiErrorResponse } from "@/services/api/client";
 
-const mocks = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn() }));
+const mocks = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), refresh: vi.fn() }));
 vi.mock("@/services/api/pmsPropertyClient", () => ({
   getPmsCalendarAutoOpen: mocks.load,
   updatePmsCalendarAutoOpen: mocks.save,
+  refreshPmsOperatingCalendar: mocks.refresh,
 }));
 
 import { CalendarAutoOpenEditor } from "./CalendarAutoOpenEditor";
@@ -165,7 +166,7 @@ describe("calendar auto-open editor", () => {
 
     expect(
       view.root.findByProps({ role: "alert" }).findAllByType("p")[0]!.children.join(" "),
-    ).toContain("Reopen Calendar setup");
+    ).toContain("Save your calendar again");
     expect(view.root.findByProps({ id: "auto-open-state" }).children.join("")).toContain("paused");
     act(() => view.root.findByProps({ "aria-label": "Auto-open future calendar" }).props.onClick());
     await act(async () => view.root.findByProps({ children: "Save auto-open" }).props.onClick());
@@ -176,7 +177,6 @@ describe("calendar auto-open editor", () => {
 
   it.each([
     ["operating_calendar_not_configured", "calendar"],
-    ["operating_calendar_room_bindings_stale", "calendar"],
     ["physical_room_labels_unverified", "rooms"],
   ])("links %s to the selected property's protected %s setup", async (code, step) => {
     mocks.load.mockResolvedValue({ ...response(3, true), setupError: { code } });
@@ -210,8 +210,59 @@ describe("calendar auto-open editor", () => {
   });
 
   it.each([
+    ["operating_calendar_room_bindings_stale", "Your rooms changed"],
+    ["operating_calendar_time_zone_stale", "Your hotel's time zone changed"],
+  ])(
+    "saves a calendar behind its %s again here, never through setup (VAY-2582)",
+    async (code, message) => {
+      const behind = { ...response(3, true), setupError: { code } };
+      mocks.load.mockResolvedValueOnce(behind).mockResolvedValueOnce(response(3, true));
+      mocks.refresh.mockResolvedValueOnce({ outcome: "refreshed" });
+      let view!: ReturnType<typeof create>;
+      await act(async () => {
+        view = create(createElement(CalendarAutoOpenEditor));
+      });
+      expect(JSON.stringify(view.toJSON())).toContain(message);
+      expect(view.root.findAllByType("a")).toHaveLength(0);
+      await act(async () =>
+        view.root.findByProps({ children: "Save calendar again" }).props.onClick(),
+      );
+      expect(mocks.refresh).toHaveBeenCalledOnce();
+      expect(mocks.load).toHaveBeenCalledTimes(2);
+      expect(mocks.save).not.toHaveBeenCalled();
+      expect(view.root.findByProps({ role: "status" }).children.join("")).toContain(
+        "Your calendar is saved",
+      );
+      expect(JSON.stringify(view.toJSON())).not.toContain(message);
+    },
+  );
+
+  it("says when the calendar can't be saved again here", async () => {
+    mocks.load.mockResolvedValue({
+      ...response(3, true),
+      setupError: { code: "operating_calendar_time_zone_stale" },
+    });
+    mocks.refresh
+      .mockRejectedValueOnce(
+        new ApiErrorResponse(409, {
+          code: "calendar_refresh_needs_review",
+          reason: "room_capacity_protected",
+        } as never),
+      )
+      .mockRejectedValueOnce(new ApiErrorResponse(503, { code: "calendar_refresh_unavailable" }));
+    let view!: ReturnType<typeof create>;
+    await act(async () => {
+      view = create(createElement(CalendarAutoOpenEditor));
+    });
+    const button = () => view.root.findByProps({ children: "Save calendar again" });
+    await act(async () => button().props.onClick());
+    expect(JSON.stringify(view.toJSON())).toContain("Contact Vayada support");
+    await act(async () => button().props.onClick());
+    expect(JSON.stringify(view.toJSON())).toContain("Try again in a moment");
+  });
+
+  it.each([
     ["operating_calendar_not_configured", "calendar"],
-    ["operating_calendar_room_bindings_stale", "calendar"],
     ["physical_room_labels_unverified", "rooms"],
   ])("offers recovery when enabling a disabled calendar fails with %s", async (code, step) => {
     mocks.save.mockRejectedValueOnce(new ApiErrorResponse(409, { code }));
@@ -280,6 +331,6 @@ describe("calendar auto-open editor", () => {
     expect(view.root.findAllByProps({ role: "status" })).toHaveLength(0);
     expect(
       view.root.findAllByProps({ role: "alert" }).at(-1)?.findByType("span").children.join(""),
-    ).toContain("Reopen Calendar setup");
+    ).toContain("Save your calendar again");
   });
 });

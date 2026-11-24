@@ -1,6 +1,9 @@
 "use client";
 
-import type { PropertyProfileResponse } from "@vayada/domain-hotels";
+import {
+  isPropertyLocationChangeRefusal,
+  type PropertyProfileResponse,
+} from "@vayada/domain-hotels";
 import type { SharedHotelSetupApi, SharedPropertyTypeOption } from "@vayada/product-onboarding";
 import { useEffect, useMemo, useState } from "react";
 
@@ -38,11 +41,13 @@ export type FourStepHotelDetailsProps = {
 type Loaded = { profile: PropertyProfileResponse; savedCurrency: string | null };
 
 const editError = (error: unknown) =>
-  error instanceof ApiErrorResponse && error.status === 409
-    ? "Someone else changed this property meanwhile. Reload the page, then try again."
-    : error instanceof Error && error.message
-      ? error.message
-      : "We couldn't save your property. Try again in a moment.";
+  error instanceof ApiErrorResponse && isPropertyLocationChangeRefusal(error.data.code)
+    ? error.message
+    : error instanceof ApiErrorResponse && error.status === 409
+      ? "Someone else changed this property meanwhile. Reload the page, then try again."
+      : error instanceof Error && error.message
+        ? error.message
+        : "We couldn't save your property. Try again in a moment.";
 
 /**
  * VAY-2451 steps 1 and 2 of a hotel that exists, in the four-step frame: a hotel an older setup made (to

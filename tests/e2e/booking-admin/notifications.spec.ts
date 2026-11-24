@@ -15,6 +15,9 @@ import { mockSetupExitHandoff } from "../support/setupExitHandoff";
 const FEED_ROUTE = /\/api\/booking\/properties\/[^/]+\/notifications$/;
 const READ_ROUTE = /\/api\/booking\/properties\/[^/]+\/notifications\/read$/;
 const READ_ALL_ROUTE = /\/api\/booking\/properties\/[^/]+\/notifications\/read-all$/;
+// VAY-2591: "Mark as unread" and "Mark as done".
+const UNREAD_ROUTE = /\/api\/booking\/properties\/[^/]+\/notifications\/unread$/;
+const DONE_ROUTE = /\/api\/booking\/properties\/[^/]+\/notifications\/done$/;
 // Today, 12:00 UTC (14:00 in Berlin): "12 min ago" and the day groups stay the same on every run.
 const NOW = new Date(Math.floor(Date.now() / 86_400_000) * 86_400_000 + 12 * 3_600_000);
 const ago = (minutes: number) => new Date(NOW.getTime() - minutes * 60_000).toISOString();
@@ -289,7 +292,10 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
     await page.goto("/settings");
     await bell(page).click();
 
-    await rows(page).first().getByRole("button", { name: "Mark “New booking” as read" }).click();
+    // "New" turns into "Mark as read" while the row is hovered.
+    await expect(rows(page).first().getByTestId("notification-status")).toHaveText("New");
+    await rows(page).first().hover();
+    await rows(page).first().getByRole("button", { name: "Mark as read: New booking" }).click();
     await expect
       .poll(() => marks)
       .toEqual([{ keys: ["booking-event:e0000000-0000-4000-8000-000000000001"] }]);
@@ -298,17 +304,190 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
     // The missed payment and the sync error are still unread: still red.
     await expect(page.getByTestId("notifications-badge")).toHaveAttribute("data-tone", "red");
 
-    await panel(page).getByRole("button", { name: "Mark all read" }).click();
+    await panel(page).getByRole("button", { name: "Mark all as read" }).click();
     // What the person saw: the feed's time and its sync card.
     await expect
       .poll(() => readAll)
       .toEqual([{ before: NOW.toISOString(), syncAlertKey: syncAlert.key }]);
     await expect(panel(page).getByText(/ new$/)).toHaveCount(0);
-    await expect(panel(page).getByRole("button", { name: "Mark all read" })).toHaveCount(0);
+    await expect(panel(page).getByRole("button", { name: "Mark all as read" })).toHaveCount(0);
     // Nothing unread, but the sync is still failing: a red dot without a count until it is fixed.
     await expect(page.getByTestId("notifications-badge")).toHaveText("");
     await expect(page.getByTestId("notifications-badge")).toHaveAttribute("data-tone", "red");
     await expect(bell(page)).toHaveAccessibleName("Notifications, channel manager sync failed");
+  });
+
+  test("uses brand blue for the active tab and light blue counts on the others (VAY-2591)", async ({
+    page,
+  }) => {
+    await setUp(page, [fullFeed()]);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/settings");
+    await bell(page).click();
+    const tab = (name: RegExp) => panel(page).getByRole("tab", { name });
+    const background = (locator: ReturnType<typeof tab>) =>
+      locator.evaluate((element) => getComputedStyle(element).backgroundColor);
+    await expect(tab(/^All/)).toHaveAttribute("aria-selected", "true");
+    expect(await background(tab(/^All/))).toBe("rgb(30, 62, 219)");
+    expect(await tab(/^All/).evaluate((element) => getComputedStyle(element).color)).toBe(
+      "rgb(255, 255, 255)",
+    );
+    // The active tab's count is white; the other tabs' counts are light blue, Needs action too.
+    expect(await background(tab(/^All/).locator("span"))).toBe("rgb(255, 255, 255)");
+    expect(await background(tab(/^Needs action/).locator("span"))).toBe("rgb(239, 242, 255)");
+    expect(await background(tab(/^Bookings/))).toBe("rgba(0, 0, 0, 0)");
+    await tab(/^Needs action/).click();
+    expect(await background(tab(/^Needs action/))).toBe("rgb(30, 62, 219)");
+    expect(await background(tab(/^All/))).toBe("rgba(0, 0, 0, 0)");
+  });
+
+  test("marks a read row unread, and says Read until then (VAY-2591)", async ({
+    page,
+  }, testInfo) => {
+    await setUp(page, [fullFeed()]);
+    const marks: unknown[] = [];
+    await page.route(UNREAD_ROUTE, (route) => {
+      marks.push(route.request().postDataJSON());
+      return route.fulfill({ status: 204 });
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/settings");
+    await bell(page).click();
+
+    const modified = rows(page).nth(2);
+    await expect(modified).toContainText("Booking modified");
+    await expect(modified).not.toHaveAttribute("data-unread", "true");
+    await expect(modified.getByTestId("notification-status")).toHaveText("Read");
+    await modified.hover();
+    const unread = modified.getByRole("button", { name: "Mark as unread: Booking modified" });
+    await expect(unread).toHaveCSS("opacity", "1");
+    await page.screenshot({ path: testInfo.outputPath("notifications-hover-read-1440.png") });
+    await unread.click();
+    await expect
+      .poll(() => marks)
+      .toEqual([{ keys: ["booking-event:e0000000-0000-4000-8000-000000000003"] }]);
+    await expect(modified).toHaveAttribute("data-unread", "true");
+    await expect(page.getByTestId("notifications-badge")).toHaveText("4");
+    // Unread again: hovering offers "Mark as read".
+    await modified.hover();
+    await expect(
+      modified.getByRole("button", { name: "Mark as read: Booking modified" }),
+    ).toBeVisible();
+  });
+
+  test("the amount steps aside while the mark button shows, so the button doesn't cover it (VAY-2591)", async ({
+    page,
+  }, testInfo) => {
+    await setUp(page, [fullFeed()]);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/settings");
+    await bell(page).click();
+
+    const row = rows(page).first();
+    const amount = row.getByText("€600", { exact: true });
+    const mark = row.getByRole("button", { name: "Mark as read: New booking" });
+    await expect(amount).toHaveCSS("opacity", "1");
+    await expect(mark).toHaveCSS("opacity", "0");
+
+    await row.hover();
+    await expect(mark).toHaveCSS("opacity", "1");
+    await expect(amount).toHaveCSS("opacity", "0");
+    await page.screenshot({ path: testInfo.outputPath("notifications-hover-amount-1440.png") });
+
+    await page.mouse.move(10, 890);
+    await expect(amount).toHaveCSS("opacity", "1");
+
+    // Keyboard: tabbing onto the button shows it, and the amount steps aside the same way.
+    // Focus on the row's other buttons leaves the amount alone.
+    await row.getByRole("button", { name: "View booking" }).focus();
+    await expect(amount).toHaveCSS("opacity", "1");
+    await page.keyboard.press("Tab");
+    await expect(mark).toBeFocused();
+    await expect(mark).toHaveCSS("opacity", "1");
+    await expect(amount).toHaveCSS("opacity", "0");
+  });
+
+  test("marks an item done: it leaves Needs action and stays in All as read (VAY-2591)", async ({
+    page,
+  }, testInfo) => {
+    await setUp(page, [fullFeed()]);
+    const marks: unknown[] = [];
+    await page.route(DONE_ROUTE, (route) => {
+      marks.push(route.request().postDataJSON());
+      return route.fulfill({ status: 204 });
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/settings");
+    await bell(page).click();
+    const tab = (name: RegExp) => panel(page).getByRole("tab", { name });
+    await tab(/^Needs action/).click();
+    await expect(panel(page).getByRole("heading", { name: "To do" })).toBeVisible();
+    await expect(rows(page)).toHaveCount(3);
+    const missed = rows(page).first();
+    await expect(missed).toContainText("Payment not received");
+    // Its own action in brand blue, next to Mark as done.
+    const contact = missed.getByRole("button", { name: "Contact guest" });
+    await expect(contact).toHaveCSS("background-color", "rgb(30, 62, 219)");
+    await page.screenshot({
+      path: testInfo.outputPath("notifications-needs-action-todo-1440.png"),
+    });
+    await missed.getByRole("button", { name: "Mark as done: Payment not received" }).click();
+    await expect
+      .poll(() => marks)
+      .toEqual([{ keys: ["booking-event:e0000000-0000-4000-8000-000000000002"] }]);
+    await expect(rows(page)).toHaveCount(2);
+    await expect(panel(page).getByText("Payment not received")).toHaveCount(0);
+    // Done is read: one fewer unread; the sync error keeps the badge red.
+    await expect(page.getByTestId("notifications-badge")).toHaveText("2");
+    await expect(page.getByTestId("notifications-badge")).toHaveAttribute("data-tone", "red");
+
+    await tab(/^All/).click();
+    const done = rows(page).filter({ hasText: "Payment not received" });
+    await expect(done).toHaveAttribute("data-done", "true");
+    await expect(done).not.toHaveAttribute("data-unread", "true");
+    await expect(done.getByTestId("notification-status")).toHaveText("Done");
+    await expect(done.getByRole("button", { name: /^Mark as done/ })).toHaveCount(0);
+    await expect(done.getByRole("button", { name: "Contact guest" })).not.toHaveCSS(
+      "background-color",
+      "rgb(30, 62, 219)",
+    );
+    // The undo, for the whole team: "Mark as not done" puts it back in Needs action.
+    const undo: unknown[] = [];
+    await page.route(UNREAD_ROUTE, (route) => {
+      undo.push(route.request().postDataJSON());
+      return route.fulfill({ status: 204 });
+    });
+    await done.hover();
+    await done.getByRole("button", { name: "Mark as not done: Payment not received" }).click();
+    await expect
+      .poll(() => undo)
+      .toEqual([{ keys: ["booking-event:e0000000-0000-4000-8000-000000000002"] }]);
+    await tab(/^Needs action/).click();
+    await expect(rows(page)).toHaveCount(3);
+  });
+
+  test("marking a payment it showed as read unread brings no toast (VAY-2591)", async ({
+    page,
+  }) => {
+    const feed = fullFeed();
+    feed.items[1] = { ...feed.items[1]!, read: true };
+    feed.unread = { all: 2, bookings: 1, needsAction: 1, updates: 0 };
+    await setUp(page, [feed]);
+    const marks: unknown[] = [];
+    await page.route(UNREAD_ROUTE, (route) => {
+      marks.push(route.request().postDataJSON());
+      return route.fulfill({ status: 204 });
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/settings");
+    await bell(page).click();
+    const missed = rows(page).filter({ hasText: "Payment not received" });
+    await missed.hover();
+    await missed.getByRole("button", { name: "Mark as unread: Payment not received" }).click();
+    await expect.poll(() => marks).toHaveLength(1);
+    await expect(missed).toHaveAttribute("data-unread", "true");
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId("notification-toast")).toHaveCount(0);
   });
 
   test("View booking opens Reservations filtered to that booking without PMS access", async ({
@@ -546,7 +725,7 @@ test.describe("Booking Admin notifications bell (VAY-2349)", () => {
     await expect(
       panel(page).getByText(/channel sync problems for Alpenrose show up here/),
     ).toBeVisible();
-    await expect(panel(page).getByRole("button", { name: "Mark all read" })).toHaveCount(0);
+    await expect(panel(page).getByRole("button", { name: "Mark all as read" })).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath("notifications-caught-up-1440.png") });
 
     await page.setViewportSize({ width: 390, height: 844 });
@@ -747,5 +926,30 @@ test.describe("Booking Admin notification toasts (VAY-2349 part 3)", () => {
     expect(box?.x).toBe(16);
     expect(box?.width).toBe(358);
     await page.screenshot({ path: testInfo.outputPath("notifications-toast-390.png") });
+  });
+});
+
+// On touch screens there is no hover: the mark buttons always show (VAY-2591).
+test.describe("Booking Admin notifications bell on touch screens (VAY-2591)", () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+
+  test("shows Mark as read and Mark as unread without hovering", async ({ page }, testInfo) => {
+    await setUp(page, [fullFeed()]);
+    await page.goto("/settings");
+    expect(await page.evaluate(() => matchMedia("(hover: none)").matches)).toBe(true);
+    await bell(page).tap();
+    await expect(panel(page)).toBeVisible();
+    const first = rows(page).first();
+    const markRead = first.getByRole("button", { name: "Mark as read: New booking" });
+    await expect(markRead).toBeVisible();
+    // The label stays, and the button sits under the text, not squeezed next to it.
+    await expect(first.getByTestId("notification-status")).toHaveText("New");
+    const title = await first.locator("p").first().boundingBox();
+    const button = await markRead.boundingBox();
+    expect(button!.y).toBeGreaterThan(title!.y + title!.height);
+    await expect(
+      rows(page).nth(2).getByRole("button", { name: "Mark as unread: Booking modified" }),
+    ).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("notifications-touch-390.png") });
   });
 });

@@ -6,11 +6,17 @@ import {
   sha256Hex,
   type PartnerScope,
 } from "../domains/partnerConnections.js";
+import { deriveWebhookSigningSecret } from "../domains/partnerWebhooks.js";
+
+import { PARTNER_SECRET_NAME } from "./partnerSecretToKeychain.js";
 
 /**
  * VAY-2436: register a partner app (Creator Links) once per environment. Vayada keeps only the client
- * secret's SHA-256; the secret is shown once, to hand to the partner. The webhook signing secret
- * comes with the booking updates (VAY-2438).
+ * secret's SHA-256. VAY-2441: the secret goes straight into a new AWS Secrets Manager secret, never to
+ * output or logs; on the Mac that hands it to the partner, `partner:secret-to-keychain` copies it into
+ * the Keychain and deletes the secret (partnerSecretToKeychain.ts). VAY-2438: an app with a webhook
+ * address also gets its webhook signing secret there, derived from PARTNER_WEBHOOK_SIGNING_KEY and
+ * never stored.
  */
 export type PartnerAppRegistration = {
   name: string;
@@ -19,8 +25,8 @@ export type PartnerAppRegistration = {
   webhookUrl: string | null;
   contactEmail: string | null;
   termsVersion: string;
-  /** Where --apply writes the client secret (a new file, readable only by its owner), never stdout. */
-  secretFile: string | null;
+  /** The new Secrets Manager secret --apply puts the client id and secret into (PARTNER_SECRET_NAME). */
+  secretName: string | null;
   apply: boolean;
 };
 
@@ -70,7 +76,7 @@ export function parsePartnerAppRegistrationArgs(argv: readonly string[]): Partne
     "--webhook-url",
     "--contact-email",
     "--terms-version",
-    "--secret-file",
+    "--secret-name",
   ];
   const unknown = [...values.keys()].find((flag) => !known.includes(flag));
   if (unknown) throw new PartnerAppRegistrationRefusal(`Unknown option ${unknown}`);
@@ -86,6 +92,9 @@ export function parsePartnerAppRegistrationArgs(argv: readonly string[]): Partne
   const webhookUrl = one("--webhook-url");
   if (webhookUrl !== null && !(checkRedirectUri(webhookUrl) && webhookUrl.startsWith("https:")))
     throw new PartnerAppRegistrationRefusal("--webhook-url must be an https address");
+  const secretName = one("--secret-name");
+  if (secretName !== null && !PARTNER_SECRET_NAME.test(secretName))
+    throw new PartnerAppRegistrationRefusal("--secret-name must look like partner-apps/prod/<app>");
   return {
     name,
     redirectUris: [...new Set(redirectUris)],
@@ -93,9 +102,18 @@ export function parsePartnerAppRegistrationArgs(argv: readonly string[]): Partne
     webhookUrl,
     contactEmail: one("--contact-email"),
     termsVersion: one("--terms-version") ?? "partner-contract-2026-10-31",
-    secretFile: one("--secret-file"),
+    secretName,
     apply,
   };
+}
+
+/** VAY-2438: an app with a webhook address gets a signing secret, which needs the signing key. */
+export function refuseWebhookWithoutSigningKey(
+  registration: Pick<PartnerAppRegistration, "webhookUrl">,
+  signingKey: Buffer | null,
+) {
+  if (registration.webhookUrl !== null && signingKey === null)
+    throw new PartnerAppRegistrationRefusal("--webhook-url needs PARTNER_WEBHOOK_SIGNING_KEY");
 }
 
 type Queryable = {
@@ -105,18 +123,23 @@ type Queryable = {
 /** Stores the app and returns its client id and secret, the only time the secret exists in full. */
 export async function registerPartnerApp(
   db: Queryable,
-  registration: Omit<PartnerAppRegistration, "apply" | "secretFile">,
-): Promise<{ appId: string; clientId: string; clientSecret: string }> {
+  registration: Omit<PartnerAppRegistration, "apply" | "secretName">,
+): Promise<{
+  appId: string;
+  clientId: string;
+  clientSecret: string;
+  webhookSecretVersion: number;
+}> {
   const clientId = `partner_${randomBytes(12).toString("hex")}`;
   const clientSecret = newSecretValue("secret");
-  const result = await db.query<{ appId: string }>(
+  const result = await db.query<{ appId: string; webhookSecretVersion: number }>(
     `INSERT INTO distribution.external_api_clients
        (public_client_id, client_name, contact_email, status, allowed_surfaces, rate_limit_tier,
         terms_version, credential_hash_ref, credential_rotated_at, redirect_uris, allowed_scopes,
         webhook_url)
      VALUES ($1, $2, $3, 'active', ARRAY['partner_connection']::text[], 'partner', $4, $5, now(),
              $6::text[], $7::text[], $8)
-     RETURNING id::text AS "appId"`,
+     RETURNING id::text AS "appId", webhook_secret_version AS "webhookSecretVersion"`,
     [
       clientId,
       registration.name,
@@ -128,5 +151,78 @@ export async function registerPartnerApp(
       registration.webhookUrl,
     ],
   );
-  return { appId: result.rows[0]!.appId, clientId, clientSecret };
+  return { ...result.rows[0]!, clientId, clientSecret };
+}
+
+/** Puts a new secret into the store (AWS Secrets Manager in production); never overwrites one. */
+export type PartnerSecretStore = (name: string, secretString: string) => Promise<void>;
+
+/**
+ * Storing the credentials or saving the app failed after both had started, so a secret may exist for
+ * an app that wasn't saved ("no") or may not have been ("unknown"). Hand a secret over only when its
+ * client id has a `"registered":true` line.
+ */
+export class PartnerRegistrationIncomplete extends Error {
+  constructor(
+    readonly secretName: string,
+    readonly clientId: string,
+    readonly appSaved: "no" | "unknown",
+    options?: ErrorOptions,
+  ) {
+    super(
+      appSaved === "no"
+        ? "The app wasn't saved. If the secret exists, delete it; don't hand it over"
+        : "Whether the app was saved is unknown. Hand the secret over only if its client id is registered",
+      options,
+    );
+  }
+}
+
+/**
+ * VAY-2441: saves the app and puts its credentials into the secret store in one go. The app commits
+ * only once the store holds them, so a secret never exists without its one copy, and the credentials
+ * never come back to the caller, so they can't reach output or logs. With a webhook address the
+ * credentials include the app's webhook signing secret (VAY-2438), for its current secret version.
+ */
+export async function registerPartnerAppIntoSecretStore(
+  pool: { connect(): Promise<Queryable & { release(): void }> },
+  registration: Omit<PartnerAppRegistration, "apply" | "secretName">,
+  secretName: string,
+  storeSecret: PartnerSecretStore,
+  signingKey: Buffer | null,
+): Promise<{ appId: string; clientId: string }> {
+  refuseWebhookWithoutSigningKey(registration, signingKey);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { appId, clientId, clientSecret, webhookSecretVersion } = await registerPartnerApp(
+      client,
+      registration,
+    );
+    const webhookSigningSecret =
+      registration.webhookUrl !== null && signingKey !== null
+        ? deriveWebhookSigningSecret(signingKey, clientId, webhookSecretVersion)
+        : undefined;
+    try {
+      await storeSecret(
+        secretName,
+        JSON.stringify({ clientId, clientSecret, webhookSigningSecret }),
+      );
+    } catch (error) {
+      // A refusal (the name is taken) stored nothing; any other failure may have stored it.
+      if (error instanceof PartnerAppRegistrationRefusal) throw error;
+      throw new PartnerRegistrationIncomplete(secretName, clientId, "no", { cause: error });
+    }
+    try {
+      await client.query("COMMIT");
+    } catch (error) {
+      throw new PartnerRegistrationIncomplete(secretName, clientId, "unknown", { cause: error });
+    }
+    return { appId, clientId };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }

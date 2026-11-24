@@ -155,12 +155,15 @@ describe.skipIf(!url)("current Booking promo code owner", () => {
       minimumBookingMinor: "9950",
     });
   });
-  it("binds source identity to saved policy and usage without redeeming the code", async () => {
+  it("binds source identity to saved policy, not usage, without redeeming the code", async () => {
     const f = await fixture(),
       first = await f.read();
     expect(first?.sourceRevision).toMatch(/^booking\.promo-code\.v2:[a-f0-9]{64}$/);
     expect((await f.read())?.sourceRevision).toBe(first?.sourceRevision);
+    // VAY-2566: another guest's booking with the code leaves this quote's price current.
     await pool.query("UPDATE booking.promo_definitions SET current_uses=1 WHERE id=$1", [f.id]);
+    expect((await f.read())?.sourceRevision).toBe(first?.sourceRevision);
+    await pool.query("UPDATE booking.promo_definitions SET discount_value=15 WHERE id=$1", [f.id]);
     expect((await f.read())?.sourceRevision).not.toBe(first?.sourceRevision);
     expect(
       (await pool.query("SELECT current_uses FROM booking.promo_definitions WHERE id=$1", [f.id]))

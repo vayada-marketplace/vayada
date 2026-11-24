@@ -126,6 +126,12 @@ jobs:
       - name: Settings UI package tests
         run: npm --workspace @vayada/settings-ui run test
 
+      - name: Web security package tests
+        run: npm --workspace @vayada/web-security run test
+
+      - name: Assistant UI package tests
+        run: npm --workspace @vayada/assistant-ui run test
+
       - name: Booking Web tests
         run: npm --workspace vayada-booking-engine-frontend run test
 
@@ -887,6 +893,7 @@ jobs:
         run: >-
           npm --workspace vayada-api run test -- --no-file-parallelism
           src/activeBookingPublicationProfile.integration.test.ts
+          src/routes/bookingCustomDomain.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
@@ -925,6 +932,12 @@ jobs:
       - name: Verify PMS dashboard reads per staff role preset
         if: matrix.shard == 'platform'
         run: npm --workspace vayada-api run test -- --no-file-parallelism src/pmsDashboardRoleAccess.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify AI reads run as the signed-in user (VAY-2506)
+        if: matrix.shard == 'platform'
+        run: npm --workspace vayada-api run test -- --no-file-parallelism src/ai/delegatedRead.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
@@ -1098,7 +1111,7 @@ jobs:
         run: |
           node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay2056_hotel_setup_test"); await client.end();'
           TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
-          npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupOrdinaryLogin.integration.test.ts src/hotelSetupProfileOrdinary.integration.test.ts src/hotelSetupLaunchSettingsOrdinary.integration.test.ts src/hotelSetupCurrencyOrdinary.integration.test.ts src/hotelSetupCreationOrdinary.integration.test.ts src/hotelSetupFeatureHubOrdinary.integration.test.ts src/hotelSetupLogoOrdinary.integration.test.ts src/domains/propertyMediaCommandRepository.integration.test.ts src/hotelSetupChecklist.integration.test.ts src/hotelAccountAgreements.integration.test.ts src/partnerConnections.integration.test.ts src/partnerPromoCodes.integration.test.ts src/partnerBookingUpdates.integration.test.ts
+          npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupOrdinaryLogin.integration.test.ts src/hotelSetupProfileOrdinary.integration.test.ts src/hotelSetupLaunchSettingsOrdinary.integration.test.ts src/hotelSetupCurrencyOrdinary.integration.test.ts src/hotelSetupCreationOrdinary.integration.test.ts src/hotelSetupFeatureHubOrdinary.integration.test.ts src/hotelSetupLogoOrdinary.integration.test.ts src/domains/propertyMediaCommandRepository.integration.test.ts src/hotelSetupChecklist.integration.test.ts src/hotelAccountAgreements.integration.test.ts src/partnerConnections.integration.test.ts src/partnerPromoCodes.integration.test.ts src/ai/usage/budgetGate.integration.test.ts src/ai/usage/budgetAdmin.integration.test.ts src/ai/assistant/conversationStore.integration.test.ts src/ai/assistant/assistantDeployCut.integration.test.ts src/partnerBookingUpdates.integration.test.ts
         env:
           ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2056_hotel_setup_test
@@ -1668,6 +1681,10 @@ jobs:
           node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay2111_inbox_test"); await client.end();'
           TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
           npm --workspace vayada-api run test -- --no-file-parallelism \
+            src/ai/actionLog/aiActivity.integration.test.ts \
+            src/ai/changes/pendingActions.integration.test.ts \
+            src/ai/executor/executor.integration.test.ts \
+            src/ai/executor/operationStore.integration.test.ts \
             src/domains/channexOfferPreviewReader.integration.test.ts \
             src/domains/pmsInboxAssistance.integration.test.ts \
             src/domains/pmsInboxMarkReadCommand.integration.test.ts \

@@ -187,14 +187,18 @@ export async function registerBookingDashboardRoutes(
     "/properties/:propertyId/dashboard/conversion-funnel",
     async (request, reply) => {
       const { propertyId } = request.params;
-      if (!(await enforceBookingDashboardReadPolicy(request, reply, propertyId, options))) return reply;
+      if (!(await enforceBookingDashboardReadPolicy(request, reply, propertyId, options)))
+        return reply;
       const window = parsePageViewWindowQuery(request.query);
       if (!window.ok) return sendBookingDashboardError(reply, 400, window.error);
       try {
         const funnel = await metricsReadPort.getConversionFunnel({ propertyId, ...window.value });
-        if (!funnel) return sendBookingDashboardError(reply, 404, {
-          code: "read_model_not_found", category: "not_found", message: "Booking funnel was not found for this property.",
-        });
+        if (!funnel)
+          return sendBookingDashboardError(reply, 404, {
+            code: "read_model_not_found",
+            category: "not_found",
+            message: "Booking funnel was not found for this property.",
+          });
         return { contractVersion: BOOKING_DASHBOARD_CONTRACT_VERSION, propertyId, funnel };
       } catch (error) {
         request.log.error({ err: error }, "Booking conversion funnel read failed");
@@ -331,6 +335,8 @@ function parseSparklineWindowQuery(
   return parseDateRange(query.windowStart, query.windowEnd, "windowStart", "windowEnd");
 }
 
+const MAX_WINDOW_DAYS = 90;
+
 function parsePageViewWindowQuery(
   query: DashboardWindowQuery,
 ): Parsed<{ windowStart: string; windowEnd: string }> {
@@ -342,13 +348,14 @@ function parsePageViewWindowQuery(
         Date.parse(`${parsed.value.windowStart}T00:00:00Z`)) /
         86_400_000,
     ) + 1;
-  if (days > 31) {
+  // The dashboard's longest range is the last 90 days (VAY-2594).
+  if (days > MAX_WINDOW_DAYS) {
     return {
       ok: false,
       error: {
         code: "invalid_query",
         category: "validation",
-        message: "Page-view timelines support requested windows of up to 31 days.",
+        message: `Page-view and funnel windows can be up to ${MAX_WINDOW_DAYS} days.`,
       },
     };
   }

@@ -48,10 +48,11 @@ export function createHotelSetupChecklistService(ports: HotelSetupChecklistPorts
   async function readGoLive(actor: HotelFirstRunActor): Promise<HotelGoLiveChecklist | null> {
     const facts = await ports.goLiveFacts.read(actor);
     if (!facts) return null;
-    const { guestPayment } = await ports.firstRun.readSetupProgress(actor);
+    const { guestPayment, live } = await ports.firstRun.readSetupProgress(actor);
     return buildHotelGoLiveChecklist({
       propertyId: actor.propertyId,
-      setupFinished: guestPayment,
+      // VAY-2582: a live hotel never gets "Finish setup" (it led into setup on a live hotel).
+      setupFinished: guestPayment || live,
       onlineCardsOffered: ports.onlineCardsOffered,
       ...facts,
     });

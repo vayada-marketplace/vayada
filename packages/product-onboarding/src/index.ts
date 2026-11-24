@@ -103,7 +103,7 @@ export {
   safeRelativeReturnTo,
   type ReturnToParam,
 } from "./returnTo";
-export { availableTimezones } from "./timezones";
+export { availableTimezones, ianaTimezones } from "./timezones";
 export {
   BrowserAuthHandoffError,
   createBrowserAuthHandoff,

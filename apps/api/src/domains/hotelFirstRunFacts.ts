@@ -44,6 +44,8 @@ export type HotelFirstRunFactsPorts = Readonly<{
   designRead: BookingDesignReadPort;
   plans: Pick<FinanceSubscriptionService, "getPlanStatus">;
   readiness: BookingPublicationProjectionReadinessPort;
+  /** VAY-2582: whether the hotel has gone live; setup never writes to a live hotel. */
+  lifecycle: { isLive(propertyId: string): Promise<boolean> };
 }>;
 
 const PRICING_STALE = [
@@ -111,6 +113,7 @@ export function createHotelFirstRunFactsReader(ports: HotelFirstRunFactsPorts) {
       const design = await ports.designRead.getCurrentDesign({ organizationId, propertyId });
       const plan = await ports.plans.getPlanStatus(propertyId);
       const codes = await readinessCodes(ports, actor);
+      const live = await ports.lifecycle.isLive(propertyId);
 
       const rooms: HotelFirstRunFacts["roomTypes"][number][] = [];
       for (const room of roomTypes) {
@@ -140,6 +143,7 @@ export function createHotelFirstRunFactsReader(ports: HotelFirstRunFactsPorts) {
       );
       return Object.freeze({
         propertyId,
+        live,
         firstRunRoomTypeIds: firstRunRoomTypes,
         language,
         profile: profile
@@ -201,13 +205,22 @@ export function createHotelFirstRunFactsReader(ports: HotelFirstRunFactsPorts) {
       return Object.freeze({
         guestPayment:
           payAtProperty && currencyMatches && (plan === "commission" || plan === "fixed"),
+        live: await ports.lifecycle.isLive(propertyId),
       });
+    },
+
+    /** VAY-2582: the light check the first run makes before it writes anything. */
+    isLive(actor: HotelFirstRunActor): Promise<boolean> {
+      return ports.lifecycle.isLive(actor.propertyId);
     },
   };
 }
 
-/** The go-live list's view of setup: how guests pay and the plan are saved (done or not). */
-export type HotelFirstRunSetupProgress = Readonly<{ guestPayment: boolean }>;
+/**
+ * The go-live list's view of setup: how guests pay and the plan are saved (done or not), and whether the
+ * hotel is live (VAY-2582: a live hotel is past setup, whatever the first run saved for it).
+ */
+export type HotelFirstRunSetupProgress = Readonly<{ guestPayment: boolean; live: boolean }>;
 
 function firstRunPlan(
   plan: Awaited<ReturnType<HotelFirstRunFactsPorts["plans"]["getPlanStatus"]>>,

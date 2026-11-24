@@ -51,6 +51,7 @@ import {
   redeemCurrentQuotePromo,
   redeemLockedCurrentQuotePromo,
 } from "./currentQuotePromoRedemption.js";
+import { pricingRoomRevenueProjection } from "./pricingRoomRevenueProjection.js";
 import { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js";
 import { createCurrentPricingQuoteStore } from "./currentPricingQuoteStore.js";
 import { lockCurrentPricingQuote } from "./currentPricingQuote.js";
@@ -10190,6 +10191,62 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(results.filter((v) => v.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((v) => v.status === "rejected")).toHaveLength(1);
     expect(await r.uses()).toBe(1);
+  });
+
+  it("keeps another guest's open quote with the code current after a booking uses it (VAY-2566)", async () => {
+    const r = await redemptionFixture(false, 2);
+    const issue = async () =>
+      (
+        await r.store.issue(r.f.scope.propertyId, {
+          requestId: randomUUID(),
+          selection: r.f.selection,
+          paymentMethod: "pay_at_property",
+        })
+      ).quote;
+    const second = await issue(),
+      third = await issue();
+    const current = async (quoteId: string) => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        return await lockCurrentQuoteRevalidation(client, r.f.scope.propertyId, quoteId);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    };
+    await r.apply();
+    expect(await current(second.quoteId)).not.toBeNull();
+    await expect(r.apply(await r.booking(second), second.quoteId)).resolves.toMatchObject({
+      kind: "applied",
+    });
+    expect(await r.uses()).toBe(2);
+    // Used up: the third guest's quote is no longer current, so it can't take a third use.
+    expect(await current(third.quoteId)).toBeNull();
+  });
+  it("records a real quote's nights net of its last-minute and code discounts (VAY-2566)", async () => {
+    const r = await redemptionFixture();
+    const stored = await r.store.read(r.f.scope.propertyId, r.quote.quoteId);
+    const calculation = stored?.calculation as { charges: unknown; code: unknown };
+    const nights = pricingRoomRevenueProjection(
+      stored?.quote,
+      calculation.charges,
+      calculation.code,
+    )?.nights;
+    // Two rooms of 100.00: 20.00 last-minute each, then the code's 20.00 (10% of the rooms after
+    // last-minute plus the 40.00 of extras) off the rooms' nights, the extras' share included.
+    expect(nights?.map((n) => [n.roomPositions, n.grossRoomAmount])).toEqual([
+      [[1], "70.00"],
+      [[2], "70.00"],
+    ]);
+    const lines = r.quote.evidence.lines;
+    const sum = (kind: string) =>
+      lines.filter((l) => l.kind === kind).reduce((n, l) => n + Number(l.amountMinor), 0);
+    expect(nights!.reduce((n, night) => n + Number(night.grossRoomAmount) * 100, 0)).toBe(
+      sum("room") - sum("discount"),
+    );
+    // Without the code's rooms the booking-wide discount has nowhere to go.
+    expect(pricingRoomRevenueProjection(stored?.quote, calculation.charges)).toBeNull();
   });
 
   async function acceptanceFixture(child = false) {

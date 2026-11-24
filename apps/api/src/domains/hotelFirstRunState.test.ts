@@ -8,6 +8,7 @@ const roomTypeId = "7a8b9c0d-1e2f-4a3b-8c4d-5e6f70819203";
 /** A hotel straight after "Your hotel": a profile, nothing else. */
 const fresh: HotelFirstRunFacts = {
   propertyId,
+  live: false,
   profile: {
     revision: 2,
     countryCode: "DE",
@@ -73,6 +74,8 @@ describe("hotelFirstRunState (VAY-2247)", () => {
 
   it("is done when every step is done", () => {
     const state = hotelFirstRunState(complete);
+    expect(state.live).toBe(false);
+    expect(hotelFirstRunState({ ...fresh, live: true }).live).toBe(true);
     expect(state.nextStep).toBeNull();
     expect(new Set(Object.values(states(complete)))).toEqual(new Set(["done"]));
   });

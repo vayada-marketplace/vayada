@@ -41,3 +41,17 @@ export class AuthorizationResolutionError extends Error {
     this.name = "AuthorizationResolutionError";
   }
 }
+
+/**
+ * An AI action that acts as a user (VAY-2506) was refused: a wrong or second use of its one-shot
+ * scope, a route its action did not declare, or a context that is not a narrowed delegation.
+ */
+export class DelegationRefusedError extends Error {
+  readonly statusCode = 403;
+  readonly code = "delegation_refused";
+
+  constructor(readonly reason: string) {
+    super(`Delegated request refused: ${reason}.`);
+    this.name = "DelegationRefusedError";
+  }
+}

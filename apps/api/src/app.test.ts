@@ -40,7 +40,7 @@ import { readFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import Fastify from "fastify";
 import type { QueryResult, QueryResultRow } from "pg";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "./app.js";
 import { agencyPropertyAccessRepository } from "./testAuthorization.js";
@@ -91,6 +91,11 @@ import {
   type BookingCustomDomainPool,
   type BookingCustomDomainRepository,
 } from "./routes/bookingCustomDomain.js";
+import {
+  CloudflareCustomHostnameError,
+  type BookingCustomDomainCheckResult,
+  type BookingCustomDomainVerifier,
+} from "./domains/bookingCustomDomainVerification.js";
 import { type BookingHotelChangeRequestRepository } from "./routes/bookingWebPublic.js";
 import { unusedBookingWebCheckoutAdapter } from "./routes/bookingWebPublic.fixtures.js";
 import type {
@@ -805,6 +810,7 @@ const bookingCustomDomainRepository: BookingCustomDomainRepository = {
       verificationStatus: "verified",
       verifiedAt: "2026-06-22T10:00:00.000Z",
       updatedAt: "2026-06-22T10:00:00.000Z",
+      cloudflareHostnameId: "ch-alpenrose",
     };
   },
   async upsertForPropertyId(propertyId, domain) {
@@ -820,6 +826,21 @@ const bookingCustomDomainRepository: BookingCustomDomainRepository = {
   },
   async deleteForPropertyId(propertyId) {
     return propertyId === "f6853000-0000-0000-0000-000000000001";
+  },
+  async isHostnameSaved() {
+    return false;
+  },
+  async projectPublicProfile() {},
+  async recordCheckResult(propertyId, domain, status) {
+    if (propertyId !== "f6853000-0000-0000-0000-000000000001") return null;
+    return {
+      hotelId: propertyId,
+      propertyId,
+      domain,
+      verificationStatus: status,
+      verifiedAt: status === "verified" ? "2026-11-20T20:00:00.000Z" : null,
+      updatedAt: "2026-11-20T20:00:00.000Z",
+    };
   },
 };
 
@@ -2612,6 +2633,7 @@ function buildAuthenticatedApp(
     publicPageRefresh?: (propertyId: string) => Promise<void>;
     pmsInventoryPublicOfferProjector?: PmsInventoryPublicOfferProjectionPort;
     customDomainRepository?: BookingCustomDomainRepository;
+    customDomainVerifier?: BookingCustomDomainVerifier;
     bookingAddonItemsRepository?: BookingAddonItemsRepository;
     bookingPromoCodesRepository?: BookingPromoCodesRepository;
     pmsOperationsRepository?: PmsOperationsReadRepository | null;
@@ -2700,6 +2722,7 @@ function buildAuthenticatedApp(
     publicPageRefresh: options.publicPageRefresh,
     pmsInventoryPublicOfferProjector: options.pmsInventoryPublicOfferProjector,
     bookingCustomDomainRepository: options.customDomainRepository ?? bookingCustomDomainRepository,
+    bookingCustomDomainVerifier: options.customDomainVerifier,
     bookingPropertyAccessRepository: propertyAccessRepository,
     auth: {
       verifier: createFakeVerifier(new Map([["valid-token", session]])),
@@ -5296,11 +5319,28 @@ describe("vayada-api", () => {
         accessOrigin: "agency",
         assignedPropertyIds: [pmsPropertyId],
       },
+      customDomainRepository: {
+        ...bookingCustomDomainRepository,
+        async resolveCanonicalPropertyId(hotelId) {
+          return hotelId === pmsPropertyId || hotelId === "booking_hotel_alpenrose"
+            ? pmsPropertyId
+            : null;
+        },
+      },
     });
+
+    // VAY-2574: a member limited to some properties uses the property id; a legacy alias of the
+    // booking hotel is refused, as the request carries no alias-to-property map.
+    const alias = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(alias.statusCode).toBe(403);
 
     const response = await injectJson(app, {
       method: "GET",
-      url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+      url: `/api/booking/hotels/${pmsPropertyId}/custom-domain`,
       headers: {
         authorization: "Bearer valid-token",
       },
@@ -5308,7 +5348,7 @@ describe("vayada-api", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body).toEqual({
-      hotelId: "booking_hotel_alpenrose",
+      hotelId: pmsPropertyId,
       propertyId: "f6853000-0000-0000-0000-000000000001",
       configured: true,
       domain: "book.alpenrose.example",
@@ -5323,6 +5363,7 @@ describe("vayada-api", () => {
         },
       ],
       verificationErrors: [],
+      verificationIssue: null,
       checkedAt: "2026-06-22T10:00:00.000Z",
       updatedAt: "2026-06-22T10:00:00.000Z",
     });
@@ -5397,6 +5438,7 @@ describe("vayada-api", () => {
       put: { method: "PUT" as const, payload: { domain: "book.alpenrose.example" } },
       malformed: { method: "PUT" as const, payload: "{not-json" },
       delete: { method: "DELETE" as const },
+      check: { method: "POST" as const, path: "/check" },
     };
 
     for (const [name, appOptions, authorization, requestSet, statusCode, code] of cases) {
@@ -5419,6 +5461,28 @@ describe("vayada-api", () => {
             operationCount += 1;
             return candidateRepository.deleteForPropertyId(propertyId);
           },
+          async recordCheckResult(propertyId, domain, status) {
+            operationCount += 1;
+            return candidateRepository.recordCheckResult(propertyId, domain, status);
+          },
+          async isHostnameSaved(hostname) {
+            operationCount += 1;
+            return candidateRepository.isHostnameSaved(hostname);
+          },
+          async projectPublicProfile(propertyId) {
+            operationCount += 1;
+            return candidateRepository.projectPublicProfile(propertyId);
+          },
+        },
+        customDomainVerifier: {
+          async check() {
+            operationCount += 1;
+            throw new Error("sensitive verifier call");
+          },
+          async release() {
+            operationCount += 1;
+            throw new Error("sensitive verifier call");
+          },
         },
       });
       const requestSpecs =
@@ -5427,9 +5491,10 @@ describe("vayada-api", () => {
           : [requestSet === "malformed" ? requests.malformed : requests.get];
 
       for (const requestSpec of requestSpecs) {
+        const { path, ...spec } = { path: "", ...requestSpec };
         const response = await injectJson(app, {
-          ...requestSpec,
-          url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+          ...spec,
+          url: `/api/booking/hotels/booking_hotel_alpenrose/custom-domain${path}`,
           headers: {
             ...(authorization === null
               ? {}
@@ -5452,6 +5517,15 @@ describe("vayada-api", () => {
     app = buildAuthenticatedApp({
       customDomainRepository: {
         ...bookingCustomDomainRepository,
+        async findByPropertyId(propertyId) {
+          return {
+            hotelId: propertyId,
+            propertyId,
+            domain: null,
+            verificationStatus: null,
+            updatedAt: null,
+          };
+        },
         async upsertForPropertyId(propertyId, domain) {
           writes.push({ hotelId: propertyId, domain });
           return {
@@ -5523,7 +5597,7 @@ describe("vayada-api", () => {
       message: "Booking custom-domain payload is invalid.",
     });
     expect(body.details).toContain(
-      "domain must be a hostname, not a URL, path, wildcard, localhost, or IP.",
+      "domain must be a hostname, not a URL, path, wildcard, localhost, IP, or vayada.com address.",
     );
   });
 
@@ -5569,6 +5643,443 @@ describe("vayada-api", () => {
 
     expect(response.statusCode).toBe(204);
     expect(deletes).toEqual([pmsPropertyId]);
+  });
+
+  describe("custom-domain check (VAY-2568)", () => {
+    const pendingDomain: BookingCustomDomainRepository = {
+      ...bookingCustomDomainRepository,
+      async findByPropertyId(propertyId) {
+        return {
+          hotelId: propertyId,
+          propertyId,
+          domain: "book.alpenrose.example",
+          verificationStatus: "pending",
+          verifiedAt: null,
+          updatedAt: "2026-11-20T17:12:49.000Z",
+        };
+      },
+    };
+    const checkDomain = () =>
+      injectJson(app!, {
+        method: "POST",
+        url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain/check",
+        headers: { authorization: "Bearer valid-token" },
+      });
+    const verifierAnswering = (result: BookingCustomDomainCheckResult) => {
+      const checked: string[] = [];
+      const verifier: BookingCustomDomainVerifier = {
+        async check(hostname) {
+          checked.push(hostname);
+          return result;
+        },
+        async release() {
+          throw new Error("A check never removes a hostname.");
+        },
+      };
+      return { checked, verifier };
+    };
+
+    it("verifies a domain once Cloudflare is active and republishes the live page", async () => {
+      const recorded: unknown[] = [];
+      const projected: string[] = [];
+      const refreshes: Array<{ propertyId: string; onlyIfLive?: boolean }> = [];
+      const { checked, verifier } = verifierAnswering({
+        status: "verified",
+        issue: null,
+        recordHost: null,
+        errors: [],
+      });
+      app = buildAuthenticatedApp({
+        customDomainRepository: {
+          ...pendingDomain,
+          async recordCheckResult(propertyId, domain, status) {
+            recorded.push([propertyId, domain, status]);
+            return bookingCustomDomainRepository.recordCheckResult(propertyId, domain, status);
+          },
+          async projectPublicProfile(propertyId) {
+            projected.push(propertyId);
+            throw new Error("projection failure is only logged");
+          },
+        },
+        customDomainVerifier: verifier,
+        bookingPublicationRefresh: {
+          async refresh(input) {
+            refreshes.push(input);
+            return null;
+          },
+        },
+      });
+
+      const response = await checkDomain();
+
+      expect(response.statusCode).toBe(200);
+      expect(checked).toEqual(["book.alpenrose.example"]);
+      expect(recorded).toEqual([[pmsPropertyId, "book.alpenrose.example", "verified"]]);
+      expect(response.body).toMatchObject({
+        configured: true,
+        domain: "book.alpenrose.example",
+        status: "verified",
+        sslStatus: "active",
+        verificationIssue: null,
+        verificationErrors: [],
+      });
+      await vi.waitFor(() =>
+        expect(refreshes).toMatchObject([{ propertyId: pmsPropertyId, onlyIfLive: true }]),
+      );
+      expect(projected).toEqual([pmsPropertyId]);
+    });
+
+    it("explains a missing record with the exact name to add and stores the failure", async () => {
+      const recorded: unknown[] = [];
+      const { verifier } = verifierAnswering({
+        status: "failed",
+        issue: { code: "dns_record_missing", foundTarget: null },
+        recordHost: "book",
+        errors: ["No CNAME record found for book.alpenrose.example."],
+      });
+      app = buildAuthenticatedApp({
+        customDomainRepository: {
+          ...pendingDomain,
+          async recordCheckResult(propertyId, domain, status) {
+            recorded.push(status);
+            return bookingCustomDomainRepository.recordCheckResult(propertyId, domain, status);
+          },
+        },
+        customDomainVerifier: verifier,
+      });
+
+      const response = await checkDomain();
+
+      expect(response.statusCode).toBe(200);
+      expect(recorded).toEqual(["failed"]);
+      expect(response.body).toMatchObject({
+        status: "failed",
+        sslStatus: "failed",
+        dnsRecords: [
+          {
+            type: "CNAME",
+            name: "book.alpenrose.example",
+            host: "book",
+            value: "custom.booking.vayada.com",
+            status: "failed",
+          },
+        ],
+        verificationIssue: { code: "dns_record_missing", foundTarget: null },
+        verificationErrors: ["No CNAME record found for book.alpenrose.example."],
+      });
+      expect(Date.parse((response.body as { checkedAt: string }).checkedAt)).toBeGreaterThan(
+        Date.parse("2026-11-20T17:12:49.000Z"),
+      );
+    });
+
+    it("keeps waiting without a write while the certificate is issued", async () => {
+      let writes = 0;
+      const { verifier } = verifierAnswering({
+        status: "pending",
+        issue: { code: "certificate_pending", foundTarget: null },
+        recordHost: "book",
+        errors: [],
+      });
+      app = buildAuthenticatedApp({
+        customDomainRepository: {
+          ...pendingDomain,
+          async recordCheckResult() {
+            writes += 1;
+            return null;
+          },
+        },
+        customDomainVerifier: verifier,
+      });
+
+      const response = await checkDomain();
+
+      expect(response.statusCode).toBe(200);
+      expect(writes).toBe(0);
+      expect(response.body).toMatchObject({
+        status: "pending",
+        verificationIssue: { code: "certificate_pending" },
+      });
+    });
+
+    it("says the check is unavailable, storing nothing, without Cloudflare or when it fails", async () => {
+      for (const verifier of [
+        undefined,
+        {
+          async check(): Promise<BookingCustomDomainCheckResult> {
+            throw new Error("Cloudflare custom hostname request failed (HTTP 403).");
+          },
+          async release() {
+            return "absent" as const;
+          },
+        },
+      ]) {
+        let writes = 0;
+        app = buildAuthenticatedApp({
+          customDomainRepository: {
+            ...pendingDomain,
+            async recordCheckResult() {
+              writes += 1;
+              return null;
+            },
+          },
+          customDomainVerifier: verifier,
+        });
+
+        const response = await checkDomain();
+
+        expect(response.statusCode).toBe(200);
+        expect(writes).toBe(0);
+        expect(response.body).toMatchObject({
+          status: "pending",
+          verificationIssue: { code: "check_unavailable", foundTarget: null },
+          verificationErrors: [
+            "The domain could not be checked right now. Try again in a few minutes.",
+          ],
+        });
+        await app.close();
+        app = null;
+      }
+    });
+
+    it("leaves a verified domain as it is", async () => {
+      const { checked, verifier } = verifierAnswering({
+        status: "failed",
+        issue: { code: "dns_record_missing", foundTarget: null },
+        recordHost: null,
+        errors: [],
+      });
+      app = buildAuthenticatedApp({ customDomainVerifier: verifier });
+
+      const response = await checkDomain();
+
+      expect(response.statusCode).toBe(200);
+      expect(checked).toEqual([]);
+      expect(response.body).toMatchObject({ status: "verified", verificationIssue: null });
+    });
+
+    it("republishes the live page only when the verified domain is replaced or removed", async () => {
+      const refreshes: string[] = [];
+      const writes: string[] = [];
+      const refresh = {
+        async refresh(input: { propertyId: string }) {
+          refreshes.push(input.propertyId);
+          return null;
+        },
+      };
+      const save = (domain: string) =>
+        injectJson(app!, {
+          method: "PUT",
+          url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+          headers: { authorization: "Bearer valid-token" },
+          payload: { domain },
+        });
+      app = buildAuthenticatedApp({
+        customDomainRepository: {
+          ...bookingCustomDomainRepository,
+          async upsertForPropertyId(propertyId, domain) {
+            writes.push(domain);
+            return bookingCustomDomainRepository.upsertForPropertyId(propertyId, domain);
+          },
+        },
+        bookingPublicationRefresh: refresh,
+      });
+
+      // Saving the verified domain again changes nothing.
+      const same = await save("Book.Alpenrose.Example");
+      expect(same.statusCode).toBe(200);
+      expect(same.body).toMatchObject({ status: "verified" });
+      expect([writes, refreshes]).toEqual([[], []]);
+
+      const replaced = await save("booking.alpenrose.example");
+      const removed = await app.inject({
+        method: "DELETE",
+        url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+        headers: { authorization: "Bearer valid-token" },
+      });
+      expect([replaced.statusCode, removed.statusCode]).toEqual([200, 204]);
+      expect(writes).toEqual(["booking.alpenrose.example"]);
+      expect(refreshes).toEqual([pmsPropertyId, pmsPropertyId]);
+      await app.close();
+
+      // A domain that was never verified isn't on the page: nothing to republish.
+      refreshes.length = 0;
+      app = buildAuthenticatedApp({
+        customDomainRepository: pendingDomain,
+        bookingPublicationRefresh: refresh,
+      });
+      expect((await save("booking.alpenrose.example")).statusCode).toBe(200);
+      expect(refreshes).toEqual([]);
+    });
+
+    it("keeps a ready domain pending until Vayada routes it to the new booking page", async () => {
+      let writes = 0;
+      const { verifier } = verifierAnswering({
+        status: "pending",
+        issue: { code: "routing_pending", foundTarget: null },
+        recordHost: null,
+        errors: [
+          "book.alpenrose.example is ready; Vayada still has to route it to the booking page.",
+        ],
+      });
+      app = buildAuthenticatedApp({
+        customDomainRepository: {
+          ...pendingDomain,
+          async recordCheckResult() {
+            writes += 1;
+            return null;
+          },
+        },
+        customDomainVerifier: verifier,
+      });
+
+      const response = await checkDomain();
+
+      expect(response.statusCode).toBe(200);
+      expect(writes).toBe(0);
+      expect(response.body).toMatchObject({
+        status: "pending",
+        verificationIssue: { code: "routing_pending", foundTarget: null },
+      });
+    });
+
+    describe("a removed domain's Cloudflare hostname (VAY-2580)", () => {
+      const released: string[] = [];
+      let releaseFails = false;
+      const verifier: BookingCustomDomainVerifier = {
+        async check(): Promise<BookingCustomDomainCheckResult> {
+          return {
+            status: "pending",
+            issue: { code: "certificate_pending", foundTarget: null },
+            recordHost: "book",
+            errors: [],
+            registeredHostnameId: "ch-new",
+          };
+        },
+        async release(hostnameId) {
+          released.push(hostnameId);
+          if (releaseFails) throw new CloudflareCustomHostnameError(403, [9109]);
+          return "deleted";
+        },
+      };
+      const save = (domain: string) =>
+        injectJson(app!, {
+          method: "PUT",
+          url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+          headers: { authorization: "Bearer valid-token" },
+          payload: { domain },
+        });
+      const remove = () =>
+        app!.inject({
+          method: "DELETE",
+          url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+          headers: { authorization: "Bearer valid-token" },
+        });
+      const withRepository = (overrides: Partial<BookingCustomDomainRepository>) =>
+        buildAuthenticatedApp({
+          customDomainRepository: { ...bookingCustomDomainRepository, ...overrides },
+          customDomainVerifier: verifier,
+        });
+      beforeEach(() => {
+        released.length = 0;
+        releaseFails = false;
+      });
+
+      it("is deleted when the domain is removed or replaced, and a failure doesn't block it", async () => {
+        const deletes: string[] = [];
+        app = withRepository({
+          async deleteForPropertyId(propertyId) {
+            deletes.push(propertyId);
+            return true;
+          },
+        });
+
+        // Saving the same domain again keeps its hostname.
+        expect((await save("Book.Alpenrose.Example")).statusCode).toBe(200);
+        expect(released).toEqual([]);
+
+        expect((await save("booking.alpenrose.example")).statusCode).toBe(200);
+        expect(released).toEqual(["ch-alpenrose"]);
+
+        expect((await remove()).statusCode).toBe(204);
+        expect(released).toEqual(["ch-alpenrose", "ch-alpenrose"]);
+
+        // Cloudflare refusing doesn't undo or block the removal.
+        releaseFails = true;
+        expect((await remove()).statusCode).toBe(204);
+        expect(deletes).toEqual([pmsPropertyId, pmsPropertyId]);
+        expect(released).toHaveLength(3);
+      });
+
+      it("stays when next-api didn't register it, when the domain is saved again, or when nothing was removed", async () => {
+        const cases: Array<Partial<BookingCustomDomainRepository>> = [
+          // The old booking-api's hostname (no id on the row), e.g. www.booking.aetherhilltopvillas.com.
+          {
+            async findByPropertyId(propertyId) {
+              const state = await bookingCustomDomainRepository.findByPropertyId(propertyId);
+              return state && { ...state, cloudflareHostnameId: null };
+            },
+          },
+          // Another tab or hotel saved the same domain meanwhile; its check may use the hostname.
+          {
+            async isHostnameSaved() {
+              return true;
+            },
+          },
+          // Nothing removed: not found, the write failed, or the domain couldn't be read first.
+          {
+            async deleteForPropertyId() {
+              return false;
+            },
+            async upsertForPropertyId() {
+              throw new Error("write failed");
+            },
+          },
+          {
+            async deleteForPropertyId() {
+              throw new Error("write failed");
+            },
+            async upsertForPropertyId() {
+              return null;
+            },
+          },
+          {
+            async findByPropertyId() {
+              throw new Error("read failed");
+            },
+          },
+        ];
+        for (const overrides of cases) {
+          app = withRepository(overrides);
+          await save("booking.alpenrose.example");
+          await remove();
+          await app.close();
+          app = null;
+        }
+        expect(released).toEqual([]);
+      });
+
+      it("is recorded when a check registers it, and deleted if the domain went meanwhile", async () => {
+        const recorded: Array<[string, string | undefined]> = [];
+        let replacedMeanwhile = false;
+        app = withRepository({
+          ...pendingDomain,
+          async recordCheckResult(propertyId, domain, status, registeredHostnameId) {
+            recorded.push([status, registeredHostnameId]);
+            if (replacedMeanwhile) return null;
+            return bookingCustomDomainRepository.recordCheckResult(propertyId, domain, status);
+          },
+        });
+
+        // Still pending, but the new hostname is stored on the row.
+        expect((await checkDomain()).statusCode).toBe(200);
+        expect(recorded).toEqual([["pending", "ch-new"]]);
+        expect(released).toEqual([]);
+
+        replacedMeanwhile = true;
+        expect((await checkDomain()).statusCode).toBe(200);
+        expect(released).toEqual(["ch-new"]);
+      });
+    });
   });
 
   it("resolves unambiguous Booking aliases once, then reads by canonical property UUID", async () => {
@@ -12563,6 +13074,8 @@ describe("vayada-api", () => {
         correlationId: expect.any(String),
         requestedAt: expect.any(String),
       },
+      // A person's request: no AI limits for the transaction to apply (VAY-2522).
+      narrowing: null,
     });
     await app.close();
     app = null;
@@ -16965,9 +17478,13 @@ describe("vayada-api", () => {
 
   it("freezes PMS checkout-charge mark-paid when the F1a finance bridge is disabled", async () => {
     const freezeRequest = checkoutChargeMarkPaidFreezeCase.request!;
+    const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
+      pmsOperationsCommandRepository: commandRepository,
+      // VAY-2575: the desk key, on a property the member may use.
+      permissions: ["pms.reservation.update"],
       linkedPmsPropertyId: "f3000000-0000-0000-0000-000000000686",
+      additionalPmsPropertyId: "f3000000-0000-0000-0000-000000000686",
       entitlements: [
         {
           product: "pms",
@@ -16992,6 +17509,8 @@ describe("vayada-api", () => {
       code: checkoutChargeMarkPaidFreezeCase.expected.errorCode,
       category: "conflict",
     });
+    expect(commandRepository.checkoutChargeMarkPaids).toEqual([]);
+    expect(commandRepository.auditEvents).toEqual([]);
   });
 
   it("lists, creates, marks paid, and waives PMS checkout charges as operational state only", async () => {
@@ -17095,6 +17614,46 @@ describe("vayada-api", () => {
       "checkout_charge_waived:f6855700-0000-0000-0000-000000000002",
     ]);
     expect(commandRepository.outboxEnqueues).toEqual([]);
+  });
+
+  it("marks a desk charge paid through the website's /paid path without the rehearsal freeze option (VAY-2573)", async () => {
+    const chargeCase = pmsCheckoutChargeCases["checkout-charge-create-mark-paid-waive"]!;
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: PMS_OWNER_PERMISSIONS,
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    const created = await injectJson(app, {
+      method: "POST",
+      url: chargeCase.request.path,
+      payload: chargeCase.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    const { chargeId } = (created.body as PmsCheckoutChargeCommandResponse).charge;
+    const paid = await injectJson(app, {
+      method: "POST",
+      url: `${chargeCase.request.path}/${chargeId}/paid`,
+      payload: {
+        commandId: "cmd-checkout-charge-paid-vay2573",
+        idempotencyKey: "pms-checkout-charge-paid-vay2573",
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(paid.statusCode).toBe(200);
+    expect((paid.body as PmsCheckoutChargeCommandResponse).charge).toMatchObject({
+      chargeId,
+      status: "paid",
+    });
+    expect(commandRepository.checkoutChargeMarkPaids).toEqual([
+      expect.objectContaining({
+        chargeId,
+        commandId: "cmd-checkout-charge-paid-vay2573",
+        idempotencyKey: "pms-checkout-charge-paid-vay2573",
+      }),
+    ]);
   });
 
   it("checks out PMS reservations with inspection results, pending flags, charge snapshots, and no finance side effects", async () => {

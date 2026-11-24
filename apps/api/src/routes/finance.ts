@@ -40,6 +40,7 @@ import {
   type FinancePropertyPayoutDispatchResponse,
   type FinancePropertyPayoutDispatchResult,
   type FinancePropertyReadRepository,
+  type FinanceRatePaymentCoverage,
   type FinanceProviderAccountStatus,
   type FinanceProviderOnboardingStatus,
   type FinanceStripeDashboardLoginLinkResult,
@@ -109,6 +110,11 @@ import {
   sameFinancePaymentMethods,
   type FinancePaymentSettingsBinding,
 } from "../domains/financePaymentSettingsBinding.js";
+import {
+  createRatePaymentCoverage,
+  refusedRatePaymentChange,
+} from "../domains/pricingRatePaymentCoverage.js";
+import type { PricingPaymentSwitches } from "../domains/pricingRatePayability.js";
 import { createFinanceOnlineCardExecutionEvidenceRepository } from "./financeOnlineCardExecutionEvidenceRepository.js";
 import { registerFinancePlatformOnlineCardExecutionEvidenceRoutes } from "./financePlatformOnlineCardExecutionEvidenceRoutes.js";
 import { enforceRoutePolicy, type RouteAuthorizationPolicy } from "./policy.js";
@@ -384,9 +390,13 @@ type FinanceCommandError = {
     | "write_unavailable"
     | "provider_unavailable"
     | "provider_rejected"
-    | "vayada_payment_unavailable";
+    | "vayada_payment_unavailable"
+    | "vayada_payment_stopped"
+    | "no_rate_payable";
   category: "validation" | "not_found" | "conflict" | "rate_limit" | "write_model" | "provider";
   message: string;
+  /** VAY-2583 (no_rate_payable): every booking-page rate and the ways its terms accept. */
+  rates?: FinanceRatePaymentCoverage["rates"];
 };
 
 /** A `country` that older pages still send is ignored: the account opens in the hotel's address
@@ -470,9 +480,15 @@ export async function registerFinanceRoutes(
       const settings =
         (await options.repository.getPaymentSettings(propertyId)) ??
         setupIncompletePaymentSettings(propertyId, new Date().toISOString());
+      const rateCoverage = await readRatePaymentCoverage(
+        options.repository,
+        propertyId,
+        request.log,
+      );
       return {
         ...toFinancePaymentSettingsResponse(settings),
         vayadaPayment: vayadaPaymentChoice(options.repository, propertyId),
+        ...(rateCoverage && { rateCoverage }),
       } satisfies FinancePaymentSettingsResponse;
     },
   );
@@ -519,6 +535,66 @@ export async function registerFinanceRoutes(
           message: "vayada Payment is not available yet.",
         } satisfies FinanceCommandError;
       }
+      // VAY-2570: a stopped hotel can still save its settings (turn card off, fix the payout
+      // account), but not end up with card on through vayada Payment: card would show on its
+      // booking page and every card checkout would be refused. The patch is partial, so this
+      // judges the settings as they will be after it.
+      if (options.repository.vayadaPaymentStopped?.(propertyId) === true) {
+        const saved = await options.repository.getPaymentSettings(propertyId);
+        const provider = parsed.payload.paymentProvider ?? saved?.paymentProvider;
+        const methods: readonly string[] =
+          parsed.payload.acceptedMethods ?? saved?.acceptedMethods ?? [];
+        const enabled = parsed.payload.paymentsEnabled ?? saved?.paymentsEnabled ?? false;
+        if (provider === "vayada" && enabled && methods.includes("card")) {
+          reply.code(409);
+          return {
+            statusCode: 409,
+            code: "vayada_payment_stopped",
+            category: "conflict",
+            message:
+              "New card payments with vayada Payment are paused for this hotel. Card can be turned off and the payout account changed.",
+          } satisfies FinanceCommandError;
+        }
+      }
+
+      // VAY-2583: a change that takes the last way to pay away from a live booking page is refused,
+      // naming each rate and the ways its terms accept: the page would list no rooms. Turning a
+      // method on is never refused (a card not ready yet must stay switchable on to set it up). A
+      // provider change can't count card yet (the new account isn't checked).
+      if (
+        options.repository.ratePaymentCoverage &&
+        (parsed.payload.acceptedMethods !== undefined ||
+          parsed.payload.paymentsEnabled !== undefined ||
+          parsed.payload.paymentProvider !== undefined)
+      ) {
+        const saved = await options.repository.getPaymentSettings(propertyId);
+        const providerChanges =
+          parsed.payload.paymentProvider !== undefined &&
+          parsed.payload.paymentProvider !== saved?.paymentProvider;
+        const refused = await refusedRatePaymentChange(
+          options.repository,
+          propertyId,
+          {
+            paymentsEnabled: parsed.payload.paymentsEnabled ?? saved?.paymentsEnabled ?? false,
+            acceptedMethods: (
+              parsed.payload.acceptedMethods ??
+              saved?.acceptedMethods ??
+              []
+            ).filter((method) => !providerChanges || method !== "card"),
+          },
+          request.log,
+        );
+        if (refused) {
+          reply.code(409);
+          return {
+            statusCode: 409,
+            code: "no_rate_payable",
+            category: "conflict",
+            message: NO_RATE_PAYABLE_MESSAGE,
+            rates: publicRatePaymentCoverage(refused).rates,
+          } satisfies FinanceCommandError;
+        }
+      }
 
       const result = await options.repository.updatePaymentSettings(parsed);
       if (!result.ok) {
@@ -529,9 +605,15 @@ export async function registerFinanceRoutes(
 
       await options.publicBookabilityPublisher?.publish({ propertyId });
 
+      const rateCoverage = await readRatePaymentCoverage(
+        options.repository,
+        propertyId,
+        request.log,
+      );
       return {
         ...toFinancePaymentSettingsResponse(result.settings),
         vayadaPayment: vayadaPaymentChoice(options.repository, propertyId),
+        ...(rateCoverage && { rateCoverage }),
         commandMeta: result.commandMeta,
       } satisfies FinancePaymentSettingsPatchResponse;
     },
@@ -1189,11 +1271,17 @@ export function createTargetFinancePropertySettingsRepository(config: {
   stripeConnectProvider?: FinanceStripeConnectProvider;
   /** VAY-2304: runs after a payment write has committed, to re-publish the hotel's prices. */
   afterPaymentChange?: (pool: pg.Pool, propertyId: string) => Promise<unknown>;
-  /** VAY-2442: whether a hotel gets vayada Payment (VAYADA_PAYMENT_ENABLED and the hotel list).
-   * Missing or false: that hotel can't choose vayada Payment and Vayada can't approve it. */
+  /** VAY-2442: whether a hotel may manage vayada Payment (VAYADA_PAYMENT_ENABLED, the hotel list
+   * and the keys of its mode; since VAY-2570 also when the hotel is stopped). Missing or false: that
+   * hotel can't choose vayada Payment and Vayada can't approve it. */
   vayadaPaymentOpen?: (propertyId: string) => boolean;
+  /** VAY-2570: whether the hotel is on the stop list (manageable, but no new charges). */
+  vayadaPaymentStopped?: (propertyId: string) => boolean;
   /** VAY-2442: VAYADA_PAYMENT_FEE_PERCENT, shown to hotels choosing vayada Payment. */
   vayadaPaymentFeePercent?: number;
+  /** VAY-2583: the booking page's payment switches (as its offer catalog uses them), to tell which
+   * booking-page rates guests could pay for. Missing: no rate coverage. */
+  ratePaymentSwitches?: PricingPaymentSwitches;
 }): FinancePropertyReadRepository {
   const pool: FinancePropertySettingsReadPool =
     config.pool ??
@@ -1247,7 +1335,16 @@ export function createTargetFinancePropertySettingsRepository(config: {
   return {
     ...onlineCardEvidenceWrites,
     vayadaPaymentAvailable: (propertyId: string) => config.vayadaPaymentOpen?.(propertyId) === true,
+    vayadaPaymentStopped: (propertyId: string) =>
+      config.vayadaPaymentStopped?.(propertyId) === true,
     vayadaPaymentFeePercent: config.vayadaPaymentFeePercent,
+    ...(config.ratePaymentSwitches &&
+      pool.connect && {
+        ratePaymentCoverage: createRatePaymentCoverage(
+          pool as unknown as Pick<pg.Pool, "connect">,
+          config.ratePaymentSwitches,
+        ),
+      }),
     async getPaymentSettings(propertyId) {
       const row = await loadPaymentSettingsRow(pool, propertyId);
       return row ? toFinancePaymentSettingsReadModel(row) : null;
@@ -6715,15 +6812,58 @@ function invalidQuery(
 }
 
 /** VAY-2442: whether a hotel can choose vayada Payment, and its fee then. */
+const NO_RATE_PAYABLE_MESSAGE =
+  "After this change guests couldn't pay for any of your rates, so your booking page would show no rooms. Keep a way to pay that your rates take, or allow it on your rates first.";
+
+/** VAY-2583: what a hotel sees of its rate coverage: each rate with the ways its terms accept and
+ * those guests can pay with, and how many rates are payable. */
+function publicRatePaymentCoverage(
+  coverage: FinanceRatePaymentCoverage,
+): FinanceRatePaymentCoverage {
+  return {
+    payable: coverage.payable,
+    rates: coverage.rates.map(({ roomName, cancellation, acceptedMethods, payableWith }) => ({
+      roomName,
+      cancellation,
+      acceptedMethods,
+      payableWith,
+    })),
+  };
+}
+
+/** VAY-2583: the live booking page's rate coverage, or null when it has none (not live, nothing
+ * published) or it couldn't be read: a read failure never stops a payment-settings read or save,
+ * it is only logged. */
+async function readRatePaymentCoverage(
+  repository: Pick<FinancePropertyReadRepository, "ratePaymentCoverage">,
+  propertyId: string,
+  log: { error(obj: object, msg: string): void },
+): Promise<FinanceRatePaymentCoverage | null> {
+  if (!repository.ratePaymentCoverage) return null;
+  try {
+    const coverage = await repository.ratePaymentCoverage(propertyId);
+    return coverage && publicRatePaymentCoverage(coverage);
+  } catch (error) {
+    log.error({ err: error, propertyId }, "rate payment coverage read failed");
+    return null;
+  }
+}
+
 function vayadaPaymentChoice(
   repository: {
     vayadaPaymentAvailable?: (propertyId: string) => boolean;
     vayadaPaymentFeePercent?: number;
+    vayadaPaymentStopped?: (propertyId: string) => boolean;
   },
   propertyId: string,
-): { available: boolean; feePercent?: number } {
+): { available: boolean; feePercent?: number; stopped?: boolean } {
   const available = repository.vayadaPaymentAvailable?.(propertyId) === true;
-  return available && repository.vayadaPaymentFeePercent !== undefined
-    ? { available, feePercent: repository.vayadaPaymentFeePercent }
-    : { available };
+  const choice =
+    available && repository.vayadaPaymentFeePercent !== undefined
+      ? { available, feePercent: repository.vayadaPaymentFeePercent }
+      : { available };
+  // VAY-2570: a stopped hotel can manage its setup but takes no new card payments.
+  return available && repository.vayadaPaymentStopped?.(propertyId) === true
+    ? { ...choice, stopped: true }
+    : choice;
 }

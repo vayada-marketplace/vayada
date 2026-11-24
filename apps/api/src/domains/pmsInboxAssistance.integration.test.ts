@@ -132,6 +132,28 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox assistance", () => {
     expect(evidence).not.toContain("translate-once");
     expect(JSON.stringify(persisted.idempotency)).not.toContain("Bonjour");
     expect(JSON.stringify(persisted.idempotency)).not.toContain("Hello, I am Ada");
+    // VAY-2508: one AI action row for the press that reached the model (not for the replay or
+    // the refused reuse), ids only, joined to the route's audit row by its keys.
+    const logged = await aiActions();
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toMatchObject({
+      organization_id: ORGANIZATION,
+      user_id: ACTOR,
+      surface: "inbox_assist",
+      client: "pms_inbox",
+      action: "inbox_translate_message",
+      action_group: "R2",
+      sensitive: true,
+      arguments: { kind: "translate_message", targetLanguage: "en-GB" },
+      records_read: [{ type: "message_thread", id: THREAD }],
+      records_changed: [],
+      outcome: "ok",
+      error_code: null,
+      request_id: "request-translate-once",
+      correlation_id: "inbox-assistance",
+      joined_audit_action: "pms.inbox.assist",
+    });
+    expect(JSON.stringify(logged)).not.toMatch(/Bonjour|Hello, I am Ada/);
   });
 
   it("pins summary and draft context to the requested message boundary", async () => {
@@ -165,6 +187,10 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox assistance", () => {
           { direction: "outbound", text: "Let me check that for you." },
         ],
       },
+    ]);
+    expect((await aiActions()).map((row) => [row.action, row.joined_audit_action])).toEqual([
+      ["inbox_draft_reply", "pms.inbox.assist"],
+      ["inbox_summarize", "pms.inbox.assist"],
     ]);
     expect((await state()).counts).toEqual({
       idempotency: 2,
@@ -231,6 +257,9 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox assistance", () => {
       audits: 1,
     });
     expect(JSON.stringify([persisted.events, persisted.audits])).not.toContain("provider detail");
+    expect(await aiActions()).toMatchObject([
+      { outcome: "failed", error_code: "assistance_unavailable" },
+    ]);
   });
 
   it("prevents concurrent duplicate service calls", async () => {
@@ -548,6 +577,24 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox assistance", () => {
     );
   }
 
+  async function aiActions() {
+    const result = await admin.query(
+      `SELECT call.*, audit.action AS joined_audit_action
+       FROM platform.ai_tool_calls call
+       LEFT JOIN platform.idempotency_keys idempotency
+         ON idempotency.key_hash = call.idempotency_key_hash
+        AND idempotency.property_id = call.property_id
+       LEFT JOIN platform.product_audit_events audit
+         ON audit.idempotency_key_id = idempotency.id
+        AND audit.correlation_id = call.correlation_id
+        AND audit.causation_id = call.request_id
+       WHERE call.property_id = $1::uuid
+       ORDER BY call.occurred_at, call.action`,
+      [PROPERTY],
+    );
+    return result.rows;
+  }
+
   async function state() {
     const result = await admin.query(
       `SELECT jsonb_build_object(
@@ -591,6 +638,7 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox assistance", () => {
       await admin.query("SET LOCAL session_replication_role = replica");
       const properties = [PROPERTY, OTHER_PROPERTY];
       for (const statement of [
+        "DELETE FROM platform.ai_tool_calls WHERE property_id = ANY($1::uuid[])",
         "DELETE FROM platform.product_audit_events WHERE property_id = ANY($1::uuid[])",
         "DELETE FROM pms.message_assistance_results WHERE property_id = ANY($1::uuid[])",
         "DELETE FROM pms.messages WHERE property_id = ANY($1::uuid[])",
