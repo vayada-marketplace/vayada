@@ -28,10 +28,12 @@ import {
   getDashboardBookings,
   getDashboardOccupancy,
   getDeparturesToday,
+  getMonthToDateRevenue,
   getPropertyToday,
   getRemainingArrivals,
   getRemainingDepartures,
   isCheckedOutDeparture,
+  isDashboardBookingPaid,
   isNotCheckedInDeparture,
 } from "@/lib/dashboardBookings";
 import { useTranslation } from "@/lib/i18n";
@@ -82,11 +84,6 @@ function roomLabel(b: Booking) {
       ? `${b.roomName} ${b.roomNumber}`
       : b.roomName;
   return assigned || "Unassigned";
-}
-
-function isPaid(b: Booking) {
-  if (b.amountStatus === "unverified") return false;
-  return ["captured", "paid", "refunded", "partially_refunded"].includes(b.paymentStatus || "");
 }
 
 const FORECAST_WINDOW_DAYS = 14;
@@ -298,20 +295,12 @@ export default function DashboardPage() {
       );
   };
 
-  const monthStartStr = useMemo(() => {
-    return `${today.slice(0, 7)}-01`;
-  }, [today]);
-
-  // VAY-2390: only bookings in the hotel's currency add up; an OTA booking in another one doesn't.
   const revenueThisMonth = useMemo(
     () =>
-      bookings
-        .filter((b) => b.checkIn >= monthStartStr && b.currency === hotelCurrency)
-        .reduce((sum, b) => sum + b.totalAmount, 0),
-    [bookings, monthStartStr, hotelCurrency],
-  );
-  const otherCurrencyThisMonth = bookings.some(
-    (b) => b.checkIn >= monthStartStr && hotelCurrency !== null && b.currency !== hotelCurrency,
+      hotelCurrency === null
+        ? null
+        : { currency: hotelCurrency, ...getMonthToDateRevenue(bookings, today, hotelCurrency) },
+    [bookings, today, hotelCurrency],
   );
 
   const forecastDays = useMemo(() => {
@@ -405,10 +394,16 @@ export default function DashboardPage() {
                 ? t("dashboard.occupancyLoadError")
                 : tonightOccupancy.percentage === null
                   ? t("common.unavailable")
-                  : t("dashboard.occupancySub", {
-                      occupied: String(tonightOccupancy.occupiedUnits),
-                      total: String(tonightOccupancy.sellableUnits),
-                    })
+                  : t(
+                      tonightOccupancy.blockedUnits > 0
+                        ? "dashboard.occupancySubBlocked"
+                        : "dashboard.occupancySub",
+                      {
+                        occupied: String(tonightOccupancy.occupiedUnits),
+                        total: String(tonightOccupancy.totalUnits),
+                        blocked: String(tonightOccupancy.blockedUnits),
+                      },
+                    )
           }
           icon={<OccupancyIcon />}
         />
@@ -442,19 +437,29 @@ export default function DashboardPage() {
           <StatCard
             label={t("dashboard.revenueThisMonth")}
             value={
-              hotelCurrency === null
-                ? "—"
-                : bookings.some(
-                      (b) => b.checkIn >= monthStartStr && b.amountStatus === "unverified",
-                    )
-                  ? t("bookings.detail.amountUnverified")
-                  : formatCurrency(revenueThisMonth, hotelCurrency)
+              revenueThisMonth
+                ? formatCurrency(revenueThisMonth.total, revenueThisMonth.currency)
+                : "—"
             }
-            sub={t(
-              otherCurrencyThisMonth
-                ? "dashboard.monthToDateOtherCurrencies"
-                : "dashboard.monthToDate",
-            )}
+            sub={[
+              t(
+                revenueThisMonth?.otherCurrencies
+                  ? "dashboard.monthToDateOtherCurrencies"
+                  : "dashboard.monthToDate",
+              ),
+              revenueThisMonth && revenueThisMonth.pending > 0
+                ? t("dashboard.amountPending", {
+                    amount: formatCurrency(revenueThisMonth.pending, revenueThisMonth.currency),
+                  })
+                : null,
+              revenueThisMonth && revenueThisMonth.unverified > 0
+                ? t("dashboard.amountUnverifiedPart", {
+                    amount: formatCurrency(revenueThisMonth.unverified, revenueThisMonth.currency),
+                  })
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
             icon={<DollarIcon />}
           />
         )}
@@ -604,7 +609,7 @@ export default function DashboardPage() {
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    {!isPaid(b) && (
+                    {!isDashboardBookingPaid(b) && (
                       <span className="hidden rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 sm:inline-flex">
                         {b.amountStatus === "unverified"
                           ? t("bookings.detail.amountUnverified")
@@ -771,7 +776,7 @@ function DepartureQuickView({
   const expectedGuests = expectedGuestCount(booking);
   const registeredGuests = Math.min(expectedGuests, registeredGuestCount(booking, guests));
   // What is still owed: a deposit or part payment already lowered the balance.
-  const due = isPaid(booking) ? 0 : Math.max(0, booking.balanceAmount);
+  const due = isDashboardBookingPaid(booking) ? 0 : Math.max(0, booking.balanceAmount);
   const internalNotes = notes.filter((note) => note.body.trim().length > 0);
   const eventDate = booking.checkOut;
   const isFuture = eventDate > today;
@@ -993,7 +998,7 @@ function StatCard({
       <p className="text-xl md:text-2xl font-bold text-gray-900 leading-none mb-1.5 truncate">
         {value}
       </p>
-      <p className="text-[11px] md:text-xs text-gray-400 leading-tight line-clamp-2">{sub}</p>
+      <p className="text-[11px] md:text-xs text-gray-400 leading-tight">{sub}</p>
     </div>
   );
 }

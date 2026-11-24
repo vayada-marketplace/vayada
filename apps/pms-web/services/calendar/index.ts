@@ -126,6 +126,8 @@ export interface CalendarInventoryDay {
   availableCount: number;
   assignmentRefs: string[];
   status: "open" | "closed" | "limited";
+  /** The active blocks on this night; a linked block mirrors a booking or block of a linked type. */
+  blocks?: { kind: "manual" | "linked_booking" | "linked_manual_block"; blockedCount: number }[];
 }
 
 export interface CreateRoomBlockPayload {

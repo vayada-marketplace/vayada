@@ -14,8 +14,11 @@ const CHECKED_OUT_STATUSES = new Set<Booking["status"]>(["checked_out"]);
 
 export type DashboardInventoryDay = {
   stayDate: string;
-  availableCount: number;
+  status: string;
+  totalCount: number;
+  blockedCount: number;
   occupiedCount: number;
+  blocks?: { kind: string; blockedCount: number }[];
 };
 
 export function getPropertyToday(timezone?: string | null, date = new Date()) {
@@ -120,14 +123,60 @@ export function isResolvedDeparture(booking: Booking) {
   return isCheckedOutDeparture(booking);
 }
 
+/** One night's occupancy over every room of the property, as the Calendar lists them: occupied
+ * rooms ÷ all rooms. Blocked rooms still count as rooms, never as occupied (VAY-2563). */
 export function getDashboardOccupancy(days: DashboardInventoryDay[], date: string) {
-  const matchingDays = days.filter((day) => day.stayDate === date);
-  const occupiedUnits = matchingDays.reduce((sum, day) => sum + day.occupiedCount, 0);
-  const sellableUnits = matchingDays.reduce((sum, day) => sum + day.availableCount, occupiedUnits);
-
+  const occupancy = { occupiedUnits: 0, totalUnits: 0, blockedUnits: 0 };
+  for (const day of days) {
+    if (day.stayDate !== date) continue;
+    // A deleted room type's nights are closed (VAY-2132): its rooms are gone, so only a stay still
+    // in one of them counts.
+    if (day.status === "closed") {
+      occupancy.occupiedUnits += day.occupiedCount;
+      occupancy.totalUnits += day.occupiedCount;
+      continue;
+    }
+    // A booking of a linked room type takes this room too; the hotel never blocked it.
+    const linkedBooked = (day.blocks ?? [])
+      .filter((block) => block.kind === "linked_booking")
+      .reduce((total, block) => total + block.blockedCount, 0);
+    occupancy.occupiedUnits += day.occupiedCount + linkedBooked;
+    occupancy.blockedUnits += Math.max(0, day.blockedCount - linkedBooked);
+    occupancy.totalUnits += day.totalCount;
+  }
+  const { occupiedUnits, totalUnits } = occupancy;
   return {
-    occupiedUnits,
-    sellableUnits,
-    percentage: sellableUnits > 0 ? Math.round((occupiedUnits / sellableUnits) * 100) : null,
+    ...occupancy,
+    percentage: totalUnits > 0 ? Math.round((occupiedUnits / totalUnits) * 100) : null,
   };
+}
+
+// Paid as far as the dashboard can tell; an amount Airbnb never confirmed is never "paid".
+export function isDashboardBookingPaid(booking: Booking) {
+  if (booking.amountStatus === "unverified") return false;
+  return ["captured", "paid", "refunded", "partially_refunded"].includes(
+    booking.paymentStatus || "",
+  );
+}
+
+/** "Revenue This Month": the stays that arrived from the 1st through today, cancelled ones left
+ * out, in the hotel's currency only (VAY-2390). The part not paid yet and the Airbnb amounts the PMS
+ * couldn't confirm after a change are shown as parts of the total, never instead of it (VAY-2563). */
+export function getMonthToDateRevenue(bookings: Booking[], today: string, currency: string) {
+  const monthStart = `${today.slice(0, 7)}-01`;
+  const arrived = getDashboardBookings(bookings).filter(
+    (booking) => booking.checkIn >= monthStart && booking.checkIn <= today,
+  );
+  const revenue = { total: 0, pending: 0, unverified: 0, otherCurrencies: false };
+  for (const booking of arrived) {
+    if (booking.currency !== currency) {
+      revenue.otherCurrencies = true;
+      continue;
+    }
+    revenue.total += booking.totalAmount;
+    if (booking.amountStatus === "unverified") revenue.unverified += booking.totalAmount;
+    else if (!isDashboardBookingPaid(booking))
+      revenue.pending += Math.max(0, booking.balanceAmount);
+  }
+  return revenue;
 }
