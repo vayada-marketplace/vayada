@@ -128,21 +128,21 @@ test.describe("pms-web dashboard", () => {
     await expect(page.getByText("No arrivals today", { exact: true })).toHaveCount(2);
     await expect(page.getByText("No departures today", { exact: true })).toHaveCount(0);
 
+    // Every room counts (VAY-2563): the blocked room and the empty or held ones too.
     const occupancyCard = page.getByText("Occupancy Tonight", { exact: true }).locator("../..");
-    await expect(occupancyCard).toContainText("100%");
-    await expect(occupancyCard).toContainText("2 of 2 rooms occupied");
+    await expect(occupancyCard).toContainText("40%");
+    await expect(occupancyCard).toContainText("2 of 5 rooms occupied · 1 blocked");
 
-    const todayBar = page.getByRole("img", { name: "2026-06-25: 100% occupancy" });
+    const todayBar = page.getByRole("img", { name: "2026-06-25: 40% occupancy" });
     await expect(todayBar).toBeVisible();
     await todayBar.hover();
-    await expect(todayBar).toContainText("Occupancy: 100%");
-    await expect(
-      page.getByRole("img", { name: "2026-06-26: occupancy unavailable" }),
-    ).toBeVisible();
+    await expect(todayBar).toContainText("Occupancy: 40%");
+    // A closed night still has its rooms; nobody is in them.
+    await expect(page.getByRole("img", { name: "2026-06-26: 0% occupancy" })).toBeVisible();
     expect(requestedCalendarRanges).toContain("?from=2026-06-25&to=2026-07-08");
 
     await page.getByRole("button", { name: "Next week" }).click();
-    await expect(occupancyCard).toContainText("100%");
+    await expect(occupancyCard).toContainText("40%");
     await expect(page.getByText("Jul 2 – Jul 15", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Today", exact: true }).click();
     await expect(page.getByText("Jun 25 – Jul 8", { exact: true })).toBeVisible();
@@ -150,7 +150,7 @@ test.describe("pms-web dashboard", () => {
     await page.clock.fastForward("22:27:00");
     await expect(page.getByText("Friday, June 26, 2026", { exact: true })).toBeVisible();
     await expect(page.getByText("Jun 26 – Jul 9", { exact: true })).toBeVisible();
-    await expect(occupancyCard).toContainText("Unavailable");
+    await expect(occupancyCard).toContainText("0 of 2 rooms occupied");
     expect(requestedCalendarRanges).toContain("?from=2026-06-26&to=2026-07-09");
   });
 
@@ -172,6 +172,106 @@ test.describe("pms-web dashboard", () => {
       page.getByRole("img", { name: "2026-08-20: occupancy failed to load" }),
     ).toBeVisible();
   });
+});
+
+test("shows a hotel's real room count and its month-to-date revenue split (VAY-2563)", async ({
+  page,
+}) => {
+  await page.clock.install({ time: new Date("2026-11-19T10:00:00Z") });
+  await mockPmsWebAuthenticatedSession(page);
+  await mockPmsWebTargetRoutes(page);
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/payment-settings`, (route) =>
+    route.fulfill({
+      json: {
+        paymentSettings: { payAtPropertyEnabled: true, defaultCurrency: "IDR" },
+        cancellationPolicy: { freeCancellationDays: 7, partialRefundPct: 50 },
+      },
+    }),
+  );
+  const addDays = (date: string, days: number) =>
+    new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+  const reservation = (
+    id: string,
+    checkIn: string,
+    amount: string,
+    extra: { status?: string; paid?: boolean; amountStatus?: "unverified" } = {},
+  ) => ({
+    ...pmsWebReservation,
+    guestBookingId: id,
+    bookingReference: id,
+    status: extra.status ?? "confirmed",
+    stay: { ...pmsWebReservation.stay, checkIn, checkOut: addDays(checkIn, 2) },
+    pricing: {
+      totalAmount: { amountDecimal: amount, currency: "IDR" },
+      balanceAmount: { amountDecimal: extra.paid ? "0.00" : amount, currency: "IDR" },
+      ...(extra.amountStatus ? { amountStatus: extra.amountStatus } : {}),
+    },
+    payment: { method: null, status: extra.paid ? "paid" : "unpaid" },
+  });
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations*`, (route) =>
+    route.fulfill({
+      json: {
+        contractVersion: "pms-operations.v1",
+        propertyId: PMS_WEB_PROPERTY_ID,
+        items: [
+          reservation("paid-direct", "2026-11-05", "3000000.00", { paid: true }),
+          reservation("ota-unpaid", "2026-11-16", "7186968.00"),
+          reservation("airbnb-changed", "2026-11-17", "4555035.00", { amountStatus: "unverified" }),
+          // Neither counts this month: one is cancelled, the other arrives in December.
+          reservation("cancelled", "2026-11-10", "5000000.00", { status: "cancelled" }),
+          reservation("december", "2026-12-03", "9999999.00", { amountStatus: "unverified" }),
+        ],
+        pagination: { total: 5, limit: 500, offset: 0 },
+        sourceFreshness: {},
+      },
+    }),
+  );
+  // Tiga Lombok's night of 2026-11-19: 7 rooms, 4 occupied, 3 blocked, none free.
+  const night = (
+    roomTypeId: string,
+    totalCount: number,
+    occupiedCount: number,
+    blocked: number,
+  ) => ({
+    stayDate: "2026-11-19",
+    roomTypeId,
+    totalCount,
+    assignedCount: occupiedCount,
+    occupiedCount,
+    blockedCount: blocked,
+    availableCount: totalCount - occupiedCount - blocked,
+    assignmentRefs: [],
+    status: "limited",
+  });
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/calendar?*`, (route) =>
+    route.fulfill({
+      json: {
+        contractVersion: "pms-operations.v1",
+        propertyId: PMS_WEB_PROPERTY_ID,
+        days: [
+          night("studio", 3, 2, 1),
+          night("villa-sava", 1, 1, 0),
+          night("three-bedroom", 2, 1, 1),
+          night("two-bedroom", 1, 0, 1),
+        ],
+        sourceFreshness: {},
+      },
+    }),
+  );
+
+  await page.goto("/dashboard");
+
+  const occupancyCard = page.getByText("Occupancy Tonight", { exact: true }).locator("../..");
+  await expect(occupancyCard).toContainText("57%");
+  await expect(occupancyCard).toContainText("4 of 7 rooms occupied · 3 blocked");
+  await expect(page.getByRole("img", { name: "2026-11-19: 57% occupancy" })).toBeVisible();
+
+  const revenueCard = page.getByText("Revenue This Month", { exact: true }).locator("../..");
+  await expect(revenueCard).toContainText("IDR 14,742,003");
+  await expect(revenueCard).toContainText(
+    "Month to date · IDR 7,186,968 pending · IDR 4,555,035 unverified",
+  );
+  await expect(revenueCard).not.toContainText("Amount unverified");
 });
 
 test("browses arrivals and departures independently across property-local dates", async ({

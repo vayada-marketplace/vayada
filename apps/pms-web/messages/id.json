@@ -169,6 +169,7 @@
   "dashboard.title": "Dasbor",
   "dashboard.occupancyTonight": "Hunian Malam Ini",
   "dashboard.occupancySub": "{occupied} dari {total} kamar terisi",
+  "dashboard.occupancySubBlocked": "{occupied} dari {total} kamar terisi · {blocked} diblokir",
   "dashboard.arrivalsToday": "Kedatangan Hari Ini",
   "dashboard.arrivalsRemaining": "{total} kedatangan · {remaining} tersisa",
   "dashboard.nextArrival": "Kedatangan berikutnya: 15:00 - {guestName}",

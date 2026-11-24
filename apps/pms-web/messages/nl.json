@@ -168,6 +168,7 @@
   "dashboard.title": "Dashboard",
   "dashboard.occupancyTonight": "Bezetting vanavond",
   "dashboard.occupancySub": "{occupied} van {total} kamers bezet",
+  "dashboard.occupancySubBlocked": "{occupied} van {total} kamers bezet · {blocked} geblokkeerd",
   "dashboard.arrivalsToday": "Aankomsten vandaag",
   "dashboard.nextArrival": "Volgende aankomst: 15:00 - {guestName}",
   "dashboard.noArrivals": "Geen aankomsten vandaag",

@@ -168,6 +168,7 @@
   "dashboard.title": "Панель управления",
   "dashboard.occupancyTonight": "Заполняемость сегодня",
   "dashboard.occupancySub": "{occupied} из {total} номеров занято",
+  "dashboard.occupancySubBlocked": "{occupied} из {total} номеров занято · {blocked} заблокировано",
   "dashboard.arrivalsToday": "Заезды сегодня",
   "dashboard.nextArrival": "Следующий заезд: 15:00 - {guestName}",
   "dashboard.noArrivals": "Сегодня нет заездов",
