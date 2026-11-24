@@ -85,7 +85,9 @@ export function unlessStopped(
   return new Promise((resolve, reject) => {
     const stop = () => resolve(STOPPED);
     signal.addEventListener("abort", stop, { once: true });
-    work()
+    // Through then(), so a work function that throws before returning a promise still rejects.
+    Promise.resolve()
+      .then(work)
       .then(resolve, reject)
       // The call's signal lives until the turn's time limit: don't keep a listener per call on it.
       .finally(() => signal.removeEventListener("abort", stop));

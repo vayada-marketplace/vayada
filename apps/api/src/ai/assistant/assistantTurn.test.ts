@@ -566,7 +566,13 @@ describe("a tool's work and the turn's Stop (unlessStopped)", () => {
         throw new Error("route failed");
       }),
     ).rejects.toThrow("route failed");
+    // A work function that throws before it returns a promise.
+    await expect(
+      unlessStopped(signal, () => {
+        throw new Error("not even started");
+      }),
+    ).rejects.toThrow("not even started");
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(removed).toHaveBeenCalledTimes(2);
+    expect(removed).toHaveBeenCalledTimes(3);
   });
 });

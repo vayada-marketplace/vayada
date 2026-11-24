@@ -15,7 +15,7 @@ import type { AiActionLog } from "../actionLog/actionLog.js";
 import { listActionsFor, toolDefinition } from "../actions/registry.js";
 import { runRouteAction } from "../actions/runRouteAction.js";
 import type { AssistantToolsFor } from "./assistantRuntime.js";
-import { unlessStopped, type AssistantTool } from "./assistantTurn.js";
+import { STOPPED, unlessStopped, type AssistantTool } from "./assistantTurn.js";
 import type { ChangeAction } from "../actions/defineChangeAction.js";
 import { changeTools, type AssistantChangeProposer } from "./changeTools.js";
 
@@ -38,17 +38,20 @@ export function registryTools(
 ): AssistantTool[] {
   return listActionsFor(options.context).map((action) => ({
     definition: toolDefinition(action),
-    // Stop and the shutdown cut wait neither for the context read nor for a slow route (the
-    // route still finishes and logs its row).
+    // Stop and the shutdown cut wait neither for the context read nor for a slow route (a route
+    // already started still finishes and logs its row).
     run: (input, call) =>
-      unlessStopped(call.signal, async () =>
-        runRouteAction(app, await options.contextFor(call.toolCallId), action, input, {
+      unlessStopped(call.signal, async () => {
+        const context = await options.contextFor(call.toolCallId);
+        // Stopped while the context was read: the route isn't called.
+        if (call.signal.aborted) return STOPPED;
+        return runRouteAction(app, context, action, input, {
           log: options.log,
           client: "in_app_assistant",
           externalCallId: call.toolCallId,
           model: options.model,
-        }),
-      ),
+        });
+      }),
   }));
 }
 
