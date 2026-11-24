@@ -10,6 +10,8 @@ import {
   worldContext,
   worldIdentity,
 } from "../actions/actionTestWorld.fixtures.js";
+import { roomBlockCreate } from "../actions/roomBlocks.js";
+import type { AssistantChangeProposer } from "./changeTools.js";
 import { delegatedAssistantTools, registryTools } from "./registryTools.js";
 
 /**
@@ -51,6 +53,7 @@ describe("assistant tools from the action registry (VAY-2518)", () => {
     const outcome = await tool!.run(rooms.input(WORLD.P1), {
       toolCallId: "toolu_01ABC",
       signal: new AbortController().signal,
+      turnId: "turn-1",
     });
     expect(outcome).toMatchObject({ ok: true });
     expect(contextFor).toHaveBeenCalledWith("toolu_01ABC");
@@ -68,6 +71,7 @@ describe("assistant tools from the action registry (VAY-2518)", () => {
     const refused = await tool!.run(rooms.input(WORLD.P3), {
       toolCallId: "toolu_01ABD",
       signal: new AbortController().signal,
+      turnId: "turn-1",
     });
     expect(refused).toMatchObject({ ok: false, error: { code: "not_allowed" } });
     expect(log.rows).toHaveLength(2);
@@ -116,6 +120,7 @@ describe("who may use the assistant for a property (VAY-2518, the production che
     const outcome = await tools![0]!.run(rooms.input(WORLD.P1), {
       toolCallId: "toolu_02",
       signal: new AbortController().signal,
+      turnId: "turn-1",
     });
     expect(outcome).toMatchObject({ ok: true });
     expect(log.rows[0]).toMatchObject({
@@ -149,8 +154,82 @@ describe("who may use the assistant for a property (VAY-2518, the production che
     const outcome = await tools![0]!.run(rooms.input(WORLD.P1), {
       toolCallId: "toolu_03",
       signal: stop.signal,
+      turnId: "turn-1",
     });
     expect(outcome).toMatchObject({ ok: false, error: { code: "stopped" } });
     await slowApp.close();
+  });
+});
+
+describe("change tools in the production check (VAY-2518 with VAY-2524)", () => {
+  // No change action has a surface yet: one as it will be.
+  const blockInApp = { ...roomBlockCreate, surfaces: ["in_app" as const] };
+  const rights: PermissionKey[] = [
+    ...ROOMS_ONLY,
+    roomBlockCreate.permission,
+    ...(roomBlockCreate.alsoNeeds ?? []),
+  ];
+  const session = (impersonated: boolean) =>
+    ({
+      actor: {
+        internalUserId: WORLD.OWNER,
+        providerIdentity: {
+          provider: "workos",
+          providerUserId: "user_01",
+          ...(impersonated ? { impersonated: true } : {}),
+        },
+      },
+      selectedOrganization: { organizationId: WORLD.ORG_A },
+    }) as unknown as RequestContext;
+  const toolsFor = (propose: AssistantChangeProposer) =>
+    delegatedAssistantTools(app, {
+      identityRepository: worldIdentity,
+      authorizationResolver: worldAuthorization(rights).resolver,
+      log: memoryAiActionLog(),
+      model: () => MODEL,
+      propose,
+      changeActions: [blockInApp],
+    });
+
+  it("asks the proposer with the tool call's own context, for this chat", async () => {
+    const propose = vi.fn<AssistantChangeProposer>(async () => ({
+      ok: true,
+      pendingActionId: "8f3c2a10-1b2c-4d5e-8f90-123456789abc",
+      status: "pending",
+      expiresAt: null,
+      created: true,
+    }));
+    const tools = await toolsFor(propose)({
+      session: session(false),
+      propertyId: WORLD.P1,
+      conversationId: WORLD.CONVERSATION,
+    });
+    const change = tools!.find((tool) => tool.asksFirst)!;
+    expect(change.definition.name).toBe(roomBlockCreate.name);
+    await change.run(
+      { propertyId: WORLD.P1 },
+      {
+        toolCallId: "toolu_09",
+        signal: new AbortController().signal,
+        turnId: "22222222-2222-4222-8222-222222222222",
+      },
+    );
+    // proposeChange refuses a context without the in-app conversation: it carries this chat.
+    const [context] = propose.mock.calls[0]!;
+    expect(context.delegation).toMatchObject({
+      channel: "in_app",
+      conversationId: WORLD.CONVERSATION,
+      toolCallId: "toolu_09",
+    });
+  });
+
+  it("offers staff signed in as the person no change tools", async () => {
+    const tools = await toolsFor(vi.fn())({
+      session: session(true),
+      propertyId: WORLD.P1,
+      conversationId: WORLD.CONVERSATION,
+    });
+    expect(tools!.some((tool) => tool.asksFirst)).toBe(false);
+    expect(tools!.map((tool) => tool.definition.name)).toContain("rooms_list");
   });
 });

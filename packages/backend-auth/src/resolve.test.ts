@@ -112,6 +112,7 @@ describe("resolveRequestContext", () => {
     expect(ctx.actor.providerIdentity.provider).toBe("workos");
     expect(ctx.actor.providerIdentity.providerUserId).toBe("user_workos_hotel_owner");
     expect(ctx.actor.providerIdentity.sessionId).toBe("session_hotel_owner");
+    expect(ctx.actor.providerIdentity).not.toHaveProperty("impersonated");
 
     expect(ctx.selectedOrganization.organizationId).toBe("org_hotel_group");
     expect(ctx.selectedOrganization.kind).toBe("hotel_group");
@@ -131,6 +132,16 @@ describe("resolveRequestContext", () => {
     expect(ctx.audit.requestId).toBe("req_test_001");
     expect(ctx.audit.source).toBe("web");
     expect(ctx.entitlements).toEqual([]);
+  });
+
+  it("carries WorkOS impersonation from the session into the provider identity", async () => {
+    const repo = fakeRepo({ user: USER, org: ORG, membership: MEMBERSHIP, resources: RESOURCES });
+    const ctx = await resolveRequestContext({ ...SESSION, impersonated: true }, repo, OPTIONS);
+    expect(ctx.actor.providerIdentity).toMatchObject({
+      providerUserId: "user_workos_hotel_owner",
+      sessionId: "session_hotel_owner",
+      impersonated: true,
+    });
   });
 
   it("populates authorization data through a resolver when provided", async () => {

@@ -16,6 +16,7 @@ import {
   inventoryReservationReceiptFromBookingMetadata,
   type DirectBookingInventoryReservationPort,
 } from "../platform/inventoryReservation.js";
+import { reverseTargetPromoRedemption } from "../domains/currentQuotePromoRedemption.js";
 import { enqueueBookingTransitionNotifications } from "./bookingEmails.js";
 
 export const BOOKING_LIFECYCLE_QUEUE = "booking-lifecycle";
@@ -949,6 +950,13 @@ async function updateBookingLifecycleStatus(
   if (!row) {
     return lifecycleNoopResult(candidate, mutation);
   }
+  // VAY-2566: a lapsed booking gives its code's use back, as a cancelled one does.
+  await reverseTargetPromoRedemption(
+    client,
+    candidate.propertyId,
+    candidate.guestBookingId,
+    context.now,
+  );
   if (row.sourceSystem === "booking") {
     if (!row.recognizedOn) throw new Error("Booking cancellation requires property timezone.");
     await captureDirectNightlyRevenueEvidence(

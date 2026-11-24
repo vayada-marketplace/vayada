@@ -84,7 +84,12 @@ export async function confirmPricingManualPayment(
     quote.quoteId,
   );
   const projection =
-    record && pricingRoomRevenueProjection(quote, record.calculation.charges as never);
+    record &&
+    pricingRoomRevenueProjection(
+      quote,
+      record.calculation.charges as never,
+      record.calculation.code,
+    );
   if (
     scale === null ||
     !projection ||

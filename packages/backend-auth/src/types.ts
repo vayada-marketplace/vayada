@@ -90,6 +90,8 @@ export type ProviderIdentity = {
   providerUserId: string;
   sessionId?: string;
   providerOrganizationId?: string;
+  /** Staff signed in as this user (WorkOS impersonation); see `VerifiedSession.impersonated`. */
+  impersonated?: true;
 };
 
 export type RequestActor = {

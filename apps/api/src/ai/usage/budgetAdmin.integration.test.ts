@@ -7,6 +7,8 @@ import {
   createHotelSetupOrdinaryLoginFixture,
   type HotelSetupOrdinaryLoginFixture,
 } from "../../hotelSetupOrdinaryLogin.fixture.js";
+import { threadMarkDone } from "../actions/threadTriage.js";
+import { createPgAiOperationStore } from "../executor/operationStore.js";
 import type { ModelRoute } from "../provider/catalog.js";
 import { createPgAiBudgetAdmin } from "./budgetAdmin.js";
 import { createPgAiBudget } from "./budgetGate.js";
@@ -161,6 +163,66 @@ describe.skipIf(!url)("AI budgets set by vayada staff and the spend alert (VAY-2
         updatedAt: "2031-04-15T10:00:00.000Z",
       },
     ]);
+  });
+
+  it("closes the account's AI changes waiting for an answer when AI is switched off (VAY-2524)", async () => {
+    const hotel = await newOrganization();
+    const other = await newOrganization();
+    const property = randomUUID();
+    const user = randomUUID();
+    await admin.query(
+      `INSERT INTO hotel_catalog.properties (id, public_id, display_name) VALUES ($1::uuid, $2, $2)`,
+      [property, `vay2524-${property}`],
+    );
+    await admin.query(`INSERT INTO identity.users (id, email) VALUES ($1, $2)`, [
+      user,
+      `vay2524-${user}@example.test`,
+    ]);
+    const store = createPgAiOperationStore({ connectionString: url! });
+    try {
+      const ask = async (organizationId: string) =>
+        (
+          await store.propose(
+            {
+              organizationId,
+              propertyId: property,
+              userId: user,
+              surface: "in_app",
+              conversationId: randomUUID(),
+              client: "vayada:pms",
+              action: threadMarkDone,
+              arguments: { propertyId: property, threadId: randomUUID(), expectedThreadVersion: 4 },
+            },
+            new Date(),
+          )
+        ).operation.id;
+      const [first, second, elsewhere] = [await ask(hotel), await ask(hotel), await ask(other)];
+      const budgetAdmin = createPgAiBudgetAdmin({ pool, defaultMonthlyLimitMicroUsd: 5_000_000 });
+      const set = (monthlyLimitMicroUsd: number) =>
+        budgetAdmin.setBudget({
+          organizationId: hotel,
+          monthlyLimitMicroUsd,
+          reason: "VAY-2524",
+          audit: audit(),
+        });
+      // A new budget above 0 leaves them waiting.
+      await set(10_000_000);
+      expect((await store.find(first))?.status).toBe("pending");
+      // AI off, on the API's own login: both close; another account's stays.
+      await set(0);
+      for (const id of [first, second]) {
+        expect(await store.find(id)).toMatchObject({
+          status: "closed",
+          closeReason: "ai_switched_off",
+        });
+      }
+      expect((await store.find(elsewhere))?.status).toBe("pending");
+    } finally {
+      await store.end();
+      await admin.query("DELETE FROM platform.ai_operations WHERE property_id = $1", [property]);
+      await admin.query("DELETE FROM hotel_catalog.properties WHERE id = $1", [property]);
+      await admin.query("DELETE FROM identity.users WHERE id = $1", [user]);
+    }
   });
 
   it("sets and resets a budget with an audit row, and only for hotel accounts", async () => {
