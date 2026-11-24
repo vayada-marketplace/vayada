@@ -156,8 +156,9 @@ export function splitAdults(adults: number, rooms: number) {
  * its own short transaction with lock and statement timeouts, and sold-out rooms aren't priced.
  * `pool` should be small: it bounds how much pricing work guests' page views can run at once.
  *
- * Children are counted for rooms but not priced until /book knows their ages; the response says
- * so (`childrenPriced`). The quote on /book stays the binding price. */
+ * Children are counted for rooms but not priced until /book knows their ages (unless the read
+ * gives them, VAY-2533); the response says so (`childrenPriced`). The quote on /book stays the
+ * binding price. */
 export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog) {
   return {
     async read(slug: string, requested: StayPricesQuery) {
@@ -174,6 +175,19 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
       budget?: { left: number },
     ) {
       return prices(slug, requested, offered, false, budget);
+    },
+    /** VAY-2533: one booking of these rooms, each with its own rate and guests, priced as the
+     * quote prices it (a fixed charge per booking or per night counts once); null when the
+     * calculation refuses it. */
+    readSelection(
+      slug: string,
+      stay: { checkIn: string; checkOut: string },
+      currency: string,
+      rooms: SelectedRoom[],
+    ) {
+      return short(pool, (client) =>
+        stayTotal(client, slug, { ...stay, promoCode: null }, currency, rooms),
+      );
     },
   };
 
@@ -233,7 +247,15 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
           : splitAdults(query.adults, roomCount ?? 1).map((adults) => ({ adults, childAges: [] }));
         const price =
           available && roomCount !== null
-            ? await short(pool, (client) => stayTotal(client, slug, query, offer, guests))
+            ? await short(pool, (client) =>
+                stayTotal(
+                  client,
+                  slug,
+                  query,
+                  offer.currency,
+                  guests.map((room) => ({ publicOfferKey: offer.publicOfferKey, ...room })),
+                ),
+              )
             : null;
         offers.push(
           price
@@ -280,7 +302,9 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
           continue;
         }
         const price = await short(pool, (client) =>
-          stayTotal(client, slug, query, offer, [{ adults, childAges: [] }]),
+          stayTotal(client, slug, query, offer.currency, [
+            { publicOfferKey: offer.publicOfferKey, adults, childAges: [] },
+          ]),
         );
         part.push(
           price
@@ -353,15 +377,17 @@ async function freeRooms(
 const agesOf = (room: NonNullable<StayPricesQuery["room"]>) =>
   room.childAges?.length === room.children ? room.childAges : [];
 
-/** One offer's stay total for the party. A promo code that doesn't apply to this stay makes the
+/** A room of one booking: its rate, its adults and its children's ages (none: not priced). */
+type SelectedRoom = { publicOfferKey: string; adults: number; childAges: readonly number[] };
+
+/** One booking's stay total for its rooms. A promo code that doesn't apply to this stay makes the
  * calculation refuse, so the price without it is returned and says so. */
 async function stayTotal(
   client: PoolClient,
   slug: string,
-  query: StayPricesQuery,
-  offer: { publicOfferKey: string; currency: string },
-  /** The guests of each room priced: its adults and its children's ages (none: not priced). */
-  perRoom: { adults: number; childAges: readonly number[] }[],
+  query: Pick<StayPricesQuery, "checkIn" | "checkOut" | "promoCode">,
+  currency: string,
+  rooms: SelectedRoom[],
 ) {
   const price = async (promoCode: string | null) =>
     (
@@ -369,10 +395,10 @@ async function stayTotal(
         version: PUBLIC_PRICING_SELECTION_VERSION,
         checkIn: query.checkIn,
         checkOut: query.checkOut,
-        currency: offer.currency,
-        rooms: perRoom.map(({ adults, childAges }, index) => ({
+        currency,
+        rooms: rooms.map(({ publicOfferKey, adults, childAges }, index) => ({
           selectionId: `room-${index + 1}`,
-          publicOfferKey: offer.publicOfferKey,
+          publicOfferKey,
           guests: { adults, childAgesAtCheckIn: [...childAges] },
         })),
         addons: [],
@@ -380,10 +406,7 @@ async function stayTotal(
       })
     )?.totalMinor ?? null;
   const withCode = query.promoCode === null ? null : await price(query.promoCode);
-  if (withCode !== null)
-    return { totalMinor: withCode, currency: offer.currency, promoApplied: true };
+  if (withCode !== null) return { totalMinor: withCode, currency, promoApplied: true };
   const plain = await price(null);
-  return plain === null
-    ? null
-    : { totalMinor: plain, currency: offer.currency, promoApplied: false };
+  return plain === null ? null : { totalMinor: plain, currency, promoApplied: false };
 }

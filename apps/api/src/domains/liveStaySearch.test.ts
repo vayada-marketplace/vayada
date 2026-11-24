@@ -10,7 +10,7 @@ import {
   type Refusal,
   type SearchOffers,
 } from "./liveStaySearch.js";
-import { fewestRooms, oneRoomFits, type StayPricesQuery } from "./publicPricingStayPrices.js";
+import { fewestRooms, oneRoomFits } from "./publicPricingStayPrices.js";
 
 const PROPERTY = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const DOUBLE = "11111111-1111-4111-8111-111111111111";
@@ -75,7 +75,9 @@ const day = (date: string, days: number) =>
 /**
  * A hotel as the booking page's stay prices see it, sized and priced one room at a time like the
  * real reader (`readOffered` with `room`): `free` says how many rooms of a type are free on every
- * night of a stay; `refuse` makes a free room's rates refuse a stay (a minimum stay, say).
+ * night of a stay; `refuse` makes a free room's rates refuse a stay (a minimum stay, say);
+ * `bookingFee` is a fixed charge per booking, so one room priced alone carries it once and a set
+ * of rooms booked together carries it once in all.
  */
 function hotel(
   options: {
@@ -85,11 +87,16 @@ function hotel(
     refusals?: Map<string, Refusal>;
     place?: { slug: string; timezone: string | null; childrenAccepted: boolean } | null;
     offered?: SearchOffers | null;
+    bookingFee?: number;
+    failing?: "refusals" | "freeWindows";
   } = {},
 ) {
   const free = options.free ?? (() => 2);
   const refuse = options.refuse ?? (() => false);
-  const stayPrices = vi.fn(async (_slug: string, query: StayPricesQuery, offered: SearchOffers) => {
+  const fee = options.bookingFee ?? 0;
+  const roomPrice = (key: string, ages: readonly number[], nights: number) =>
+    (NIGHTLY[key]! + 2_000 * ages.length) * nights;
+  const stayPrices = vi.fn<LiveStaySearchSources["stayPrices"]>(async (_slug, query, offered) => {
     const room = query.room!;
     const left = (roomTypeId: string) => free(roomTypeId, query.checkIn, query.checkOut);
     const nights = nightsBetween(query.checkIn, query.checkOut);
@@ -117,9 +124,7 @@ function hotel(
               ? {
                   publicOfferKey: offer.publicOfferKey,
                   status: "priced" as const,
-                  totalMinor: String(
-                    (NIGHTLY[offer.publicOfferKey]! + 2_000 * ages.length) * nights,
-                  ),
+                  totalMinor: String(roomPrice(offer.publicOfferKey, ages, nights) + fee),
                   currency: "EUR",
                   promoApplied: false,
                 }
@@ -137,10 +142,31 @@ function hotel(
     ),
     offers: vi.fn(async () => (options.offered === undefined ? offers() : options.offered)),
     stayPrices,
-    freeWindows: vi.fn<LiveStaySearchSources["freeWindows"]>(async () => options.windows ?? []),
-    refusals: vi.fn<LiveStaySearchSources["refusals"]>(
-      async () => options.refusals ?? new Map<string, Refusal>(),
+    selectionTotal: vi.fn<LiveStaySearchSources["selectionTotal"]>(
+      async (_slug, dates, _currency, rooms) => ({
+        totalMinor: String(
+          rooms.reduce(
+            (sum, room) =>
+              sum +
+              roomPrice(
+                room.publicOfferKey,
+                room.childAges,
+                nightsBetween(dates.checkIn, dates.checkOut),
+              ),
+            fee,
+          ),
+        ),
+      }),
     ),
+    freeWindows: vi.fn<LiveStaySearchSources["freeWindows"]>(async () => {
+      if (options.failing === "freeWindows") throw new Error("statement timeout");
+      return options.windows ?? [];
+    }),
+    refusals: vi.fn<LiveStaySearchSources["refusals"]>(async () => {
+      if (options.failing === "refusals") throw new Error("statement timeout");
+      return options.refusals ?? new Map<string, Refusal>();
+    }),
+    log: { warn: vi.fn() },
     now: () => NOW,
   } satisfies LiveStaySearchSources;
   return { sources, search: createLiveStaySearch(sources).search };
@@ -270,12 +296,118 @@ describe("live stay search (VAY-2533)", () => {
       [DOUBLE, 2, "double-nonref"],
       [DOUBLE, 1, "double-nonref"],
     ]);
-    // The whole party, then each kind of room of the pair.
+    // The whole party, then each kind of room of the pair; all of one search's budget.
     expect(sources.stayPrices.mock.calls.map(([, query]) => query.room)).toEqual([
       { adults: 3, children: 0, childAges: [] },
       { adults: 2, children: 0, childAges: [] },
       { adults: 1, children: 0, childAges: [] },
     ]);
+    expect(new Set(sources.stayPrices.mock.calls.map((call) => call[3]))).toEqual(
+      new Set([{ left: 300 }]),
+    );
+    // The pair is priced once, as one booking; its rooms carry the rate, not a price of their own.
+    expect(sources.selectionTotal).toHaveBeenCalledWith(
+      "villa-test",
+      { checkIn: "2026-12-10", checkOut: "2026-12-12" },
+      "EUR",
+      [
+        { publicOfferKey: "double-nonref", adults: 2, childAges: [] },
+        { publicOfferKey: "double-nonref", adults: 1, childAges: [] },
+      ],
+    );
+    expect(result.split!.rooms.map((room) => room.rate.totalMinor)).toEqual([null, null]);
+  });
+
+  it("counts a fixed charge per booking once for rooms booked together", async () => {
+    const { search } = hotel({ bookingFee: 5_000 });
+    const result = await search(stay({ adults: 3 }));
+    // Each double alone costs 18,000 + 5,000; booked together, 36,000 + 5,000.
+    expect(result.split).toMatchObject({ roomCount: 2, totalMinor: "41000" });
+  });
+
+  it("offers two rooms when the one room large enough refuses the dates", async () => {
+    const TRIPLE = "44444444-4444-4444-8444-444444444444";
+    const offered = offers();
+    offered.rooms.push({
+      roomTypeId: TRIPLE,
+      name: "Triple",
+      occupancy: { maxGuests: 3, maxAdults: 3, maxChildren: 0 },
+      offers: [{ ...offered.rooms[0]!.offers[0]!, publicOfferKey: "triple-flex" }],
+    });
+    NIGHTLY["triple-flex"] = 12_000;
+    const { search } = hotel({
+      offered,
+      refuse: (room) => room === TRIPLE,
+      refusals: new Map([[TRIPLE, { status: "minimum_stay", minNights: 3 }]]),
+    });
+    const result = await search(stay({ adults: 3 }));
+    expect(result.status).toBe("available");
+    expect(result.rooms.find((room) => room.roomTypeId === TRIPLE)).toMatchObject({
+      status: "minimum_stay",
+      minNights: 3,
+    });
+    expect(result.split).toMatchObject({ roomCount: 2, totalMinor: "36000" });
+  });
+
+  it("tries more rooms when the fewest can't each take their share of the group", async () => {
+    // Adults-only rooms for three, and family rooms for one adult with two children: three
+    // adults and two children need three rooms, not two.
+    const ADULTS = "55555555-5555-4555-8555-555555555555";
+    const KIDS = "66666666-6666-4666-8666-666666666666";
+    const rate = offers().rooms[1]!.offers[0]!;
+    NIGHTLY["adults-rate"] = 11_000;
+    NIGHTLY["kids-rate"] = 7_000;
+    const { search } = hotel({
+      offered: {
+        rooms: [
+          {
+            roomTypeId: ADULTS,
+            name: "Adults",
+            occupancy: { maxGuests: 3, maxAdults: 3, maxChildren: 0 },
+            offers: [{ ...rate, publicOfferKey: "adults-rate" }],
+          },
+          {
+            roomTypeId: KIDS,
+            name: "Kids",
+            occupancy: { maxGuests: 3, maxAdults: 1, maxChildren: 2 },
+            offers: [{ ...rate, publicOfferKey: "kids-rate" }],
+          },
+        ],
+      },
+    });
+    const result = await search(stay({ adults: 3, childAges: [5, 7] }));
+    expect(result.status).toBe("available");
+    expect(
+      result.split!.rooms.map((room) => [room.roomTypeId, room.adults, room.childAges]),
+    ).toEqual([
+      [ADULTS, 1, []],
+      [KIDS, 1, [5]],
+      [KIDS, 1, [7]],
+    ]);
+    // 11,000 + 9,000 + 9,000 a night for two nights.
+    expect(result.split).toMatchObject({ roomCount: 3, totalMinor: "58000" });
+  });
+
+  it("leaves every room's children unpriced while one age is unknown", async () => {
+    const { search, sources } = hotel();
+    const result = await search(stay({ adults: 3, childAges: [6, null] }));
+    expect(result).toMatchObject({ status: "available", childrenPriced: false });
+    expect(sources.stayPrices.mock.calls.every(([, query]) => !query.room?.childAges)).toBe(true);
+    expect(sources.selectionTotal.mock.calls[0]![3].map((room) => room.childAges)).toEqual([
+      [],
+      [],
+    ]);
+  });
+
+  it("answers without reasons or later dates when those reads fail", async () => {
+    const refusing = hotel({ refuse: (room) => room === DOUBLE, failing: "refusals" });
+    const reasons = await refusing.search(stay());
+    expect(reasons.rooms.map((room) => room.status)).toEqual(["closed", "available"]);
+    expect(refusing.sources.log.warn).toHaveBeenCalledTimes(1);
+
+    const full = hotel({ free: () => 0, failing: "freeWindows" });
+    expect(await full.search(stay())).toMatchObject({ status: "unavailable", nearestFree: null });
+    expect(full.sources.log.warn).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a group's rooms to rates paid the same way, and its children in their rooms", async () => {
@@ -455,9 +587,10 @@ describe("live stay search (VAY-2533)", () => {
       status: "no_fit",
       childrenAccepted: false,
     });
+    // Said without children too, so a guest asking "do you take kids?" gets an answer.
     expect(await adultsOnly.search(stay())).toMatchObject({
       status: "available",
-      childrenAccepted: true,
+      childrenAccepted: false,
     });
   });
 
@@ -477,6 +610,8 @@ describe("live stay search (VAY-2533)", () => {
       { ...stay(), stay: { checkIn: "2026-12-01", checkOut: "2027-01-01" } },
       { ...stay(), stay: { month: "2026-13", nights: 2 } },
       { ...stay(), stay: { month: "2026-12", nights: 31 } },
+      { ...stay(), stay: { checkIn: "2099-12-30", checkOut: "2100-01-02" } },
+      { ...stay(), stay: { month: "2100-01", nights: 2 } },
     ];
     for (const input of bad) {
       expect(parseLiveStaySearch(input), JSON.stringify(input)).toBeNull();

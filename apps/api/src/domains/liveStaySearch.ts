@@ -23,6 +23,7 @@ import { publicPricingOfferBindings } from "./publicPricingRoomStay.js";
 import {
   createPublicPricingStayPrices,
   fewestRooms,
+  oneRoomFits,
   type StayPricesQuery,
 } from "./publicPricingStayPrices.js";
 
@@ -82,7 +83,7 @@ export type LiveStayRoom = {
    * dates ("closed": closed to arrival or departure, stop sell, a maximum stay, a night without a
    * price, or too late to book). */
   status: "available" | "too_small" | "sold_out" | "minimum_stay" | "closed";
-  /** With "minimum_stay": the fewest nights a stay arriving that day can book. */
+  /** With "minimum_stay": the minimum stay its rates ask of an arrival that day. */
   minNights: number | null;
   /** Free rooms of this type, only when 3 or fewer (as the booking page shows "Only 2 left"). */
   roomsLeft: number | null;
@@ -90,7 +91,9 @@ export type LiveStayRoom = {
   rates: LiveStayRate[];
 };
 
-/** The party over more than one room, the cheapest way the booking page books it together. */
+/** The party over more than one room: the cheapest set the booking page books together, priced
+ * once as one booking, as its quote prices it (a fixed charge per booking or per night counts
+ * once). Each room's rate has no price of its own (`totalMinor` null): the price is the set's. */
 export type LiveStaySplit = {
   roomCount: number;
   totalMinor: string;
@@ -123,11 +126,11 @@ export type LiveStaySearchResult = {
   childAges: (number | null)[];
   /** Whether the prices include the children (every age known). */
   childrenPriced: boolean;
-  /** False when the hotel's booking page takes no children. */
+  /** False when the hotel's booking page takes no children (true when not known). */
   childrenAccepted: boolean;
   rooms: LiveStayRoom[];
-  /** When no free room is large enough for the whole party: the fewest free rooms (2 to 9) that
-   * take it, when the party can book them. */
+  /** When no one room is bookable for the whole party: the fewest free rooms (2 to 9) it can
+   * book together. */
   split: LiveStaySplit | null;
   /** When nothing is bookable: the first later arrival, within 60 days, for the same number of
    * nights, that is. */
@@ -172,12 +175,22 @@ export type LiveStaySearchSources = {
     childrenAccepted: boolean;
   } | null>;
   offers(slug: string): Promise<SearchOffers | null>;
-  /** The booking page's room prices (`readOffered`). */
+  /** The booking page's room prices (`readOffered`); past the search's `budget`, rates are
+   * "unpriced". */
   stayPrices(
     slug: string,
     query: StayPricesQuery,
     offered: SearchOffers,
+    budget: { left: number },
   ): Promise<StayPricesRead | null>;
+  /** One booking of these rooms, each with its own rate and guests, priced as the quote prices it
+   * (`readSelection`); null when it can't be. */
+  selectionTotal(
+    slug: string,
+    dates: Dates,
+    currency: string,
+    rooms: { publicOfferKey: string; adults: number; childAges: readonly number[] }[],
+  ): Promise<{ totalMinor: string } | null>;
   /** Later arrivals that may take the party's rooms (`readFreeWindows`), at most a few. */
   freeWindows(
     slug: string,
@@ -192,11 +205,20 @@ export type LiveStaySearchSources = {
     guests: { adults: number; childAges: readonly number[] },
     rooms: SearchOffers["rooms"],
   ): Promise<ReadonlyMap<string, Refusal>>;
+  /** Where a failed side read (reasons, next free dates) is noted; the search answers without it. */
+  log?: { warn(fields: object, message: string): void };
   now?: () => number;
 };
 
 /** Longer stays are asked for on the booking page itself (as on agency pages). */
-export const LIVE_STAY_MAX_NIGHTS = 30;
+const MAX_NIGHTS = 30;
+/** A party never books more rooms than this on the booking page. */
+const MAX_ROOMS = 9;
+/** Rates priced per search (and again for a month's later arrival); past it they are "unpriced",
+ * as on agency pages, so one search can't run unbounded pricing work. */
+const SEARCH_BUDGET = 300;
+/** Dates after this are refused (they would overflow the date arithmetic). */
+const LAST_DATE = "2099-12-31";
 const MAX_GUESTS = 99;
 const MAX_CHILD_AGE = 17;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -242,12 +264,12 @@ export function parseLiveStaySearch(input: unknown): LiveStaySearch | null {
   if (asked["month"] !== undefined) {
     const { month, nights } = asked;
     if (typeof month !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return null;
-    if (!isInt(nights, 1, LIVE_STAY_MAX_NIGHTS)) return null;
+    if (month > LAST_DATE.slice(0, 7) || !isInt(nights, 1, MAX_NIGHTS)) return null;
     dates = { month, nights };
   } else {
     const { checkIn, checkOut } = asked;
     if (!isDate(checkIn) || !isDate(checkOut) || checkOut <= checkIn) return null;
-    if (nightsOf({ checkIn, checkOut }) > LIVE_STAY_MAX_NIGHTS) return null;
+    if (checkOut > LAST_DATE || nightsOf({ checkIn, checkOut }) > MAX_NIGHTS) return null;
     dates = { checkIn, checkOut };
   }
   return {
@@ -266,19 +288,27 @@ const monthEnd = (month: string) => {
   return new Date(Date.UTC(year!, index!, 0)).toISOString().slice(0, 10);
 };
 
+/** A room's children ages to price: all of them while the party's are all known, else none
+ * (children then go unpriced in every room alike). */
+const agesToPrice = (search: LiveStaySearch, room: Guests): readonly number[] | null =>
+  allKnown(search.childAges) && allKnown(room.childAges) ? room.childAges : null;
+
 /** The booking page's room prices for the party, one room for `room`'s guests. */
-const queryFor = (dates: Dates, search: LiveStaySearch, room: Guests): StayPricesQuery => ({
-  checkIn: dates.checkIn,
-  checkOut: dates.checkOut,
-  adults: search.adults,
-  children: search.childAges.length,
-  promoCode: null,
-  room: {
-    adults: room.adults,
-    children: room.childAges.length,
-    ...(allKnown(room.childAges) && { childAges: room.childAges }),
-  },
-});
+const queryFor = (dates: Dates, search: LiveStaySearch, room: Guests): StayPricesQuery => {
+  const ages = agesToPrice(search, room);
+  return {
+    checkIn: dates.checkIn,
+    checkOut: dates.checkOut,
+    adults: search.adults,
+    children: search.childAges.length,
+    promoCode: null,
+    room: {
+      adults: room.adults,
+      children: room.childAges.length,
+      ...(ages && { childAges: ages }),
+    },
+  };
+};
 
 /** The party in `count` rooms as the booking page spreads it (`splitParty`), children in the
  * order given. */
@@ -290,6 +320,25 @@ const splitGuests = (search: LiveStaySearch, count: number): Guests[] => {
   }));
 };
 
+/** Whether each room of the party spread over `count` rooms fits one of `rooms`. */
+const placeable = (search: LiveStaySearch, count: number, rooms: SearchOffers["rooms"]) =>
+  splitGuests(search, count).every((slot) =>
+    rooms.some((room) =>
+      oneRoomFits(room.occupancy, { adults: slot.adults, children: slot.childAges.length }),
+    ),
+  );
+
+/** The fewest rooms, two or more, the party spreads over with one of `rooms` for each; null when
+ * no count up to the most a party books does. */
+const roomCountFor = (search: LiveStaySearch, rooms: SearchOffers["rooms"]) => {
+  const party = { adults: search.adults, children: search.childAges.length };
+  const fewest = fewestRooms(rooms, party);
+  if (fewest === null) return null;
+  for (let count = Math.max(2, fewest); count <= Math.min(search.adults, MAX_ROOMS); count++)
+    if (placeable(search, count, rooms)) return count;
+  return null;
+};
+
 /** Search one property's live prices (see the module comment). */
 export function createLiveStaySearch(sources: LiveStaySearchSources) {
   const now = sources.now ?? Date.now;
@@ -299,6 +348,8 @@ export function createLiveStaySearch(sources: LiveStaySearchSources) {
     offered: SearchOffers;
     today: string;
     month: string | null;
+    childrenAccepted: boolean;
+    budget: { left: number };
   };
 
   const answer = (
@@ -306,6 +357,7 @@ export function createLiveStaySearch(sources: LiveStaySearchSources) {
     dates: Dates,
     month: string | null,
     status: LiveStaySearchResult["status"],
+    childrenAccepted = true,
   ): LiveStaySearchResult => ({
     version: "live-stay-search.v1",
     propertyId: search.propertyId,
@@ -317,7 +369,7 @@ export function createLiveStaySearch(sources: LiveStaySearchSources) {
     adults: search.adults,
     childAges: [...search.childAges],
     childrenPriced: allKnown(search.childAges),
-    childrenAccepted: true,
+    childrenAccepted,
     rooms: [],
     split: null,
     nearestFree: null,
@@ -348,17 +400,29 @@ export function createLiveStaySearch(sources: LiveStaySearchSources) {
     };
   };
 
-  /** The party on these dates: each room for all of it, else the fewest rooms that take it. With
-   * `full`, also why a free room's rates refuse the stay and, when nothing is bookable, the next
-   * free dates; without, only whether it is bookable (to confirm later dates). */
+  /** A side read (reasons, next free dates): on failure the search answers without it. */
+  const aside = async <T>(what: string, read: () => Promise<T>, fallback: T): Promise<T> => {
+    try {
+      return await read();
+    } catch (error) {
+      sources.log?.warn({ err: error }, `Live stay search: ${what} failed`);
+      return fallback;
+    }
+  };
+
+  /** The party on these dates: each room for all of it, else the fewest rooms it can book
+   * together. With `full`, also why a free room's rates refuse the stay and, when nothing is
+   * bookable, the next free dates; without, only whether it is bookable (to confirm later
+   * dates). */
   async function evaluate(c: Context, dates: Dates, full: boolean): Promise<LiveStaySearchResult> {
     const { search } = c;
     const whole = await sources.stayPrices(
       c.slug,
       queryFor(dates, search, { adults: search.adults, childAges: search.childAges }),
       c.offered,
+      c.budget,
     );
-    if (!whole) return answer(search, dates, c.month, "not_bookable");
+    if (!whole) return answer(search, dates, c.month, "not_bookable", c.childrenAccepted);
     const reads = new Map(whole.rooms.map((room) => [room.roomTypeId, room]));
     const rooms: LiveStayRoom[] = c.offered.rooms.map((room) => {
       const read = reads.get(room.roomTypeId);
@@ -385,16 +449,24 @@ export function createLiveStaySearch(sources: LiveStaySearchSources) {
         rates,
       };
     });
-    const bookable = rooms.some((room) => room.status === "available");
-    // More rooms only when no free room is large enough for the whole party (as agency pages
-    // offer it): the fewest free rooms that are, each with an adult.
-    const fewestFree = whole.suggestedRooms ?? null;
-    const split =
-      !bookable && fewestFree !== null && fewestFree >= 2
-        ? await splitFor(c, dates, fewestFree)
-        : null;
+    // More rooms only when no one room is bookable. From the rooms the party could book some of
+    // (free, and their rates not refusing these dates): the fewest that take it with a room for
+    // each, and one more when those can't be booked together.
+    let split: LiveStaySplit | null = null;
+    if (!rooms.some((room) => room.status === "available")) {
+      const open = c.offered.rooms.filter(
+        (room, index) =>
+          (reads.get(room.roomTypeId)?.roomsFree ?? 0) >= 1 && rooms[index]!.status !== "closed",
+      );
+      const count = roomCountFor(search, open);
+      if (count !== null) split = await splitFor(c, dates, count);
+      if (count !== null && !split && count < Math.min(search.adults, MAX_ROOMS))
+        if (placeable(search, count + 1, open)) split = await splitFor(c, dates, count + 1);
+    }
+    const bookable = rooms.some((room) => room.status === "available") || split !== null;
+    const status = bookable ? "available" : "unavailable";
     const result = {
-      ...answer(search, dates, c.month, bookable || split ? "available" : "unavailable"),
+      ...answer(search, dates, c.month, status, c.childrenAccepted),
       rooms,
       split,
     };
@@ -402,14 +474,21 @@ export function createLiveStaySearch(sources: LiveStaySearchSources) {
     // Why free rooms' rates refuse the stay: from the published prices' own rules.
     const refused = rooms.filter((room) => room.status === "closed");
     if (refused.length) {
-      const reasons = await sources.refusals(
-        c.slug,
-        dates,
-        {
-          adults: search.adults,
-          childAges: allKnown(search.childAges) ? search.childAges : [],
-        },
-        c.offered.rooms.filter((room) => refused.some((one) => one.roomTypeId === room.roomTypeId)),
+      const reasons = await aside(
+        "reasons",
+        () =>
+          sources.refusals(
+            c.slug,
+            dates,
+            {
+              adults: search.adults,
+              childAges: agesToPrice(search, search) ?? [],
+            },
+            c.offered.rooms.filter((room) =>
+              refused.some((one) => one.roomTypeId === room.roomTypeId),
+            ),
+          ),
+        new Map<string, Refusal>(),
       );
       for (const room of refused) {
         const reason = reasons.get(room.roomTypeId);
@@ -418,31 +497,31 @@ export function createLiveStaySearch(sources: LiveStaySearchSources) {
         room.minNights = reason.status === "minimum_stay" ? reason.minNights : null;
       }
     }
-    if (result.status === "available") return result;
+    if (bookable) return result;
     // The rooms the party needs: one when a room takes it all, else the fewest of the hotel's
-    // rooms, free or not.
-    const fewest = fewestRooms(c.offered.rooms, {
-      adults: search.adults,
-      children: search.childAges.length,
-    });
+    // rooms, free or not, with a room for each.
     const needed = rooms.some((room) => room.status !== "too_small")
       ? 1
-      : fewest !== null && fewest >= 2
-        ? fewest
-        : null;
+      : roomCountFor(search, c.offered.rooms);
     if (needed === null) return { ...result, status: "no_fit" };
-    return { ...result, nearestFree: await nearestFree(c, dates, needed) };
+    return {
+      ...result,
+      nearestFree: await aside("next free dates", () => nearestFree(c, dates, needed), null),
+    };
   }
 
   /** The cheapest set of `count` free rooms for the party, with rates the booking page books
-   * together (paid the same way, with a way to pay they share). */
+   * together (paid the same way, with a way to pay they share), chosen by each room's own price
+   * and then priced once as one booking. */
   async function splitFor(c: Context, dates: Dates, count: number): Promise<LiveStaySplit | null> {
     const slots = splitGuests(c.search, count);
     const keyOf = (guests: Guests) => JSON.stringify([guests.adults, guests.childAges]);
     const kinds = [...new Map(slots.map((slot) => [keyOf(slot), slot])).values()];
     const counts = kinds.map((kind) => slots.filter((slot) => keyOf(slot) === keyOf(kind)).length);
     const reads = await Promise.all(
-      kinds.map((kind) => sources.stayPrices(c.slug, queryFor(dates, c.search, kind), c.offered)),
+      kinds.map((kind) =>
+        sources.stayPrices(c.slug, queryFor(dates, c.search, kind), c.offered, c.budget),
+      ),
     );
     if (reads.some((read) => !read)) return null;
     const types = c.offered.rooms;
@@ -483,13 +562,26 @@ export function createLiveStaySearch(sources: LiveStaySearchSources) {
       };
     }
     if (!best) return null;
-    const total = best.total.toString();
+    // Rooms priced one by one count a booking's fixed charges each time; the booking counts
+    // them once.
+    const currency = best.rooms[0]!.offer.currency;
+    const priced = await sources.selectionTotal(
+      c.slug,
+      dates,
+      currency,
+      best.rooms.map(({ kind, offer }) => ({
+        publicOfferKey: offer.publicOfferKey,
+        adults: kinds[kind]!.adults,
+        childAges: agesToPrice(c.search, kinds[kind]!) ?? [],
+      })),
+    );
+    if (!priced) return null;
     return {
       roomCount: count,
-      totalMinor: total,
-      nightlyMinor: nightly(best.total, BigInt(nightsOf(dates))),
-      currency: best.rooms[0]!.offer.currency,
-      withinBudget: withinBudget(c.search, total),
+      totalMinor: priced.totalMinor,
+      nightlyMinor: nightly(BigInt(priced.totalMinor), BigInt(nightsOf(dates))),
+      currency,
+      withinBudget: withinBudget(c.search, priced.totalMinor),
       rooms: best.rooms.map(({ kind, type, offer }) => {
         const room = types[type]!;
         return {
@@ -501,7 +593,7 @@ export function createLiveStaySearch(sources: LiveStaySearchSources) {
             c,
             dates,
             room.offers.find((one) => one.publicOfferKey === offer.publicOfferKey)!,
-            offer.totalMinor,
+            null,
           ),
         };
       }),
@@ -520,7 +612,10 @@ export function createLiveStaySearch(sources: LiveStaySearchSources) {
       const later = { checkIn: window.checkIn, checkOut: window.checkOut };
       // One room: the rates that found it free. More: every rate of those room types.
       const offered = narrow(c.offered, window.offers, needed > 1);
-      if ((await evaluate({ ...c, offered }, later, false)).status === "available") return later;
+      const check = await evaluate({ ...c, offered }, later, false);
+      // Priced, too: past the search's budget a rate is bookable but unchecked.
+      if (check.split || check.rooms.some((room) => room.rates.some((rate) => rate.totalMinor)))
+        return later;
     }
     return null;
   }
@@ -542,27 +637,30 @@ export function createLiveStaySearch(sources: LiveStaySearchSources) {
             })()
           : asked;
       if (!place) return answer(search, first, month, "not_bookable");
+      const accepted = place.childrenAccepted;
       if (first.checkIn < today || (month !== null && first.checkIn > monthEnd(month)))
-        return answer(search, first, month, "past");
+        return answer(search, first, month, "past", accepted);
       const offered = await sources.offers(place.slug);
       const rooms = offered?.rooms.filter(
         (room) => !search.roomTypeId || room.roomTypeId === search.roomTypeId,
       );
-      if (!rooms?.length) return answer(search, first, month, "not_bookable");
-      if (search.childAges.length && !place.childrenAccepted)
-        return { ...answer(search, first, month, "no_fit"), childrenAccepted: false };
+      if (!rooms?.length) return answer(search, first, month, "not_bookable", accepted);
+      if (search.childAges.length && !accepted)
+        return answer(search, first, month, "no_fit", accepted);
       const c: Context = {
         search,
         slug: place.slug,
         offered: { ...offered!, rooms },
         today,
         month,
+        childrenAccepted: accepted,
+        budget: { left: SEARCH_BUDGET },
       };
       const result = await evaluate(c, first, true);
       // A month: its first arrival, else the next free one while still in that month.
       const later = result.nearestFree;
       if (month !== null && later && later.checkIn <= monthEnd(month)) {
-        const found = await evaluate(c, later, true);
+        const found = await evaluate({ ...c, budget: { left: SEARCH_BUDGET } }, later, true);
         if (found.status === "available") return found;
       }
       return result;
@@ -633,24 +731,25 @@ async function inSnapshot<T>(pool: Pool, read: (client: PoolClient) => Promise<T
 
 /**
  * The live search over the database, on a display pool of its own (`max` connections at once,
- * default 2): read-only and lock-free, so a search can write nothing. `payments`: the booking
- * page's payment switches, so only the rates guests can pay now are offered, as on the page.
+ * default 2, named apart from the agency page's): read-only and lock-free, so a search can write
+ * nothing. `payments`: the booking page's own payment switches (as its route builds them from the
+ * deployment's settings), so only the rates guests can pay now are offered, as on the page.
  */
 export function createPgLiveStaySearch(config: {
   connectionString: string;
-  payments?: PricingPaymentSwitches;
+  payments: PricingPaymentSwitches;
   max?: number;
+  log?: LiveStaySearchSources["log"];
 }) {
   const pool = createPublicPricingDisplayPool({
     connectionString: config.connectionString,
     max: config.max ?? 2,
+    applicationName: "vayada-live-stay-search",
   });
-  const catalog = createPublicPricingOfferCatalog(
-    pool,
-    config.payments ? { payments: config.payments } : {},
-  );
+  const catalog = createPublicPricingOfferCatalog(pool, { payments: config.payments });
   const prices = createPublicPricingStayPrices(pool, catalog);
   const search = createLiveStaySearch({
+    ...(config.log && { log: config.log }),
     property: (propertyId) =>
       inSnapshot(pool, async (client) => {
         // The canonical address, the hotel's calendar, and its booking page's children switch.
@@ -678,7 +777,9 @@ export function createPgLiveStaySearch(config: {
         return rows.rows.length === 1 ? rows.rows[0]! : null;
       }),
     offers: (slug) => catalog.read(slug),
-    stayPrices: (slug, query, offered) => prices.readOffered(slug, query, offered),
+    stayPrices: (slug, query, offered, budget) => prices.readOffered(slug, query, offered, budget),
+    selectionTotal: (slug, dates, currency, rooms) =>
+      prices.readSelection(slug, dates, currency, rooms),
     freeWindows: (slug, dates, slots, offered) =>
       readFreeWindows(pool, slug, dates, slots, offered, NEXT_FREE_TRIES),
     refusals: (slug, dates, guests, rooms) =>

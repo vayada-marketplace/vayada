@@ -25,7 +25,13 @@ import type { Pool, PoolClient, PoolConfig, QueryConfig, QueryResult } from "pg"
  * agency page's many reads would set off on every search.
  */
 export function createPublicPricingDisplayPool(
-  config: { connectionString: string; max: number; connectionTimeoutMillis?: number },
+  config: {
+    connectionString: string;
+    max: number;
+    connectionTimeoutMillis?: number;
+    /** Its own name, so the pool runtime keeps it apart from the agency page's (VAY-2533). */
+    applicationName?: string;
+  },
   /** The pool class; production's pool runtime replaces `pg.Pool` (tests pass it in). */
   PoolClass: new (config: PoolConfig) => Pool = pg.Pool,
 ): Pool {
@@ -77,12 +83,13 @@ export function displayPoolConfig(config: {
   connectionString: string;
   max: number;
   connectionTimeoutMillis?: number;
+  applicationName?: string;
 }): PoolConfig {
   return {
     connectionString: config.connectionString,
     max: config.max,
     connectionTimeoutMillis: config.connectionTimeoutMillis ?? 3000,
-    application_name: "vayada-display-prices",
+    application_name: config.applicationName ?? "vayada-display-prices",
   };
 }
 

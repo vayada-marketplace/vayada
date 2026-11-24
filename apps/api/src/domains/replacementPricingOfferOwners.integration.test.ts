@@ -7459,8 +7459,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   async function bookableStay(
     configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot,
     roomChildren = 0,
+    policy?: FixedChargePolicy,
   ) {
-    const f = await publicFixture(false, configure, undefined, payable, false, true, roomChildren),
+    const f = await publicFixture(false, configure, policy, payable, false, true, roomChildren),
       id = f.scope.propertyId;
     const publisher = createTargetPublicBookabilityPublicationCommandPort({
       connectionString: url!,
@@ -7825,7 +7826,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   }, 300_000);
   it("searches a stay as its booking page prices it, writing nothing (VAY-2533)", async () => {
     // Rooms for two adults and a child aged 0-11, who pays 15.00 a night; the second room takes
-    // stays of three nights or more.
+    // stays of three nights or more. Each booking pays a 50.00 cleaning fee on top.
     const rules = {
       minArrivalNights: 1,
       maxStayNights: null,
@@ -7857,21 +7858,41 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         })),
       }),
       1,
+      {
+        version: "booking.fixed-charges.v1",
+        currency: "EUR",
+        charges: [
+          {
+            id: "cleaning",
+            name: "Cleaning",
+            unit: "booking",
+            amountMinor: "5000",
+            minimumAge: null,
+            included: false,
+            collect: "property",
+          },
+        ],
+      },
     );
     const id = f.scope.propertyId;
     const [first, second] = f.snapshot.rooms.map((room) => room.roomTypeId) as [string, string];
+    // As production now: no card payments, no bank transfer or PayPal.
+    const payments = { card: false, deposits: false, manual: [] };
     const [checkIn, checkOut] = [await localDay(5), await localDay(7)];
     const quotesFor = async () =>
       Number(
         (await pool.query("SELECT count(*) FROM booking.pricing_quotes WHERE property_id=$1", [id]))
           .rows[0].count,
       );
-    const live = createPgLiveStaySearch({ connectionString: url! });
+    const live = createPgLiveStaySearch({ connectionString: url!, payments });
     const search = (adults: number, childAges: number[]) =>
       live.search({ propertyId: id, stay: { checkIn, checkOut }, adults, childAges });
     try {
       // The booking page's own room prices, one room for these guests.
-      const page = createPublicPricingStayPrices(pool, createPublicPricingOfferCatalog(pool));
+      const page = createPublicPricingStayPrices(
+        pool,
+        createPublicPricingOfferCatalog(pool, { payments }),
+      );
       const pagePrices = async (party: number, room: number) =>
         new Map(
           (await page.read(id, {
@@ -7919,8 +7940,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           BigInt(rate.totalMinor!) - BigInt(rates(couple).get(`${first}|${rate.publicOfferKey}`)!),
         ).toBe(3000n);
 
-      // Three adults: no room takes them; two of the first rooms do, priced room by room as the
-      // booking page prices a group.
+      // Three adults: no room takes them; two of the first rooms do, chosen by the booking page's
+      // price for each room, and priced as one booking: the cleaning fee once, not per room.
       const three = await search(3, []);
       expect(three.status).toBe("available");
       expect(three.rooms.map((room) => room.status)).toEqual(["too_small", "too_small"]);
@@ -7933,8 +7954,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           .filter(([key]) => key.startsWith(`${first}|`))
           .map(([, total]) => BigInt(total))
           .sort((a, b) => (a < b ? -1 : 1))[0]!;
-      expect(three.split!.totalMinor).toBe(
-        (lowest(await pagePrices(3, 2)) + lowest(await pagePrices(3, 1))).toString(),
+      expect(BigInt(three.split!.totalMinor)).toBe(
+        lowest(await pagePrices(3, 2)) + lowest(await pagePrices(3, 1)) - 5000n,
       );
 
       // Searching wrote nothing; the quotes /book issues for the same stays cost what it said.
@@ -7961,8 +7982,26 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         });
         expect(issued.quote?.evidence.totalMinor).toBe(rate.totalMinor);
       }
+      const pair = await createCurrentPricingQuoteStore(pool, 300).issue(id, {
+        requestId: randomUUID(),
+        selection: {
+          version: "public-pricing-selection.v1",
+          checkIn,
+          checkOut,
+          currency: "EUR",
+          rooms: three.split!.rooms.map((room, index) => ({
+            selectionId: `room-${index + 1}`,
+            publicOfferKey: room.rate.publicOfferKey,
+            guests: { adults: room.adults, childAgesAtCheckIn: [] },
+          })),
+          addons: [],
+          promoCode: null,
+        },
+        paymentMethod: "pay_at_property",
+      });
+      expect(pair.quote?.evidence.totalMinor).toBe(three.split!.totalMinor);
       const issued = await quotesFor();
-      expect(issued).toBe(2);
+      expect(issued).toBe(3);
 
       // The first room sold out on the first night: nothing for a couple, and the second room
       // still needs three nights; a day later the first room is free for two.
