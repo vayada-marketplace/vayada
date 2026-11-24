@@ -615,6 +615,7 @@ const bookingCustomDomainVerifier = config.bookingCustomDomainCloudflare
       cloudflare: createCloudflareCustomHostnames(config.bookingCustomDomainCloudflare),
       dns: createCustomDomainDns(),
       routes: config.bookingCustomDomainRoutes,
+      proofSecret: config.bookingCustomDomainProofSecret,
     })
   : undefined;
 

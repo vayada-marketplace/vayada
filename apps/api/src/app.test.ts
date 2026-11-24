@@ -87,6 +87,7 @@ import {
   createPgTargetBookingPromoCodesRepository,
 } from "./routes/bookingPromoCodes.js";
 import {
+  BookingCustomDomainConflictError,
   createTargetBookingCustomDomainRepository,
   type BookingCustomDomainPool,
   type BookingCustomDomainRepository,
@@ -5483,6 +5484,10 @@ describe("vayada-api", () => {
             operationCount += 1;
             throw new Error("sensitive verifier call");
           },
+          proofRecord() {
+            operationCount += 1;
+            throw new Error("sensitive verifier call");
+          },
         },
       });
       const requestSpecs =
@@ -5510,6 +5515,33 @@ describe("vayada-api", () => {
       await app.close();
       app = null;
     }
+  });
+
+  it("says a domain another hotel connected is taken, with a conflict (VAY-2579)", async () => {
+    app = buildAuthenticatedApp({
+      customDomainRepository: {
+        ...bookingCustomDomainRepository,
+        async upsertForPropertyId() {
+          throw new BookingCustomDomainConflictError();
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+      headers: { authorization: "Bearer valid-token" },
+      payload: { domain: "book.taken.example" },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.body).toEqual({
+      statusCode: 409,
+      code: "conflict",
+      category: "validation",
+      message: "This domain is already connected to another hotel.",
+      details: ["Domain is already connected to another property."],
+    });
   });
 
   it("connects booking custom-domain through the typed write contract", async () => {
@@ -5675,9 +5707,62 @@ describe("vayada-api", () => {
         async release() {
           throw new Error("A check never removes a hostname.");
         },
+        proofRecord: () => null,
       };
       return { checked, verifier };
     };
+
+    it("names the ownership record in every answer and marks it after a check (VAY-2579)", async () => {
+      const proof = {
+        name: "_vayada.book.alpenrose.example",
+        value: "vayada-domain-verification=0123456789abcdef0123456789abcdef",
+      };
+      const { verifier } = verifierAnswering({
+        status: "failed",
+        issue: { code: "ownership_record_missing", foundTarget: null },
+        recordHost: "book",
+        errors: ["No TXT record _vayada.book.alpenrose.example with this hotel's code found."],
+        proofStatus: "failed",
+      });
+      const proofRecords: unknown[] = [];
+      verifier.proofRecord = (hostname, propertyId) => {
+        proofRecords.push([hostname, propertyId]);
+        return proof;
+      };
+      app = buildAuthenticatedApp({
+        customDomainRepository: pendingDomain,
+        customDomainVerifier: verifier,
+      });
+
+      const stored = await injectJson(app, {
+        method: "GET",
+        url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+        headers: { authorization: "Bearer valid-token" },
+      });
+      expect(stored.statusCode).toBe(200);
+      expect((stored.body as { dnsRecords: unknown }).dnsRecords).toEqual([
+        {
+          type: "CNAME",
+          name: "book.alpenrose.example",
+          value: "custom.booking.vayada.com",
+          status: "pending",
+        },
+        { type: "TXT", ...proof, status: "pending" },
+      ]);
+
+      const checked = await checkDomain();
+      expect(checked.statusCode).toBe(200);
+      expect(checked.body).toMatchObject({
+        status: "failed",
+        dnsRecords: [
+          // The check got as far as the TXT record, so the CNAME is right.
+          { type: "CNAME", host: "book", status: "verified" },
+          { type: "TXT", ...proof, host: "_vayada.book", status: "failed" },
+        ],
+        verificationIssue: { code: "ownership_record_missing", foundTarget: null },
+      });
+      expect(proofRecords).toContainEqual(["book.alpenrose.example", pmsPropertyId]);
+    });
 
     it("verifies a domain once Cloudflare is active and republishes the live page", async () => {
       const recorded: unknown[] = [];
@@ -5811,6 +5896,7 @@ describe("vayada-api", () => {
           async release() {
             return "absent" as const;
           },
+          proofRecord: () => null,
         },
       ]) {
         let writes = 0;
@@ -5960,6 +6046,7 @@ describe("vayada-api", () => {
           if (releaseFails) throw new CloudflareCustomHostnameError(403, [9109]);
           return "deleted";
         },
+        proofRecord: () => null,
       };
       const save = (domain: string) =>
         injectJson(app!, {

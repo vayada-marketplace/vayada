@@ -13,6 +13,9 @@ const ISSUE_MESSAGES = {
   routing_pending: "admin.customDomainRoutingPending",
   hostname_rejected: "admin.customDomainRejected",
   check_unavailable: "admin.customDomainCheckUnavailable",
+  // VAY-2579: the TXT record that proves the domain is this hotel's.
+  ownership_record_missing: "admin.customDomainOwnershipMissing",
+  ownership_record_mismatch: "admin.customDomainOwnershipMismatch",
 } as const;
 
 interface CustomDomainCardProps {
@@ -53,10 +56,14 @@ export default function CustomDomainCard({
     return [t("admin.customDomainNotVerified"), "bg-red-500"];
   };
   const [statusLabel, statusColor] = badge();
-  const record = domainStatus?.dnsRecords[0];
+  // The CNAME, and the ownership TXT record when the domain needs one (VAY-2579).
+  const records = domainStatus?.dnsRecords ?? [];
   const issueMessage = issue
     ? t(
-        ISSUE_MESSAGES[issue.code] ??
+        // With the ownership record listed too, ask for both records at once (VAY-2579).
+        (issue.code === "dns_record_missing" && records.length > 1
+          ? "admin.customDomainRecordsMissing"
+          : ISSUE_MESSAGES[issue.code]) ??
           "admin.domainVerificationHasNotCompletedCheckTheCNAMERecordAnd",
         {
           domain: domainStatus?.domain ?? "",
@@ -103,19 +110,36 @@ export default function CustomDomainCard({
           </button>
         </div>
 
-        {configured && !connected && record ? (
+        {configured && !connected && records.length > 0 ? (
           <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 p-3">
             <p className="text-[12px] font-medium text-gray-900">
-              {t("admin.customDomainRecordToAdd")}
+              {t(
+                records.length > 1
+                  ? "admin.customDomainRecordsToAdd"
+                  : "admin.customDomainRecordToAdd",
+              )}
             </p>
-            <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[12px] text-gray-600">
-              <dt>{t("admin.customDomainRecordType")}</dt>
-              <dd className="font-mono text-gray-900">{record.type}</dd>
-              <dt>{t("admin.customDomainRecordName")}</dt>
-              <dd className="break-all font-mono text-gray-900">{record.host ?? record.name}</dd>
-              <dt>{t("admin.customDomainRecordTarget")}</dt>
-              <dd className="break-all font-mono text-gray-900">{record.value}</dd>
-            </dl>
+            {records.map((record, index) => (
+              <dl
+                key={`${record.type}:${record.name}`}
+                className={`mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[12px] text-gray-600 ${
+                  index > 0 ? "border-t border-blue-100 pt-2" : ""
+                }`}
+              >
+                <dt>{t("admin.customDomainRecordType")}</dt>
+                <dd className="font-mono text-gray-900">{record.type}</dd>
+                <dt>{t("admin.customDomainRecordName")}</dt>
+                <dd className="break-all font-mono text-gray-900">{record.host ?? record.name}</dd>
+                <dt>
+                  {t(
+                    record.type === "TXT"
+                      ? "admin.customDomainRecordValue"
+                      : "admin.customDomainRecordTarget",
+                  )}
+                </dt>
+                <dd className="break-all font-mono text-gray-900">{record.value}</dd>
+              </dl>
+            ))}
           </div>
         ) : (
           <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 p-3">

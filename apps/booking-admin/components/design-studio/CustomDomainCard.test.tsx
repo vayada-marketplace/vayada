@@ -135,6 +135,55 @@ describe("custom domain card (VAY-2568)", () => {
     expect(render(base, true)).toContain("Checking...");
   });
 
+  describe("the ownership record (VAY-2579)", () => {
+    const proof = {
+      type: "TXT" as const,
+      name: "_vayada.booking.hotel.example",
+      host: "_vayada.booking",
+      value: "vayada-domain-verification=0123456789abcdef0123456789abcdef",
+      status: "failed" as const,
+    };
+    const withProof = (code: "ownership_record_missing" | "ownership_record_mismatch") =>
+      render({
+        ...base,
+        dnsRecords: [{ ...base.dnsRecords[0], status: "verified" }, proof],
+        verificationIssue: { code, foundTarget: null },
+      });
+
+    it("shows both records to add, the TXT one with its name and value", () => {
+      const text = withProof("ownership_record_missing");
+
+      expect(text).toContain("DNS records for your domain");
+      expect(text).toContain('"CNAME"');
+      expect(text).toContain('"TXT"');
+      expect(text).toContain('"_vayada.booking"');
+      expect(text).toContain('"Value"');
+      expect(text).toContain("vayada-domain-verification=0123456789abcdef0123456789abcdef");
+      expect(text).toContain("Not verified");
+      expect(text).toContain(
+        "Add the TXT record below too, so we know booking.hotel.example is yours.",
+      );
+    });
+
+    it("asks for both records at once while the CNAME is missing too", () => {
+      const text = render({
+        ...base,
+        dnsRecords: [base.dnsRecords[0], { ...proof, status: "pending" }],
+      });
+
+      expect(text).toContain(
+        "We can't find a CNAME record for booking.hotel.example yet. Add both records below",
+      );
+    });
+
+    it("says the domain belongs to another hotel when the record holds another code", () => {
+      const text = withProof("ownership_record_mismatch");
+
+      expect(text).toContain("This domain belongs to another hotel");
+      expect(text).toContain("the TXT record for booking.hotel.example holds another hotel's code");
+    });
+  });
+
   it("keeps the general DNS setup help before a domain is connected", () => {
     const text = render({
       ...base,

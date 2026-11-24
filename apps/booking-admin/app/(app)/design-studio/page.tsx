@@ -12,6 +12,7 @@ import {
 } from "@vayada/domain-booking";
 import { BookingPagePreview } from "@vayada/product-onboarding";
 import { settingsService, type CustomDomainStatus } from "@/services/settings";
+import { BookingCustomDomainClientError } from "@/services/api/bookingCustomDomainClient";
 import { designStudioBookingDesignClient } from "@/services/api/bookingDesignClient";
 import { requireSelectedBookingHotelId } from "@/services/api/bookingHotelScope";
 import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
@@ -696,8 +697,12 @@ export default function DesignStudioPage() {
       setDomainStatus(status);
       setDomainInput("");
       setFeedback({ type: "success", message: "settings.feedback.domainConnected" });
-    } catch {
-      const message = "admin.failedToConnectCustomDomain";
+    } catch (error) {
+      // VAY-2579: another hotel has connected this domain.
+      const message =
+        error instanceof BookingCustomDomainClientError && error.code === "conflict"
+          ? "admin.customDomainTaken"
+          : "admin.failedToConnectCustomDomain";
       setFeedback({ type: "error", message });
     } finally {
       setSaving(false);

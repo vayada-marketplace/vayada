@@ -32,7 +32,10 @@ export type BookingCustomDomainIssueCode =
   | "certificate_pending"
   | "routing_pending"
   | "hostname_rejected"
-  | "check_unavailable";
+  | "check_unavailable"
+  // VAY-2579: the ownership TXT record is missing, or holds another hotel's code.
+  | "ownership_record_missing"
+  | "ownership_record_mismatch";
 
 export interface BookingCustomDomainIssue {
   code: BookingCustomDomainIssueCode;

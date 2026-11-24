@@ -270,6 +270,9 @@ export type ApiConfig = {
   /** VAY-2568: hotel domains the ALB sends to the new booking frontend, each with the property it
    * belongs to (platform's next_booking_custom_domains). Only these can be verified. */
   bookingCustomDomainRoutes: ReadonlyMap<string, string>;
+  /** VAY-2579: keys each hotel's domain ownership code (the TXT record `_vayada.<domain>`). Without
+   * it, no record is asked for and only the routed domains above can be verified. */
+  bookingCustomDomainProofSecret?: string;
   /** VAY-2589: the browser Maps key (projects/<project>/locations/global/keys/<id>) and the JSON key of
    * the service account that may read and update it. With both, next-api adds hotels' booking domains
    * to the key's website list; without them, nothing is added. */
@@ -380,6 +383,15 @@ function readBookingCustomDomainRoutes(env: NodeJS.ProcessEnv): ReadonlyMap<stri
     if (host && propertyId && rest.length === 0) routes.set(host.replace(/\.$/, ""), propertyId);
   }
   return routes;
+}
+
+/** At least 32 characters (`openssl rand -hex 32` gives 64): a short one would make codes guessable. */
+function readBookingCustomDomainProofSecret(env: NodeJS.ProcessEnv): string | undefined {
+  const secret = readOptionalEnv(env, "BOOKING_CUSTOM_DOMAIN_PROOF_SECRET");
+  if (secret && secret.length < 32) {
+    throw new Error("BOOKING_CUSTOM_DOMAIN_PROOF_SECRET must be at least 32 characters");
+  }
+  return secret;
 }
 
 function readOptionalEnv(env: NodeJS.ProcessEnv, key: string): string | undefined {
@@ -1602,6 +1614,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
     bookingCustomDomainCloudflare: readBookingCustomDomainCloudflare(env),
     bookingCustomDomainRoutes: readBookingCustomDomainRoutes(env),
+    bookingCustomDomainProofSecret: readBookingCustomDomainProofSecret(env),
     googleMapsKeyEditor: readGoogleMapsKeyEditor(env),
     platformMediaServing,
     platformMediaCleanupEnabled: readBooleanEnv(env, "PLATFORM_MEDIA_CLEANUP_ENABLED", true),
