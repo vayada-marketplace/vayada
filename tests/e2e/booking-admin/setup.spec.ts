@@ -5,6 +5,7 @@ import {
   BOOKING_ADMIN_PUBLIC_PROPERTY_PROFILE_PATH,
   BOOKING_ADMIN_PROPERTY_ID,
   defaultBookingAdminDesignSettings,
+  defaultBookingAdminPropertySettings,
   mockBookingAdminAuthenticatedSession,
   mockBookingAdminDesignSettings,
   mockBookingAdminShellRoutes,
@@ -28,7 +29,11 @@ test.describe("booking-admin adaptive setup", () => {
     await mockSetupOwnerSession(page);
     await page.route(/\/api\/hotel-setup\/imports\/prepared(?:\?|$)/, async (route) => {
       if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
-      await route.fulfill({ status: 200, headers: sharedCorsHeaders(route), json: { import: null } });
+      await route.fulfill({
+        status: 200,
+        headers: sharedCorsHeaders(route),
+        json: { import: null },
+      });
     });
     // The page asks for the entry product in its URL (pms here); the status must answer for it.
     await mockHotelSetupPrerequisites(
@@ -64,7 +69,11 @@ test.describe("booking-admin adaptive setup", () => {
     await mockSetupOwnerSession(page);
     await page.route(/\/api\/hotel-setup\/imports\/prepared(?:\?|$)/, async (route) => {
       if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
-      await route.fulfill({ status: 200, headers: sharedCorsHeaders(route), json: { import: null } });
+      await route.fulfill({
+        status: 200,
+        headers: sharedCorsHeaders(route),
+        json: { import: null },
+      });
     });
     const statusRequests: string[] = [];
     await page.route(/\/api\/hotel-setup\/status(?:\?|$)/, async (route) => {
@@ -240,7 +249,10 @@ test.describe("booking-admin adaptive setup", () => {
 
   test("uploads, previews, and removes a Booking header logo", async ({ page }) => {
     await mockBookingAdminAuthenticatedSession(page);
-    await mockBookingAdminShellRoutes(page);
+    // The preview names the hotel from the property settings (VAY-2610).
+    await mockBookingAdminShellRoutes(page, {
+      propertySettings: { ...defaultBookingAdminPropertySettings, property_name: "Alpenrose" },
+    });
     const { requests } = await mockBookingAdminDesignSettings(page);
     const logoUrls = [
       "https://media.example/alpenrose-header-logo.webp",

@@ -457,7 +457,16 @@ export async function registerSharedHotelSetupStatusRoutes(
     const propertyId = parsePropertyId(params.propertyId, reply);
     if (propertyId === false || propertyId === null) return reply;
 
-    const access = resolveSharedSetupAccess(request, reply, propertyId);
+    // VAY-2610: Design Studio shows the cover, gallery and page language to every team member
+    // who may read the booking design, not only to owners and operators.
+    const access = resolveSharedSetupAccess(
+      request,
+      reply,
+      propertyId,
+      request.authContext?.membership.permissions.includes("hotel_catalog.setup.read")
+        ? "hotel_catalog.setup.read"
+        : "booking.design.read",
+    );
     if (!access) return reply;
 
     const profile = await repository.getPublicPropertyProfile({

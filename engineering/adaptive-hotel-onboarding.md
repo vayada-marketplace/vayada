@@ -368,7 +368,8 @@ type PropertyProfileResponse = {
 Shared and public-profile updates require `hotel_catalog.setup.manage`, a direct
 Catalog property link, and `{ expectedProfileRevision, patch }`. Property-type
 and profile reads require `hotel_catalog.setup.read`; profile reads also require
-the same link. Patches preserve omitted values;
+the same link. The public-profile read also accepts `booking.design.read`
+(Design Studio, VAY-2610). Patches preserve omitted values;
 validation returns `422` with `{ code: "invalid_setup_request", fields }`, and a
 stale revision returns the current revision with `409 profile_revision_conflict`.
 Public-profile patches own localized descriptions and ordered, approved media:
