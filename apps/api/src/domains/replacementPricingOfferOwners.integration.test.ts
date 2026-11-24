@@ -10,6 +10,7 @@ import {
   parseAgencyStayPricesQuery,
 } from "./agencyStayPrices.js";
 import { readFreeWindows } from "./agencyNextFreeDates.js";
+import { createPgLiveStaySearch } from "./liveStaySearch.js";
 import { DEFAULT_FULL_ARI_DAYS_AHEAD } from "../jobs/pmsChannexAriHorizon.js";
 import { readLiveAccountBookingPageStays, readStaysWithPromoCode } from "./accountBookingPages.js";
 import { installPostgresPoolRuntime } from "../platform/postgresRuntime.js";
@@ -202,6 +203,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     enableCard = false,
     roomTotal = 2,
     bookable = false,
+    /** Children each room takes besides its `roomTotal` adults (VAY-2533). */
+    roomChildren = 0,
   ) {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
       throw new Error("test database required");
@@ -226,8 +229,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     );
     await pool.query(
       `INSERT INTO pms.room_types(id,property_id,name,occupancy_limits)
-       VALUES($1,$2,'Terms room',jsonb_build_object('total',$3::int,'adults',$3::int,'children',0))`,
-      [roomTypeId, propertyId, roomTotal],
+       VALUES($1,$2,'Terms room',jsonb_build_object('total',$3::int+$4::int,'adults',$3::int,'children',$4::int))`,
+      [roomTypeId, propertyId, roomTotal, roomChildren],
     );
     await pool.query(
       `INSERT INTO identity.organization_memberships(id,organization_id,user_id,role_key,property_access_mode,access_origin)
@@ -286,8 +289,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       secondRoomId = randomUUID();
     await pool.query(
       `INSERT INTO pms.room_types(id,property_id,name,occupancy_limits)
-       VALUES($1,$2,'Second room',jsonb_build_object('total',$3::int,'adults',$3::int,'children',0))`,
-      [secondRoomId, propertyId, roomTotal],
+       VALUES($1,$2,'Second room',jsonb_build_object('total',$3::int+$4::int,'adults',$3::int,'children',$4::int))`,
+      [secondRoomId, propertyId, roomTotal, roomChildren],
     );
     const termsInput: Omit<ReplacementOfferTerms, "revision"> = {
       roomTypeId,
@@ -6663,8 +6666,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     configureTerms?: TermsSetup,
     enableCard = false,
     realReadiness = false,
+    roomChildren = 0,
   ) {
-    const f = await fixture(configure, configureTerms, enableCard, 2, realReadiness),
+    const f = await fixture(configure, configureTerms, enableCard, 2, realReadiness, roomChildren),
       propertyId = f.scope.propertyId;
     await pool.query(
       "UPDATE hotel_catalog.properties SET profile_status='complete',lifecycle_status='active' WHERE id=$1",
@@ -7452,8 +7456,11 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     ).toEqual([{ kind: "full" }, { kind: "full" }, { kind: "full" }]);
   });
   /** VAY-2458: a stay guests can book, set up as VAY-2123 above, with free rooms for 40 days. */
-  async function bookableStay() {
-    const f = await publicFixture(false, undefined, undefined, payable, false, true),
+  async function bookableStay(
+    configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot,
+    roomChildren = 0,
+  ) {
+    const f = await publicFixture(false, configure, undefined, payable, false, true, roomChildren),
       id = f.scope.propertyId;
     const publisher = createTargetPublicBookabilityPublicationCommandPort({
       connectionString: url!,
@@ -7816,6 +7823,171 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       await quotes.end();
     }
   }, 300_000);
+  it("searches a stay as its booking page prices it, writing nothing (VAY-2533)", async () => {
+    // Rooms for two adults and a child aged 0-11, who pays 15.00 a night; the second room takes
+    // stays of three nights or more.
+    const rules = {
+      minArrivalNights: 1,
+      maxStayNights: null,
+      closedToArrival: false,
+      closedToDeparture: false,
+      stopSell: false,
+    };
+    const f = await bookableStay(
+      (snapshot) => ({
+        ...snapshot,
+        rooms: snapshot.rooms.map((room, index) => ({
+          ...room,
+          capacity: { total: 3, adults: 2, children: 1 },
+          children: {
+            adultFromAge: 12,
+            bands: [
+              { fromAge: 0, throughAge: 11, nightlyMinor: "1500", countsTowardCapacity: true },
+            ],
+          },
+          offers: room.offers.map((offer) => ({
+            ...offer,
+            restrictions: {
+              kind: "own" as const,
+              rules: { ...rules, minArrivalNights: index === 1 ? 3 : 1 },
+              seasons: [],
+              dates: [],
+            },
+          })),
+        })),
+      }),
+      1,
+    );
+    const id = f.scope.propertyId;
+    const [first, second] = f.snapshot.rooms.map((room) => room.roomTypeId) as [string, string];
+    const [checkIn, checkOut] = [await localDay(5), await localDay(7)];
+    const quotesFor = async () =>
+      Number(
+        (await pool.query("SELECT count(*) FROM booking.pricing_quotes WHERE property_id=$1", [id]))
+          .rows[0].count,
+      );
+    const live = createPgLiveStaySearch({ connectionString: url! });
+    const search = (adults: number, childAges: number[]) =>
+      live.search({ propertyId: id, stay: { checkIn, checkOut }, adults, childAges });
+    try {
+      // The booking page's own room prices, one room for these guests.
+      const page = createPublicPricingStayPrices(pool, createPublicPricingOfferCatalog(pool));
+      const pagePrices = async (party: number, room: number) =>
+        new Map(
+          (await page.read(id, {
+            checkIn,
+            checkOut,
+            adults: party,
+            children: 0,
+            promoCode: null,
+            room: { adults: room, children: 0 },
+          }))!.rooms.flatMap((one) =>
+            one.offers.flatMap((offer) =>
+              offer.status === "priced"
+                ? [[`${one.roomTypeId}|${offer.publicOfferKey}`, offer.totalMinor] as const]
+                : [],
+            ),
+          ),
+        );
+      const rates = (result: Awaited<ReturnType<typeof search>>) =>
+        new Map(
+          result.rooms.flatMap((room) =>
+            room.rates.map((rate) => [
+              `${room.roomTypeId}|${rate.publicOfferKey}`,
+              rate.totalMinor,
+            ]),
+          ),
+        );
+
+      // A couple: the first room's two rates, at the booking page's prices; the second room
+      // needs three nights.
+      const couple = await search(2, []);
+      expect(couple).toMatchObject({ status: "available", split: null, nearestFree: null });
+      const rooms = new Map(couple.rooms.map((room) => [room.roomTypeId, room]));
+      expect(rooms.get(first)).toMatchObject({ status: "available", roomsLeft: 2 });
+      expect(rooms.get(second)).toMatchObject({ status: "minimum_stay", minNights: 3, rates: [] });
+      expect(rates(couple)).toEqual(await pagePrices(2, 2));
+      expect(rates(couple).size).toBe(2);
+
+      // With their 8-year-old: the child is priced, 15.00 a night.
+      const family = await search(2, [8]);
+      expect(family).toMatchObject({ status: "available", childrenPriced: true });
+      const familyRates = family.rooms.find((room) => room.roomTypeId === first)!.rates;
+      expect(familyRates).toHaveLength(2);
+      for (const rate of familyRates)
+        expect(
+          BigInt(rate.totalMinor!) - BigInt(rates(couple).get(`${first}|${rate.publicOfferKey}`)!),
+        ).toBe(3000n);
+
+      // Three adults: no room takes them; two of the first rooms do, priced room by room as the
+      // booking page prices a group.
+      const three = await search(3, []);
+      expect(three.status).toBe("available");
+      expect(three.rooms.map((room) => room.status)).toEqual(["too_small", "too_small"]);
+      expect(three.split!.rooms.map((room) => [room.roomTypeId, room.adults])).toEqual([
+        [first, 2],
+        [first, 1],
+      ]);
+      const lowest = (prices: Map<string, string>) =>
+        [...prices]
+          .filter(([key]) => key.startsWith(`${first}|`))
+          .map(([, total]) => BigInt(total))
+          .sort((a, b) => (a < b ? -1 : 1))[0]!;
+      expect(three.split!.totalMinor).toBe(
+        (lowest(await pagePrices(3, 2)) + lowest(await pagePrices(3, 1))).toString(),
+      );
+
+      // Searching wrote nothing; the quotes /book issues for the same stays cost what it said.
+      expect(await quotesFor()).toBe(0);
+      for (const rate of familyRates) {
+        const issued = await createCurrentPricingQuoteStore(pool, 300).issue(id, {
+          requestId: randomUUID(),
+          selection: {
+            version: "public-pricing-selection.v1",
+            checkIn,
+            checkOut,
+            currency: "EUR",
+            rooms: [
+              {
+                selectionId: "family",
+                publicOfferKey: rate.publicOfferKey,
+                guests: { adults: 2, childAgesAtCheckIn: [8] },
+              },
+            ],
+            addons: [],
+            promoCode: null,
+          },
+          paymentMethod: "pay_at_property",
+        });
+        expect(issued.quote?.evidence.totalMinor).toBe(rate.totalMinor);
+      }
+      const issued = await quotesFor();
+      expect(issued).toBe(2);
+
+      // The first room sold out on the first night: nothing for a couple, and the second room
+      // still needs three nights; a day later the first room is free for two.
+      await pool.query(
+        `UPDATE pms.inventory_days SET available_count=0
+        WHERE property_id=$1 AND room_type_id=$2 AND stay_date=$3::date`,
+        [id, first, checkIn],
+      );
+      const full = await search(2, []);
+      expect(full).toMatchObject({
+        status: "unavailable",
+        split: null,
+        nearestFree: { checkIn: await localDay(6), checkOut: await localDay(8) },
+      });
+      expect(new Map(full.rooms.map((room) => [room.roomTypeId, room.status]))).toEqual(
+        new Map([
+          [first, "sold_out"],
+          [second, "minimum_stay"],
+        ]),
+      );
+      expect(await quotesFor()).toBe(issued);
+    } finally {
+      await live.close();
+    }
+  }, 120_000);
   /** "Save prices" for the next revision, with its Finance evidence and charge declaration. */
   async function savePrices(
     f: Awaited<ReturnType<typeof publicFixture>>,

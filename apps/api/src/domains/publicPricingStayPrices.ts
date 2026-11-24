@@ -21,8 +21,10 @@ export type StayPricesQuery = {
   children: number;
   promoCode: string | null;
   /** VAY-2320: the guests of the one room being chosen when a group picks its rooms one by one.
-   * Then each room type is sized and priced for that one room. */
-  room?: { adults: number; children: number };
+   * Then each room type is sized and priced for that one room. VAY-2533: with each child's age at
+   * check-in (`childAges`, one per child), its children are priced as the quote prices them; the
+   * booking page's own query never has them. */
+  room?: { adults: number; children: number; childAges?: readonly number[] };
 };
 
 /** One offer's stay total, or why it has none in this read. */
@@ -226,10 +228,12 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
           offers.push({ publicOfferKey: offer.publicOfferKey, status: "unpriced" as const });
           continue;
         }
-        const adults = one ? [one.adults] : splitAdults(query.adults, roomCount ?? 1);
+        const guests = one
+          ? [{ adults: one.adults, childAges: agesOf(one) }]
+          : splitAdults(query.adults, roomCount ?? 1).map((adults) => ({ adults, childAges: [] }));
         const price =
           available && roomCount !== null
-            ? await short(pool, (client) => stayTotal(client, slug, query, offer, adults))
+            ? await short(pool, (client) => stayTotal(client, slug, query, offer, guests))
             : null;
         offers.push(
           price
@@ -276,7 +280,7 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
           continue;
         }
         const price = await short(pool, (client) =>
-          stayTotal(client, slug, query, offer, [adults]),
+          stayTotal(client, slug, query, offer, [{ adults, childAges: [] }]),
         );
         part.push(
           price
@@ -290,7 +294,7 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
       version: "public-pricing-stay-prices.v1" as const,
       checkIn: query.checkIn,
       checkOut: query.checkOut,
-      childrenPriced: (one ? one.children : query.children) === 0,
+      childrenPriced: one ? agesOf(one).length === one.children : query.children === 0,
       // Additive (VAY-2320).
       suggestedRooms,
       rooms: rooms.map((room, index) => {
@@ -345,6 +349,10 @@ async function freeRooms(
   );
 }
 
+/** A room's children ages to price: all of them, or none while any is unknown. */
+const agesOf = (room: NonNullable<StayPricesQuery["room"]>) =>
+  room.childAges?.length === room.children ? room.childAges : [];
+
 /** One offer's stay total for the party. A promo code that doesn't apply to this stay makes the
  * calculation refuse, so the price without it is returned and says so. */
 async function stayTotal(
@@ -352,8 +360,8 @@ async function stayTotal(
   slug: string,
   query: StayPricesQuery,
   offer: { publicOfferKey: string; currency: string },
-  /** Adults in each room priced. */
-  adultsPerRoom: number[],
+  /** The guests of each room priced: its adults and its children's ages (none: not priced). */
+  perRoom: { adults: number; childAges: readonly number[] }[],
 ) {
   const price = async (promoCode: string | null) =>
     (
@@ -362,10 +370,10 @@ async function stayTotal(
         checkIn: query.checkIn,
         checkOut: query.checkOut,
         currency: offer.currency,
-        rooms: adultsPerRoom.map((adults, index) => ({
+        rooms: perRoom.map(({ adults, childAges }, index) => ({
           selectionId: `room-${index + 1}`,
           publicOfferKey: offer.publicOfferKey,
-          guests: { adults, childAgesAtCheckIn: [] },
+          guests: { adults, childAgesAtCheckIn: [...childAges] },
         })),
         addons: [],
         promoCode,
