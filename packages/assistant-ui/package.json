@@ -1,0 +1,31 @@
+{
+  "name": "@vayada/assistant-ui",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The in-app AI assistant's panel, shared by PMS and Booking Admin (VAY-2519).",
+  "exports": {
+    ".": "./src/AssistantPanel.tsx",
+    "./assistantApi": "./src/assistantApi.ts",
+    "./assistantMessages": "./src/assistantMessages.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vayada/web-security": "*"
+  },
+  "peerDependencies": {
+    "@heroicons/react": "^2.2.0",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@heroicons/react": "^2.2.0",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "^5",
+    "vitest": "^4.0.15"
+  }
+}
