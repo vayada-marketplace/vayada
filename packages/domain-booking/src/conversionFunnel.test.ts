@@ -30,7 +30,7 @@ describe("sequential Booking conversion funnel", () => {
       ...journey("abandoned", "card").slice(0, -2),
     ];
     const funnel = buildBookingConversionFunnel([...events, ...events].reverse(), false);
-    expect(funnel.steps.map((step) => step.count)).toEqual([4, 4, 4, 4, 1, 3]);
+    expect(funnel.steps.map((step) => step.count)).toEqual([4, 4, 4, 4, 4, 1, 3]);
     expect(funnel.steps.at(-2)).toMatchObject({
       conversionPercent: 50,
       percentOfVisits: 25,
@@ -62,8 +62,8 @@ describe("sequential Booking conversion funnel", () => {
       [...valid, ...missingAddon, ...noVisit, ...early],
       true,
     );
-    expect(result.steps.map((step) => step.count)).toEqual([3, 3, 2, 1, 1, 1, 1]);
-    expect(result.steps[3]?.conversionPercent).toBe(50);
+    expect(result.steps.map((step) => step.count)).toEqual([3, 3, 3, 2, 1, 1, 1, 1]);
+    expect(result.steps[4]?.conversionPercent).toBe(50);
     expect(result.biggestDrop).toBe("details_completed");
   });
 
@@ -92,8 +92,10 @@ describe("sequential Booking conversion funnel", () => {
       ],
       false,
     );
-    expect(result.steps.slice(0, 3).map(({ stage, count }) => [stage, count])).toEqual([
+    expect(result.steps.slice(0, 4).map(({ stage, count }) => [stage, count])).toEqual([
       ["page_visit", 1],
+      // Selecting a rate on the page's own dates counts as having searched them.
+      ["dates_searched", 1],
       ["rate_selected", 1],
       ["details_completed", 0],
     ]);
@@ -102,9 +104,39 @@ describe("sequential Booking conversion funnel", () => {
     expect(FUNNEL_EVENT_TYPES).toContain("room_viewed");
   });
 
+  it("counts picked dates, and a rate selection as a search when the dates weren't changed (VAY-2594)", () => {
+    const visit = (session: string, ...stages: ("dates_searched" | "rate_selected")[]) => [
+      { sessionId: session, sequence: 1, stage: "page_visit" as const },
+      ...stages.map((stage, index) => ({ sessionId: session, sequence: index + 2, stage })),
+    ];
+    const result = buildBookingConversionFunnel(
+      [
+        ...visit("looked"),
+        ...visit("searched", "dates_searched"),
+        ...visit("default-dates", "rate_selected"),
+        ...visit("both", "dates_searched", "dates_searched", "rate_selected"),
+      ],
+      false,
+    );
+    expect(result.steps.slice(0, 3).map(({ stage, count }) => [stage, count])).toEqual([
+      ["page_visit", 4],
+      ["dates_searched", 3],
+      ["rate_selected", 2],
+    ]);
+    // Skipping a required step still doesn't count.
+    const skipped = buildBookingConversionFunnel(
+      [
+        { sessionId: "s", sequence: 1, stage: "page_visit" },
+        { sessionId: "s", sequence: 2, stage: "details_completed" },
+      ],
+      false,
+    );
+    expect(skipped.steps.map((step) => step.count)).toEqual([1, 0, 0, 0, 0, 0, 0]);
+  });
+
   it("returns finite empty counts without a false biggest drop", () => {
     const result = buildBookingConversionFunnel([], false);
-    expect(result.steps).toHaveLength(6);
+    expect(result.steps).toHaveLength(7);
     expect(
       result.steps.every(
         (step) =>
@@ -121,6 +153,7 @@ describe("funnel event allowlist (VAY-2197)", () => {
   it("accepts each event with exactly its own properties", () => {
     for (const [type, properties] of [
       ["page_visit", {}],
+      ["dates_searched", {}],
       ["room_viewed", { roomTypeId: "f6853000-0000-4000-8000-000000000010" }],
       ["rate_selected", { entry: "room_card" }],
       ["step_viewed", { step: "extras" }],

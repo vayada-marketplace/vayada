@@ -956,7 +956,7 @@ function conversionFunnelSql(): string {
     FROM distribution.booking_web_events event
     WHERE property.profile_status = 'complete'
       AND event.property_id = scoped.property_id
-      AND event.event_type IN ('page_visit', 'rate_selected', 'addons_step_passed',
+      AND event.event_type IN ('page_visit', 'dates_searched', 'rate_selected', 'addons_step_passed',
         'details_completed', 'complete_booking_clicked', 'payment_authorized', 'booking_completed')
       AND event.metadata -> 'funnelVersion' = '1'::jsonb
       AND event.traffic_class = 'human'
