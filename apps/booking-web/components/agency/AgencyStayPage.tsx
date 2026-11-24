@@ -102,6 +102,7 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
     ),
   );
   const [checkIn, setCheckIn] = useState(initialDates.checkIn);
+  const datesSearchedSent = useRef(false);
   const [checkOut, setCheckOut] = useState(initialDates.checkOut);
   // The agency's own search, for "All stays" and the nearby stays: its room count and code when
   // this stay needed others (`stayHref`'s agencyRooms, agencyPromo).
@@ -254,6 +255,12 @@ function StayContent({ agency, stay }: { agency: AgencyPage; stay: AgencyStay })
         checkOut={checkOut}
         nights={calculateNights(checkIn, checkOut)}
         onDates={(ci, co) => {
+          // VAY-2594: the funnel's "Searched dates" step, once per page load: only the first
+          // counts, and each send uses up the session's event limit.
+          if (!datesSearchedSent.current && (ci !== checkIn || co !== checkOut)) {
+            datesSearchedSent.current = true;
+            trackEvent(slug, "dates_searched", {});
+          }
           setCheckIn(ci);
           setCheckOut(co);
         }}

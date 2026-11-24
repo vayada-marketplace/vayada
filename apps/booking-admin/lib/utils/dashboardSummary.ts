@@ -15,18 +15,19 @@ export function compareSummary(current: number, previous: number): SummaryCompar
 }
 
 /**
- * Conversion rate in %: confirmed bookings ÷ visitors, both from one period's funnel, so the card
- * and the funnel agree (VAY-2594). Null without visitors.
+ * Conversion rate in %: bookings made on the booking page ÷ its page views in the same period
+ * (VAY-2594), counted only since the page counts every visit. Null without page views, or when
+ * the API doesn't send them.
  */
-export function conversionRate(steps: readonly { stage: string; count: number }[]): number | null {
-  const visits = steps.find(({ stage }) => stage === "page_visit")?.count ?? 0;
-  const bookings = steps.find(({ stage }) => stage === "booking_completed")?.count ?? 0;
-  return visits > 0 ? (bookings / visits) * 100 : null;
+export function conversionRate(bookings: number | null, pageViews: number | null): number | null {
+  return bookings !== null && pageViews !== null && pageViews > 0
+    ? (bookings / pageViews) * 100
+    : null;
 }
 
 /**
  * Compares two conversion rates in hundredths of a percent. No comparison without a previous
- * rate (no visitors then), and "No data yet" without a current one.
+ * rate (no page views then), and "No data yet" without a current one.
  */
 export function compareConversion(
   current: number | null,

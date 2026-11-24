@@ -189,6 +189,32 @@ test("a first-time guest who allows analytics is counted from the hotel page to 
   expectPrivate(sent);
 });
 
+test("picking dates is the funnel's searched dates step, without the dates themselves (VAY-2594)", async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date("2028-03-05T12:00:00Z"));
+  await saveChoice(page, true);
+  const sent = await mockFunnel(page);
+  // No dates in the address, so the calendar opens on the (fixed) current month.
+  await page.goto("/");
+  const pickDates = async (from: string, to: string, nights: string) => {
+    await page.getByRole("button").filter({ hasText: "Your Stay" }).click();
+    await page.getByRole("button", { name: from, exact: true }).click();
+    await page.getByRole("button", { name: to, exact: true }).click();
+    await expect(page.locator("#stay-search")).toContainText(nights);
+  };
+  await pickDates("2028-03-10", "2028-03-13", "3 nights");
+  await expect.poll(() => funnel(sent).map(([type]) => type)).toContain("dates_searched");
+  // Picking again sends nothing more: only the first search counts.
+  await pickDates("2028-03-15", "2028-03-17", "2 nights");
+  expect(funnel(sent)).toEqual([
+    ["page_visit", {}],
+    ["dates_searched", {}],
+  ]);
+  expect(JSON.stringify(sent)).not.toMatch(/2028-03-1[0357]/);
+  expectPrivate(sent);
+});
+
 test("a stay without an Extras step still passes the extras stage", async ({ page }) => {
   await saveChoice(page, true);
   const sent = await mockFunnel(page, { extras: false });

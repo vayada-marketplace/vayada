@@ -23,16 +23,14 @@ describe("dashboard summary comparison", () => {
 });
 
 describe("dashboard conversion rate (VAY-2594)", () => {
-  const steps = (visits: number, booked: number) => [
-    { stage: "page_visit", count: visits },
-    { stage: "rate_selected", count: Math.round(visits / 2) },
-    { stage: "booking_completed", count: booked },
-  ];
-
-  it("divides confirmed bookings by visitors from one period's funnel", () => {
-    expect(conversionRate(steps(200, 3))).toBeCloseTo(1.5, 5);
-    expect(conversionRate(steps(0, 0))).toBeNull();
-    expect(conversionRate([])).toBeNull();
+  it("divides booking page bookings by page views", () => {
+    expect(conversionRate(3, 200)).toBeCloseTo(1.5, 5);
+    expect(conversionRate(0, 200)).toBe(0);
+    expect(conversionRate(0, 0)).toBeNull();
+    expect(conversionRate(2, 0)).toBeNull();
+    // An API without the conversion fields: no rate rather than 0%.
+    expect(conversionRate(null, 200)).toBeNull();
+    expect(conversionRate(3, null)).toBeNull();
   });
 
   it("compares two periods' rates, and nothing without a previous rate", () => {
@@ -44,7 +42,7 @@ describe("dashboard conversion rate (VAY-2594)", () => {
     });
     expect(compareConversion(4.878, 3.191)).toMatchObject({ kind: "change", up: true });
     expect(compareConversion(1.501, 1.499)).toEqual({ kind: "unchanged" });
-    // No bookings in either period, with visitors: unchanged, not "no data".
+    // No bookings in either period, with page views: unchanged, not "no data".
     expect(compareConversion(0, 0)).toEqual({ kind: "unchanged" });
     expect(compareConversion(2, 0)).toMatchObject({ kind: "change", up: true, percent: null });
     expect(compareConversion(2, null)).toBeNull();

@@ -5,13 +5,7 @@ import {
   mockBookingAdminShellRoutes,
 } from "../support/bookingAdminMocks";
 
-// The dashboard also reads the funnel for the period before, for the conversion card's change
-// (VAY-2594); these specs follow the range's own read, which ends today in the property's zone.
-const ENDS_TODAY = (url: string) =>
-  new URL(url).searchParams.get("windowEnd") ===
-  new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" }).format(new Date());
-
-test("shows inline drop-offs, the card branch, CSV export and recomputes all time tabs", async ({
+test("shows six steps with each one's share of the step before, the overall rate, CSV export and every range (VAY-2594)", async ({
   page,
 }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 1200 });
@@ -19,31 +13,31 @@ test("shows inline drop-offs, the card branch, CSV export and recomputes all tim
   await mockBookingAdminShellRoutes(page);
   const windows: string[] = [];
   let empty = false;
+  let noBookings = false;
+  const counts: [string, number][] = [
+    ["page_visit", 1912],
+    ["dates_searched", 846],
+    ["rate_selected", 241],
+    ["addons_step_passed", 200],
+    ["details_completed", 92],
+    ["complete_booking_clicked", 26],
+    ["payment_authorized", 20],
+    ["booking_completed", 18],
+  ];
   await page.route("**/dashboard/conversion-funnel?**", (route) => {
-    if (ENDS_TODAY(route.request().url())) windows.push(route.request().url());
+    windows.push(route.request().url());
     return route.fulfill({
       json: {
         funnel: {
-          // 40 card clicks reach authorization; completion reunites 10 authorized + 40 non-card.
-          steps: [
-            ["page_visit", 100, 100, 100],
-            ["rate_selected", 80, 100, 80],
-            ["details_completed", 80, 80, 80],
-            ["complete_booking_clicked", 80, 80, 80],
-            ["payment_authorized", 10, 40, 10],
-            ["booking_completed", 50, 50, 50],
-          ].map(([stage, count, previousCount, percentOfVisits]) => ({
+          steps: counts.map(([stage, count], index) => ({
             stage,
-            count: empty ? 0 : count,
-            previousCount: empty ? 0 : previousCount,
-            percentOfVisits,
+            count: empty || (noBookings && stage === "booking_completed") ? 0 : count,
+            previousCount: empty ? 0 : counts[Math.max(0, index - 1)]![1],
+            percentOfVisits: Math.round((count / 1912) * 1000) / 10,
             conversionPercent: null,
           })),
-          paymentMethods: [
-            { method: "card", count: 40 },
-            { method: "bank_transfer", count: 40 },
-          ],
-          biggestDrop: "payment_authorized",
+          paymentMethods: [{ method: "card", count: 20 }],
+          biggestDrop: "rate_selected",
         },
       },
     });
@@ -52,26 +46,33 @@ test("shows inline drop-offs, the card branch, CSV export and recomputes all tim
   const card = page
     .getByRole("heading", { name: "Conversion funnel", exact: true })
     .locator("xpath=../../..");
-  await expect(card.getByText("Visitors to booked guests")).toBeVisible();
-  await expect(card.getByText("Page visits · 100")).toBeVisible();
-  await expect(card.getByText("−20 (20%)")).toBeVisible();
-  await expect(card.getByText("Authorized payment (card only) · 10")).toBeVisible();
-  await expect(card.getByText("−30 (75%)")).toBeVisible();
-  await expect(card.getByText(/^0 \(0%\)/)).toHaveCount(3);
-  await expect(card.getByText("Card: 40 (50%)")).toBeVisible();
-  await expect(card.getByText("Biggest drop")).toHaveCount(0);
-  await expect(card.getByText("Viewed a room")).toHaveCount(0);
-  await expect(card.getByText("Added add-ons / skipped")).toHaveCount(0);
+  await expect(card.getByText("From visitor to booked guest")).toBeVisible();
+  const rows = card.getByRole("listitem");
+  await expect(rows).toHaveCount(6);
+  const lines = await rows.allInnerTexts();
+  expect(lines.map((line) => line.replace(/\s+/g, " ").trim())).toEqual([
+    "Visitors 1,912",
+    "Searched dates 846 44%",
+    "Selected room & rate 241 28%",
+    "Completed guest details 92 38%",
+    "Started payment 26 28%",
+    "Confirmed booking 18 69%",
+  ]);
+  // Bars are as wide as their share of the visitors, at least a sliver.
+  const bars = rows.locator("div.bg-\\[\\#2B4BF2\\]");
+  expect(await bars.first().evaluate((el) => el.style.width)).toBe("100%");
+  expect(await bars.last().evaluate((el) => el.style.width)).toBe("3%");
+  await expect(card.getByText("Visitors who made a confirmed booking")).toBeVisible();
+  await expect(card.getByText("0.94% overall")).toBeVisible();
+  // No comments, tags or the card-payment branch.
+  await expect(card.getByText(/Biggest drop|Authorized payment|add-ons|Card:/)).toHaveCount(0);
 
   await page.screenshot({ path: testInfo.outputPath("conversion-funnel.png"), fullPage: true });
   await card.getByRole("button", { name: "About the conversion funnel" }).hover();
-  await expect(card.getByRole("tooltip")).toBeVisible();
-  await card.screenshot({
-    path: testInfo.outputPath("conversion-funnel-tooltip.png"),
-    animations: "disabled",
-  });
+  await expect(card.getByRole("tooltip")).toContainText("Visitors who allowed analytics");
   await page.mouse.move(0, 0);
 
+  // The export keeps every stage.
   await card.getByRole("button", { name: "Funnel options" }).click();
   const [download] = await Promise.all([
     page.waitForEvent("download"),
@@ -82,26 +83,36 @@ test("shows inline drop-offs, the card branch, CSV export and recomputes all tim
   );
   const csv = await readFile(await download.path(), "utf8");
   expect(csv).toContain('"Step","Visitors","% of visits"');
-  expect(csv).toContain('"Authorized payment (card only)","10","10","30","75"');
+  expect(csv).toContain('"Searched dates","846"');
+  expect(csv).toContain('"Authorized payment (card only)","20"');
   await expect(card.getByRole("button", { name: "Export CSV" })).toHaveCount(0);
 
+  // On a phone the labels go above their bars, without sideways scrolling.
   await page.setViewportSize({ width: 390, height: 1400 });
   await card.scrollIntoViewIfNeeded();
-  await card.getByRole("button", { name: "About the conversion funnel" }).focus();
   await card.screenshot({
     path: testInfo.outputPath("conversion-funnel-mobile.png"),
     animations: "disabled",
   });
-  // Page content scrolls inside <main>, so check it rather than the document.
   const main = page.locator("main");
   expect(await main.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
-  await page.keyboard.press("Tab");
+  const [label, bar] = [
+    await rows.first().getByText("Visitors").boundingBox(),
+    await bars.first().boundingBox(),
+  ];
+  expect(label!.y + label!.height).toBeLessThanOrEqual(bar!.y + 1);
   await page.setViewportSize({ width: 1280, height: 1200 });
 
   await page.getByRole("button", { name: "Today", exact: true }).click();
-  await expect(card.getByText("Authorized payment (card only) · 10")).toBeVisible();
+  await expect.poll(() => windows.length).toBeGreaterThanOrEqual(2);
+  await expect(card.getByText("0.94% overall")).toBeVisible();
+  // Nobody booked: the last step has no blue bar, only a grey 0.
+  noBookings = true;
   await page.getByRole("button", { name: "7 days", exact: true }).click();
   await expect.poll(() => windows.length).toBeGreaterThanOrEqual(3);
+  await expect(rows.last().getByText("0", { exact: true })).toHaveClass(/text-gray-400/);
+  await expect(rows.last().locator("div.bg-\\[\\#2B4BF2\\]")).toHaveCount(0);
+  noBookings = false;
   await page.getByRole("button", { name: "30 days", exact: true }).click();
   await expect.poll(() => windows.length).toBeGreaterThanOrEqual(4);
   empty = true;
@@ -116,8 +127,7 @@ test("the funnel options and the page tabs share one time range", async ({ page 
   await mockBookingAdminShellRoutes(page);
   const windowStarts: string[] = [];
   await page.route("**/dashboard/conversion-funnel?**", (route) => {
-    if (ENDS_TODAY(route.request().url()))
-      windowStarts.push(new URL(route.request().url()).searchParams.get("windowStart") ?? "");
+    windowStarts.push(new URL(route.request().url()).searchParams.get("windowStart") ?? "");
     return route.fulfill({
       json: {
         funnel: {

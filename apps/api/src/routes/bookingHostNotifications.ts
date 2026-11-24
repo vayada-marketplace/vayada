@@ -13,7 +13,7 @@ import {
   type HostNotificationViewer,
   type HostSyncDomain,
 } from "../domains/bookingHostNotifications.js";
-import { enforcePropertyRoutePolicy, enforceRoutePolicy } from "./policy.js";
+import { canUsePms, enforcePropertyRoutePolicy, enforceRoutePolicy } from "./policy.js";
 
 export type BookingHostNotificationRoutesOptions = {
   repository: BookingHostNotificationsRepository;
@@ -213,32 +213,6 @@ async function authorize(
       reply.status(403).send({ code: "forbidden" });
       return null;
     }
-    throw error;
-  }
-}
-
-/** "Retry sync" posts PMS → Channel manager's own sync command, "View details" opens that page and "View
- * booking" opens the booking's page in PMS (VAY-2480), so each goes to PMS only for people PMS accepts
- * there: the same permission, PMS product and property access. (The property itself was checked above.) */
-function canUsePms(
-  request: FastifyRequest,
-  propertyId: string,
-  permission: "pms.operations.read" | "pms.operations.manage" | "pms.reservation.read",
-): boolean {
-  const resource = {
-    product: "pms",
-    resourceType: "pms_property",
-    resourceId: propertyId,
-  } as const;
-  try {
-    enforceRoutePolicy(request, {
-      permission,
-      entitlement: { product: "pms", key: "property-management", resource },
-      resource: { ...resource, allowedRelationships: ["owner", "operator", "front_desk"] },
-    });
-    return true;
-  } catch (error) {
-    if (error instanceof AuthorizationError) return false;
     throw error;
   }
 }

@@ -7,8 +7,8 @@ const url = process.env["TEST_DATABASE_URL"];
 if (url && !/(^|[_-])(test|verify)([_-]|$)/i.test(new URL(url).pathname))
   throw new Error("Refusing non-test database");
 
-describe.skipIf(!url)("dashboard unverified booking money", () => {
-  it("excludes uncertain amounts and ADR nights while keeping bookings and coverage across all reports", async () => {
+describe.skipIf(!url)("dashboard booking money", () => {
+  it("counts direct bookings by the day they were made, and every channel in the source mix", async () => {
     const pool = new pg.Pool({ connectionString: url });
     const property = randomUUID();
     const port = createTargetBookingDashboardMetricsReadPort({ connectionString: url!, pool });
@@ -21,53 +21,259 @@ describe.skipIf(!url)("dashboard unverified booking money", () => {
         `INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Berlin')`,
         [property],
       );
-      for (const [channel, total, metadata, currency, createdAt] of [
-        ["direct", 200, { channel: "direct" }, "EUR", "2026-09-01"],
-        [
-          "airbnb",
-          900,
-          { channel: "airbnb", airbnbMoneyStatus: "unverified" },
-          "USD",
-          "2026-09-02",
-        ],
-      ] as const) {
+      const insert = async (input: {
+        channel: string;
+        source?: string;
+        total: number;
+        currency?: string;
+        createdAt: string;
+        checkIn?: string;
+        metadata?: Record<string, unknown>;
+      }) => {
         const id = randomUUID();
         await pool.query(
-          `INSERT INTO booking.guest_bookings(id,property_id,public_reference,booking_channel,lifecycle_status,check_in,check_out,currency,total_amount,room_count,adults,children,booking_metadata,direct_booking_source,created_at) VALUES($1::uuid,$2,$1::text,$3,'confirmed','2026-10-01','2026-10-03',$6,$4,1,2,0,$5,CASE WHEN $3='direct' THEN 'booking_engine' ELSE NULL END,$7::timestamptz)`,
-          [id, property, channel, total, metadata, currency, createdAt],
+          `INSERT INTO booking.guest_bookings(id,property_id,public_reference,booking_channel,direct_booking_source,lifecycle_status,check_in,check_out,currency,total_amount,room_count,adults,children,booking_metadata,created_at) VALUES($1::uuid,$2,$1::text,$3,$4,'confirmed',$5::date,$5::date + 2,$6,$7,1,2,0,$8,$9::timestamptz)`,
+          [
+            id,
+            property,
+            input.channel,
+            input.source ?? null,
+            input.checkIn ?? "2026-12-01",
+            input.currency ?? "EUR",
+            input.total,
+            input.metadata ?? { channel: input.channel },
+            input.createdAt,
+          ],
         );
-      }
-      const period = { propertyId: property, periodStart: "2026-10-01", periodEnd: "2026-10-07" };
-      const metrics = await port.getDashboardMetrics({
-        ...period,
-        previousPeriodStart: "2026-09-01",
-        previousPeriodEnd: "2026-09-07",
+        return id;
+      };
+      // VAY-2594: direct bookings, dated by the day they were made in the property's time zone
+      // (Europe/Berlin), whatever the arrival date.
+      const roomType = randomUUID();
+      await pool.query(
+        `INSERT INTO pms.room_types(id,property_id,name) VALUES($1,$2,'Deluxe Room')`,
+        [roomType, property],
+      );
+      const first = await insert({
+        channel: "direct",
+        source: "booking_engine",
+        total: 200,
+        createdAt: "2026-09-30T22:30:00Z",
+        metadata: { channel: "direct", pricingSelections: [{ roomTypeId: roomType }] },
       });
+      await insert({
+        channel: "direct",
+        source: "call",
+        total: 100,
+        createdAt: "2026-10-03T09:00:00Z",
+      });
+      // Made on Sep 30 in Berlin: the previous period.
+      await insert({
+        channel: "direct",
+        source: "booking_engine",
+        total: 50,
+        createdAt: "2026-09-30T21:30:00Z",
+      });
+      // Booking sites: in the source mix, never in the totals.
+      await insert({
+        channel: "airbnb",
+        total: 900,
+        currency: "USD",
+        createdAt: "2026-10-02T10:00:00Z",
+        metadata: { channel: "airbnb", airbnbMoneyStatus: "unverified" },
+      });
+      // Imported on Oct 4, but Channex had it on Sep 3: dated Sep 3.
+      const imported = await insert({
+        channel: "booking_com",
+        total: 500,
+        createdAt: "2026-10-04T08:00:00Z",
+      });
+      const connection = randomUUID();
+      await pool.query(
+        // Disconnected and unbound: enough for the mapping, without a binding claim.
+        `INSERT INTO pms.channel_connections(id,property_id,provider,connection_status) VALUES($1,$2,'channex','disconnected')`,
+        [connection, property],
+      );
+      await pool.query(
+        `INSERT INTO pms.channel_booking_mappings(property_id,connection_id,guest_booking_id,external_booking_id,mapping_metadata) VALUES($1,$2,$3,$4,$5)`,
+        [
+          property,
+          connection,
+          imported,
+          `ext-${imported}`,
+          { providerInsertedAt: "2026-09-03T12:00:00.000000Z" },
+        ],
+      );
+
+      // VAY-2592: a consented visit on Sep 28, then every page view from Oct 1 on.
+      for (const [eventType, occurredAt] of [
+        ["page_visit", "2026-09-28T10:00:00Z"],
+        ["page_view", "2026-10-01T10:00:00Z"],
+        ["page_view", "2026-10-02T10:00:00Z"],
+      ])
+        await pool.query(
+          `INSERT INTO distribution.booking_web_events(property_id,event_type,event_id,occurred_at) VALUES($1,$2,gen_random_uuid(),$3::timestamptz)`,
+          [property, eventType, occurredAt],
+        );
+
+      const period = { propertyId: property, periodStart: "2026-10-01", periodEnd: "2026-10-07" };
+      const previous = { previousPeriodStart: "2026-09-24", previousPeriodEnd: "2026-09-30" };
+      const metrics = await port.getDashboardMetrics({ ...period, ...previous });
       expect(metrics?.current).toMatchObject({
         bookingCount: 2,
-        unverifiedBookingCount: 1,
-        totalRevenue: { amountDecimal: "200.00", currency: "EUR" },
-        avgNightlyRate: { amountDecimal: "100.00", currency: "EUR" },
+        pageViewCount: 2,
+        // Booking page bookings ÷ page views, both since Oct 1.
+        conversionBookingCount: 1,
+        conversionPageViewCount: 2,
+        unverifiedBookingCount: 0,
+        otherCurrencyBookingCount: 0,
+        totalRevenue: { amountDecimal: "300.00", currency: "EUR" },
+        avgNightlyRate: { amountDecimal: "75.00", currency: "EUR" },
       });
-      const sources = await port.getSourceMix(period);
-      expect(sources.totalRevenue).toEqual({ amountDecimal: "200.00", currency: "EUR" });
-      expect(sources.items.find((item) => item.source === "airbnb")).toMatchObject({
+      expect(metrics?.previous).toMatchObject({
         bookingCount: 1,
+        pageViewCount: 1,
+        // Before every view was counted: no conversion rate, though a booking and a visit exist.
+        conversionBookingCount: 0,
+        conversionPageViewCount: 0,
+        totalRevenue: { amountDecimal: "50.00", currency: "EUR" },
+      });
+
+      const sources = await port.getSourceMix(period);
+      expect(
+        Object.fromEntries(sources.items.map((item) => [item.source, item.bookingCount])),
+      ).toEqual({
+        direct: 2,
+        airbnb: 1,
+      });
+      expect(sources.items.find((item) => item.source === "airbnb")).toMatchObject({
         unverifiedBookingCount: 1,
         revenue: { amountDecimal: "0.00", currency: "EUR" },
-        revenueSharePercent: 0,
       });
+      const september = await port.getSourceMix({
+        ...period,
+        periodStart: "2026-09-01",
+        periodEnd: "2026-09-07",
+      });
+      expect(september.items.map((item) => [item.source, item.bookingCount])).toEqual([
+        ["booking_com", 1],
+      ]);
+
+      // Bookings by channel: every channel, and direct ones by source, now and in the week before.
+      const mix = await port.getChannelMix({ ...period, ...previous });
+      const byKey = (
+        rows: readonly { key: string; bookingCount: number; previousBookingCount: number }[],
+      ) =>
+        Object.fromEntries(
+          rows.map((row) => [row.key, [row.bookingCount, row.previousBookingCount]]),
+        );
+      expect(byKey(mix.channels)).toEqual({ direct: [2, 1], airbnb: [1, 0] });
+      expect(byKey(mix.directSources)).toEqual({ booking_engine: [1, 1], call: [1, 0] });
+      // The Booking.com booking Channex had on Sep 3 counts there.
+      const septemberMix = await port.getChannelMix({
+        ...period,
+        periodStart: "2026-09-01",
+        periodEnd: "2026-09-07",
+        previousPeriodStart: "2026-08-25",
+        previousPeriodEnd: "2026-08-31",
+      });
+      expect(byKey(septemberMix.channels)).toEqual({ booking_com: [1, 0] });
+      expect(septemberMix.directSources).toEqual([]);
+
+      // The Details window: by room type and lead time, cancellations, top and latest bookings.
+      await pool.query(
+        `INSERT INTO booking.guest_bookings(id,property_id,public_reference,booking_channel,direct_booking_source,lifecycle_status,check_in,check_out,currency,total_amount,created_at) VALUES($1::uuid,$2,$1::text,'direct','booking_engine','canceled','2026-10-20','2026-10-22','EUR',80,'2026-10-04T10:00:00Z')`,
+        [randomUUID(), property],
+      );
+      const details = await port.getDashboardDetails({ ...period, ...previous });
+      expect(details.pageViewsCountedFrom).toBe("2026-10-01");
+      expect(
+        details.roomTypes.map((row) => [
+          row.name,
+          row.revenue.amountDecimal,
+          row.previousRevenue.amountDecimal,
+        ]),
+      ).toEqual([
+        ["Deluxe Room", "200.00", "0.00"],
+        [null, "100.00", "50.00"],
+      ]);
+      // Arrival on Dec 1, booked about two months before: 31–90 days, now and before.
+      expect(
+        details.leadTimes.map((row) => [row.bucket, row.bookingCount, row.previousBookingCount]),
+      ).toEqual([
+        ["0-7", 0, 0],
+        ["8-30", 0, 0],
+        ["31-90", 2, 1],
+        ["90+", 0, 0],
+      ]);
+      expect(details.canceledBookingCount).toBe(1);
+      expect(details.topBookings.map((row) => row.total.amountDecimal)).toEqual([
+        "200.00",
+        "100.00",
+      ]);
+      expect(details.topBookings[0]).toMatchObject({
+        id: first,
+        bookedOn: "2026-10-01",
+        roomNames: ["Deluxe Room"],
+      });
+      expect(details.recentBookings.map((row) => [row.status, row.total.amountDecimal])).toEqual([
+        ["canceled", "80.00"],
+        ["confirmed", "100.00"],
+        ["confirmed", "200.00"],
+      ]);
+
+      // Guest insights: every channel's guests of the bookings made Oct 1–7, one per booking.
+      const guest = await pool.query<{ id: string }>(
+        `INSERT INTO booking.booking_guests(guest_booking_id,guest_role,first_name,last_name,country_code) VALUES($1,'primary_guest','Ada','Example','DE') RETURNING id`,
+        [first],
+      );
+      // A child travelling along, registered at check-in first: neither their country nor their
+      // age is the booking's.
+      const child = await pool.query<{ id: string }>(
+        `INSERT INTO booking.booking_guests(guest_booking_id,guest_role,first_name,last_name,country_code) VALUES($1,'additional_guest','Kit','Example','FR') RETURNING id`,
+        [first],
+      );
+      await pool.query(
+        `INSERT INTO pms.guest_registrations(booking_guest_id,property_id,guest_booking_id,date_of_birth,created_at) VALUES($1,$2,$3,'2015-02-01',now() - interval '1 minute')`,
+        [child.rows[0]!.id, property, first],
+      );
+      await pool.query(
+        `INSERT INTO pms.guest_registrations(booking_guest_id,property_id,guest_booking_id,date_of_birth) VALUES($1,$2,$3,'1990-06-15')`,
+        [guest.rows[0]!.id, property, first],
+      );
+      const guests = await port.getGuestInsights(period);
+      expect(guests).toMatchObject({
+        guestCount: 3,
+        nationalities: [
+          { countryCode: null, guestCount: 2 },
+          { countryCode: "DE", guestCount: 1 },
+        ],
+        ageKnownCount: 1,
+        averageNights: 2,
+        averageLeadDays: 60,
+      });
+      // 36 on arrival (Dec 1).
+      expect(guests.ages.find((row) => row.guestCount > 0)).toEqual({
+        bucket: "35-44",
+        guestCount: 1,
+      });
+      expect(guests.stays[0]).toEqual({ bucket: "1-2", guestCount: 3 });
+
       const spark = await port.getSparklines({
         propertyId: property,
         windowStart: period.periodStart,
         windowEnd: period.periodEnd,
       });
-      expect(spark.points[0]).toMatchObject({
-        bookingCount: 2,
-        unverifiedBookingCount: 1,
-        revenue: { amountDecimal: "200.00", currency: "EUR" },
-        avgNightlyRate: { amountDecimal: "100.00", currency: "EUR" },
-      });
+      expect(spark.points.map((point) => point.bookingCount)).toEqual([1, 0, 1, 0, 0, 0, 0]);
+      expect(spark.points.map((point) => point.revenue.amountDecimal)).toEqual([
+        "200.00",
+        "0.00",
+        "100.00",
+        "0.00",
+        "0.00",
+        "0.00",
+        "0.00",
+      ]);
       // Daily buckets up to 31 days; longer windows split into 31 contiguous buckets.
       const month = await port.getSparklines({
         propertyId: property,
@@ -78,7 +284,7 @@ describe.skipIf(!url)("dashboard unverified booking money", () => {
       expect(month.points[21]).toMatchObject({
         bucketStart: "2026-10-01",
         bucketEnd: "2026-10-01",
-        bookingCount: 2,
+        bookingCount: 1,
       });
       const year = await port.getSparklines({
         propertyId: property,
@@ -88,23 +294,62 @@ describe.skipIf(!url)("dashboard unverified booking money", () => {
       expect(year.points).toHaveLength(31);
       expect(year.points[0]?.bucketStart).toBe("2026-01-01");
       expect(year.points.at(-1)?.bucketEnd).toBe("2026-12-31");
-      expect(year.points.reduce((total, point) => total + point.bookingCount, 0)).toBe(2);
-      // With only unverified bookings, zero eligible revenue remains explicitly incomplete.
-      await pool.query(
-        `DELETE FROM booking.guest_bookings WHERE property_id=$1 AND booking_channel='direct'`,
-        [property],
-      );
-      const onlyUnverified = await port.getDashboardMetrics({
-        ...period,
-        previousPeriodStart: "2026-09-01",
-        previousPeriodEnd: "2026-09-07",
+      expect(year.points.reduce((total, point) => total + point.bookingCount, 0)).toBe(3);
+
+      // The revenue chart: one day per date of the window, direct bookings by booking date.
+      const revenueDays = await port.getRevenueDays({
+        propertyId: property,
+        windowStart: period.periodStart,
+        windowEnd: period.periodEnd,
       });
-      expect(onlyUnverified?.current).toMatchObject({
+      expect(
+        revenueDays?.days.map((day) => [day.date, day.bookingCount, day.revenue.amountDecimal]),
+      ).toEqual([
+        ["2026-10-01", 1, "200.00"],
+        ["2026-10-02", 0, "0.00"],
+        ["2026-10-03", 1, "100.00"],
+        ["2026-10-04", 0, "0.00"],
+        ["2026-10-05", 0, "0.00"],
+        ["2026-10-06", 0, "0.00"],
+        ["2026-10-07", 0, "0.00"],
+      ]);
+      // The day window: Oct 1 in Berlin, though the booking was made on Sep 30 in UTC.
+      const day = await port.getDayBookings({ propertyId: property, date: "2026-10-01" });
+      expect(day).toMatchObject({
+        date: "2026-10-01",
         bookingCount: 1,
-        unverifiedBookingCount: 1,
-        totalRevenue: { amountDecimal: "0.00" },
+        roomNights: 2,
+        revenue: { amountDecimal: "200.00", currency: "EUR" },
+        bookings: [
+          {
+            id: first,
+            reference: first,
+            checkIn: "2026-12-01",
+            checkOut: "2026-12-03",
+            nights: 2,
+            roomCount: 1,
+            roomNames: ["Deluxe Room"],
+            total: { amountDecimal: "200.00", currency: "EUR" },
+            countedInRevenue: true,
+          },
+        ],
       });
-      // VAY-2390: amounts are in the PMS pricing currency, not Booking settings' default. An OTA
+      // Booking sites' bookings aren't in the window.
+      expect(
+        (await port.getDayBookings({ propertyId: property, date: "2026-10-02" }))?.bookings,
+      ).toEqual([]);
+      expect(
+        await port.getDayBookings({ propertyId: randomUUID(), date: "2026-10-01" }),
+      ).toBeNull();
+      expect(
+        await port.getRevenueDays({
+          propertyId: randomUUID(),
+          windowStart: "2026-10-01",
+          windowEnd: "2026-10-02",
+        }),
+      ).toBeNull();
+
+      // VAY-2390: amounts are in the PMS pricing currency, not Booking settings' default. A direct
       // booking in another currency is counted, but not added to revenue or rates.
       await pool.query(
         `INSERT INTO pms.property_pricing_settings(property_id,currency) VALUES($1,'EUR')`,
@@ -114,46 +359,85 @@ describe.skipIf(!url)("dashboard unverified booking money", () => {
         `INSERT INTO booking.booking_settings(property_id,default_currency) VALUES($1,'LKR')`,
         [property],
       );
-      const ota = randomUUID();
-      await pool.query(
-        `INSERT INTO booking.guest_bookings(id,property_id,public_reference,booking_channel,lifecycle_status,check_in,check_out,currency,total_amount,room_count,adults,children,booking_metadata) VALUES($1::uuid,$2,$1::text,'booking_com','confirmed','2026-10-01','2026-10-03','GBP',500,1,2,0,'{"channel":"booking_com"}')`,
-        [ota, property],
-      );
-      const mixed = await port.getDashboardMetrics({
-        ...period,
-        previousPeriodStart: "2026-09-01",
-        previousPeriodEnd: "2026-09-07",
+      await insert({
+        channel: "direct",
+        source: "email",
+        total: 70,
+        currency: "GBP",
+        createdAt: "2026-10-05T10:00:00Z",
       });
+      const mixed = await port.getDashboardMetrics({ ...period, ...previous });
       expect(mixed?.current).toMatchObject({
-        bookingCount: 2,
-        unverifiedBookingCount: 1,
+        bookingCount: 3,
         otherCurrencyBookingCount: 1,
-        totalRevenue: { amountDecimal: "0.00", currency: "EUR" },
-        avgNightlyRate: { amountDecimal: "0.00", currency: "EUR" },
+        totalRevenue: { amountDecimal: "300.00", currency: "EUR" },
       });
-      const mixedSources = await port.getSourceMix(period);
-      expect(mixedSources.items.find((item) => item.source === "booking_com")).toMatchObject({
+      const gbpDay = await port.getDayBookings({ propertyId: property, date: "2026-10-05" });
+      expect(gbpDay).toMatchObject({
         bookingCount: 1,
-        otherCurrencyBookingCount: 1,
         revenue: { amountDecimal: "0.00", currency: "EUR" },
+        bookings: [{ total: { amountDecimal: "70.00", currency: "GBP" }, countedInRevenue: false }],
       });
       const mixedSpark = await port.getSparklines({
         propertyId: property,
         windowStart: period.periodStart,
         windowEnd: period.periodEnd,
       });
-      expect(mixedSpark.points[0]).toMatchObject({
-        bookingCount: 2,
+      expect(mixedSpark.points[4]).toMatchObject({
+        bookingCount: 1,
         otherCurrencyBookingCount: 1,
         revenue: { amountDecimal: "0.00", currency: "EUR" },
       });
+      // Tracking check: two finished bookings on the booking page this week but no page view
+      // means the views aren't being counted; one page view clears it.
+      expect(await port.getTrackingCheck({ propertyId: property })).toMatchObject({
+        bookingPageBookingCount: 0,
+        trackingMissing: false,
+      });
+      const pageBooking = () =>
+        insert({
+          channel: "direct",
+          source: "booking_engine",
+          total: 90,
+          createdAt: new Date().toISOString(),
+        });
+      await pageBooking();
+      // One booking could be one lost view; a draft or an expired booking isn't a finished one.
+      const unfinished = await pageBooking();
+      await pool.query(`UPDATE booking.guest_bookings SET lifecycle_status='draft' WHERE id=$1`, [
+        unfinished,
+      ]);
+      expect(await port.getTrackingCheck({ propertyId: property })).toMatchObject({
+        bookingPageBookingCount: 1,
+        trackingMissing: false,
+      });
+      await pageBooking();
+      expect(await port.getTrackingCheck({ propertyId: property })).toMatchObject({
+        bookingPageBookingCount: 2,
+        pageViewCount: 0,
+        trackingMissing: true,
+      });
+      await pool.query(
+        `INSERT INTO distribution.booking_web_events(property_id,event_type,event_id,occurred_at) VALUES($1,'page_view',gen_random_uuid(),now())`,
+        [property],
+      );
+      expect(await port.getTrackingCheck({ propertyId: property })).toMatchObject({
+        pageViewCount: 1,
+        trackingMissing: false,
+      });
     } finally {
+      await pool.query("DELETE FROM pms.channel_booking_mappings WHERE property_id=$1", [property]);
+      await pool.query("DELETE FROM pms.channel_connections WHERE property_id=$1", [property]);
       await pool.query("DELETE FROM booking.guest_bookings WHERE property_id=$1", [property]);
       await pool.query("DELETE FROM booking.booking_settings WHERE property_id=$1", [property]);
+      await pool.query("DELETE FROM pms.room_types WHERE property_id=$1", [property]);
       await pool.query("DELETE FROM pms.property_pricing_settings WHERE property_id=$1", [
         property,
       ]);
       await pool.query("DELETE FROM hotel_catalog.property_locations WHERE property_id=$1", [
+        property,
+      ]);
+      await pool.query("DELETE FROM distribution.booking_web_events WHERE property_id=$1", [
         property,
       ]);
       await pool.query("DELETE FROM hotel_catalog.properties WHERE id=$1", [property]);
