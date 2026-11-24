@@ -13,6 +13,7 @@ import type { ConversationStore } from "../assistant/conversationStore.js";
 import { createAiChangeExecutor, type AiChangeExecutor } from "../executor/executor.js";
 import { createPgAiOperationStore } from "../executor/operationStore.js";
 import { startAiChangeRecoveryWorker } from "../executor/recoveryWorker.js";
+import { readCurrentState } from "./currentState.js";
 import type { PendingActionRouteOptions } from "./pendingActions.js";
 import { createAiChangeProposer } from "./proposeChange.js";
 
@@ -45,6 +46,7 @@ export function createAiChangesRuntime(config: {
   const log = createPgAiActionLog({ connectionString: config.connectionString, pool: pool(2) });
   // This API task, as leases name it.
   const holder = `api-${process.pid}-${randomBytes(4).toString("hex")}`;
+  let started: FastifyInstance | undefined;
   let executor: AiChangeExecutor | undefined;
   let worker: ReturnType<typeof startAiChangeRecoveryWorker> | undefined;
   let appLog: FastifyBaseLogger | undefined;
@@ -55,9 +57,18 @@ export function createAiChangesRuntime(config: {
     /**
      * How an AI asks for a change: the in-app assistant's change tool calls it with the tool
      * call's own delegated context and returns the result as the tool's output; the card finds
-     * the change by its `pendingActionId`. It records the ask and runs nothing.
+     * the change by its `pendingActionId`. It records the ask (with the versions vayada reads
+     * through the app's own routes) and runs nothing.
      */
-    proposeChange: createAiChangeProposer({ store, log, onLogFailure: logFailure }),
+    proposeChange: createAiChangeProposer({
+      store,
+      log,
+      onLogFailure: logFailure,
+      readCurrentState(context, action, input) {
+        if (!started) throw new Error("AI changes are not started");
+        return readCurrentState(started, context, action, input);
+      },
+    }),
     /** For buildApp: the Yes/No routes. */
     routes: {
       store,
@@ -78,8 +89,12 @@ export function createAiChangesRuntime(config: {
       allowedOrigins: config.allowedOrigins,
     } satisfies Omit<PendingActionRouteOptions, "root">,
 
-    /** Once the app exists: the executor runs its changes in it, and the recovery job starts. */
+    /**
+     * Once the app exists: asks read their versions and the executor runs its changes in it, and
+     * the recovery job starts.
+     */
     start(app: FastifyInstance) {
+      started = app;
       appLog = app.log;
       executor = createAiChangeExecutor({
         app,

@@ -96,7 +96,15 @@ function memoryStore(...operations: AiOperation[]) {
 }
 
 const readerOf = (overrides: Partial<CardReader> = {}): CardReader => ({
-  rooms: async () => [{ roomId: R12, roomTypeId: DELUXE, roomNumber: "12", status: "available" }],
+  rooms: async () => [
+    {
+      roomId: R12,
+      roomTypeId: DELUXE,
+      roomNumber: "12",
+      status: "available",
+      roomUnitsRevision: 7,
+    },
+  ],
   roomTypeNames: async () => new Map([[DELUXE, "Deluxe Double"]]),
   roomBlock: async () => null,
   linkedRoomTypeIds: async () => [],

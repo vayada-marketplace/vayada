@@ -1,8 +1,9 @@
 // The person's Yes/No to an AI change on real PostgreSQL (VAY-2524): real identity, roles,
 // entitlements and property scope, the real inbox routes and commands, the real operation store
-// and the one executor. An AI asks; only the person, signed in to a vayada app, answers; a Yes runs
-// the change once; a stale card, an expired question, a person's edit, AI switched off and every
-// AI token are refused without changing anything.
+// and the one executor. An AI asks, and vayada reads the conversation's version as the person; only
+// the person, signed in to a vayada app, answers; a Yes runs the change once; a stale card, an
+// expired question, a person's edit, AI switched off and every AI token are refused without
+// changing anything.
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -33,6 +34,7 @@ import { threadMarkDone } from "../actions/threadTriage.js";
 import { createAiChangeExecutor, type AiChangeExecutor } from "../executor/executor.js";
 import { createPgAiOperationStore } from "../executor/operationStore.js";
 import type { PendingActionView } from "./pendingActions.js";
+import { readCurrentState } from "./currentState.js";
 import { createAiChangeProposer } from "./proposeChange.js";
 
 const url = process.env["TEST_DATABASE_URL"];
@@ -87,6 +89,7 @@ describe.skipIf(!url)("the Yes/No to AI changes on PostgreSQL (VAY-2524)", () =>
     store,
     log,
     onLogFailure: (error) => failures.push(error),
+    readCurrentState: (context, action, input) => readCurrentState(app, context, action, input),
     findAction: (key) => (key === inApp.key ? inApp : undefined),
   });
   const toolContext = () =>
@@ -247,11 +250,11 @@ describe.skipIf(!url)("the Yes/No to AI changes on PostgreSQL (VAY-2524)", () =>
       )
     ).rows[0]!.n;
 
-  /** The AI asks to mark a conversation done; the id the card is found by. */
+  /** The AI asks to mark a conversation done (no version: vayada reads it); the card's id. */
   async function ask(threadId: string): Promise<string> {
     const result = await proposeChange(await toolContext(), {
       action: "thread_mark_done@1",
-      arguments: { propertyId: property, threadId, expectedThreadVersion: 4 },
+      arguments: { propertyId: property, threadId },
       client: "vayada:pms",
       requestScope: `turn-${threadId}`,
     });
@@ -343,6 +346,21 @@ describe.skipIf(!url)("the Yes/No to AI changes on PostgreSQL (VAY-2524)", () =>
     expect(again.statusCode).toBe(409);
     expect(again.json()).toMatchObject({ code: "already_answered" });
     expect(await audits(threadId)).toBe(1);
+    // The model asks the same in its turn again (a regenerated step): the conversation is at its
+    // next version now, yet the AI gets the change that ran, not a second card.
+    const retried = await proposeChange(await toolContext(), {
+      action: "thread_mark_done@1",
+      arguments: { propertyId: property, threadId },
+      client: "vayada:pms",
+      requestScope: `turn-${threadId}`,
+    });
+    expect(retried).toMatchObject({
+      ok: true,
+      pendingActionId: id,
+      status: "done",
+      created: false,
+    });
+    expect(await audits(threadId)).toBe(1);
     expect(failures).toEqual([]);
   });
 
@@ -421,19 +439,38 @@ describe.skipIf(!url)("the Yes/No to AI changes on PostgreSQL (VAY-2524)", () =>
     expect(starts).not.toContain(id);
   });
 
+  it("keeps the version vayada read when the AI asked, from the real conversation", async () => {
+    const threadId = await newThread();
+    // A person moved it on before the AI asked: the change keeps today's version, not one the AI
+    // could have seen earlier, and runs.
+    await admin.query(`UPDATE pms.message_threads SET version = 6 WHERE id = $1`, [threadId]);
+    const id = await ask(threadId);
+    expect((await store.find(id))!.arguments).toEqual({
+      propertyId: property,
+      threadId,
+      expectedThreadVersion: 6,
+    });
+    const { cardSha256 } = await shown(id);
+    expect((await answer(id, { answer: "yes", cardSha256 })).json()).toMatchObject({
+      state: "done",
+    });
+    expect(await thread(threadId)).toEqual({ attentionState: "done", version: "7" });
+  });
+
   it("refuses a Yes after a person changed the conversation: nothing is overwritten", async () => {
     const threadId = await newThread();
     const id = await ask(threadId);
     const { cardSha256 } = await shown(id);
-    // A person handles the conversation meanwhile.
+    // A person handles the conversation meanwhile: the card no longer reads the record asked about.
     await admin.query(`UPDATE pms.message_threads SET version = 5 WHERE id = $1`, [threadId]);
     const response = await answer(id, { answer: "yes", cardSha256 });
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ state: "changed" });
-    expect(await store.find(id)).toMatchObject({
-      status: "failed",
-      errorCode: "thread_version_conflict",
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({
+      code: "changed",
+      pendingAction: { state: "changed", cardSha256: null },
     });
+    expect(await store.find(id)).toMatchObject({ status: "closed", closeReason: "changed" });
+    expect(starts).not.toContain(id);
     expect(await thread(threadId)).toEqual({ attentionState: "needs_attention", version: "5" });
     expect(await audits(threadId)).toBe(0);
   });

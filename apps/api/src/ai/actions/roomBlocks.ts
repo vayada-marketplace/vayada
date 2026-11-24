@@ -1,7 +1,7 @@
 // Blocking rooms for some nights, and releasing a block (VAY-2522, first change batch).
 import { z } from "zod";
 
-import { defineChangeAction } from "./defineChangeAction.js";
+import { defineChangeAction, sameRecordId } from "./defineChangeAction.js";
 
 const shared = {
   version: 1,
@@ -59,4 +59,19 @@ export const roomBlockRelease = defineChangeAction({
   pathParams: { blockId: z.uuid() },
   body: z.strictObject({ expectedVersion: z.string().min(1).max(100) }),
   preconditions: ["expectedVersion"],
+  // The block's version, from the property's blocks; a released block has nothing to release.
+  currentState: {
+    route: "GET /api/pms/properties/:propertyId/room-blocks",
+    pick(answer, input) {
+      const block = z
+        .object({
+          items: z.array(
+            z.object({ blockId: z.string(), version: z.string(), status: z.string() }),
+          ),
+        })
+        .parse(answer)
+        .items.find((item) => sameRecordId(item.blockId, input.blockId));
+      return block?.status === "active" ? { expectedVersion: block.version } : null;
+    },
+  },
 });

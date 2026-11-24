@@ -1,7 +1,8 @@
 // The Yes/No card of an AI change (VAY-2524), written by vayada from the stored change and what
 // the person can see now, never by the model: what changes, on which records, and what else
 // happens. The person's Yes binds to this text (its digest), so a card that would read differently
-// now (a renamed room, a block that is gone) is never answered with an old Yes.
+// now (a renamed room, a block that is gone) is never answered with an old Yes; nor is a change
+// whose record moved past the version vayada read when the AI asked (proposeChange.ts).
 import { createHash } from "node:crypto";
 
 import { canonicalJson } from "../executor/operationStore.js";
@@ -32,13 +33,22 @@ export type CardReader = {
   booking(propertyId: string, guestBookingId: string): Promise<CardBooking | null>;
 };
 export type CardThread = {
+  version: number;
   guestName: string | null;
   channel: "ota" | "email";
   providerChannel: string | null;
   lastMessageAt: string | null;
 };
-export type CardRoom = { roomId: string; roomTypeId: string; roomNumber: string; status: string };
+export type CardRoom = {
+  roomId: string;
+  roomTypeId: string;
+  roomNumber: string;
+  status: string;
+  /** The room type's rooms revision, when the read gives it. */
+  roomUnitsRevision: number | null;
+};
 export type CardRoomBlock = {
+  version: string;
   roomTypeId: string;
   roomId: string | null;
   startsOn: string;
@@ -77,7 +87,8 @@ type CardInput = {
   now: Date;
   /**
    * The change still waits for its answer: a record that no longer is what it was asked for (a
-   * block released meanwhile) makes it "changed". After the answer the card is only its title.
+   * block released meanwhile, a version past the one vayada read when the AI asked) makes it
+   * "changed". After the answer the card is only its title.
    */
   waiting: boolean;
 };
@@ -157,6 +168,13 @@ export function dateTimeText(iso: string, now: Date): string {
   const time = `${String(at.getUTCHours()).padStart(2, "0")}:${String(at.getUTCMinutes()).padStart(2, "0")}`;
   return `${dayText(at, now, true)}, ${time} UTC`;
 }
+
+/**
+ * The record moved past the version the change keeps (read when the AI asked): only while it
+ * waits, since running it moves the record on.
+ */
+const movedSince = (input: CardInput, current: unknown, precondition: string) =>
+  input.waiting && current !== input.arguments[precondition];
 
 /** Ids as the database compares them: UUIDs in any case are one record. */
 const sameId = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -254,8 +272,10 @@ const roomBlockCreate: CardWriter = async (input) => {
 
 const roomBlockRelease: CardWriter = async (input) => {
   const block = await input.reader.roomBlock(input.propertyId, str(input.arguments.blockId));
-  // Released or expired meanwhile: there is nothing left to release.
+  // Released or expired meanwhile: there is nothing left to release; edited meanwhile: not the
+  // block the AI asked about.
   if (!block || (input.waiting && block.status !== "active")) throw new CardTargetMissingError();
+  if (movedSince(input, block.version, "expectedVersion")) throw new CardTargetMissingError();
   let rooms: string;
   let roomsValue: string;
   if (block.roomId) {
@@ -291,6 +311,9 @@ const roomStatusSet: CardWriter = async (input) => {
   const target = ROOM_STATES[str(changes.status)];
   const current = ROOM_STATES[rooms[0]!.status] ?? rooms[0]!.status;
   if (!target) throw new CardTargetMissingError();
+  if (movedSince(input, rooms[0]!.roomUnitsRevision, "expectedRevision")) {
+    throw new CardTargetMissingError();
+  }
   const room = `room ${numbers[0]}`;
   return {
     question: `Set ${room} to ${target}?`,
@@ -322,7 +345,9 @@ function threadWriter(
 ): CardWriter {
   return async (input) => {
     const thread = await input.reader.thread(input.propertyId, str(input.arguments.threadId));
-    if (!thread) throw new CardTargetMissingError();
+    if (!thread || movedSince(input, thread.version, "expectedThreadVersion")) {
+      throw new CardTargetMissingError();
+    }
     const who = thread.guestName
       ? `the conversation with ${thread.guestName}`
       : "a guest conversation";

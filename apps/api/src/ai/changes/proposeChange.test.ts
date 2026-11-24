@@ -1,5 +1,6 @@
 // How an AI asks for a change (VAY-2524): only changes offered on its surface, with valid input,
-// on a property and with rights the person has now; the ask is one pending operation and one log
+// on a property and with rights the person has now; a change to a record that exists keeps the
+// version vayada reads now, never one from the AI; the ask is one pending operation and one log
 // row, and nothing runs.
 import { describe, expect, it } from "vitest";
 
@@ -7,18 +8,21 @@ import { memoryAiActionLog } from "../actionLog/memoryActionLog.fixtures.js";
 import { WORLD, FORBIDDEN, worldContext } from "../actions/actionTestWorld.fixtures.js";
 import type { ChangeAction } from "../actions/defineChangeAction.js";
 import { CHANGE_ACTIONS } from "../actions/registry.js";
-import { roomBlockCreate } from "../actions/roomBlocks.js";
+import { roomBlockCreate, roomBlockRelease } from "../actions/roomBlocks.js";
 import type { AiOperation, AiOperationStore, ProposedChange } from "../executor/operationStore.js";
+import type { CurrentState } from "./currentState.js";
 import { createAiChangeProposer } from "./proposeChange.js";
 
 const { OWNER, MEMBER, ORG_A, P1, P2, CONVERSATION } = WORLD;
 const DELUXE = "eeeeeeee-0000-4000-8000-000000000001";
 const R12 = "ffffffff-0000-4000-8000-000000000012";
+const BLOCK = "abababab-0000-4000-8000-000000000001";
 const OP = "11111111-0000-4000-8000-000000000001";
 const NOW = new Date("2026-12-09T09:40:00Z");
 const CALENDAR = ["pms.calendar.manage", "pms.calendar.read"] as const;
 
 const inApp = { ...roomBlockCreate, surfaces: ["in_app"] } as ChangeAction;
+const release = { ...roomBlockRelease, surfaces: ["in_app"] } as ChangeAction;
 const args = (propertyId: string = P1) => ({
   propertyId,
   roomTypeId: DELUXE,
@@ -28,9 +32,20 @@ const args = (propertyId: string = P1) => ({
   reason: "  shower repair ",
 });
 
-function setUp(offered: readonly ChangeAction[] = [inApp], storeFails = false) {
+function setUp(
+  offered: readonly ChangeAction[] = [inApp, release],
+  storeFails = false,
+  current: CurrentState | Error = { ok: true, values: { expectedVersion: "3" } },
+  ran: AiOperation | null = null,
+) {
   const proposed: ProposedChange[] = [];
-  const store: Pick<AiOperationStore, "propose"> = {
+  const reads: unknown[][] = [];
+  const runsLookedUp: ProposedChange[] = [];
+  const store: Pick<AiOperationStore, "propose" | "findRun"> = {
+    async findRun(change) {
+      runsLookedUp.push(change);
+      return ran;
+    },
     async propose(change) {
       if (storeFails) throw new Error("AI operation store query failed (57P01)");
       proposed.push(change);
@@ -50,10 +65,15 @@ function setUp(offered: readonly ChangeAction[] = [inApp], storeFails = false) {
     store,
     log,
     onLogFailure: (error) => failures.push(error),
+    async readCurrentState(context, action, input) {
+      reads.push([context.delegation?.toolCallId, action.key, input]);
+      if (current instanceof Error) throw current;
+      return current;
+    },
     findAction: (key) => offered.find((action) => action.key === key),
     now: () => NOW,
   });
-  return { propose, proposed, log, failures };
+  return { propose, proposed, log, failures, reads, runsLookedUp };
 }
 
 describe("an AI asking for a change (VAY-2524)", () => {
@@ -108,6 +128,165 @@ describe("an AI asking for a change (VAY-2524)", () => {
     // The free-text reason is never logged.
     expect(JSON.stringify(log.rows)).not.toContain("shower");
     expect(failures).toEqual([]);
+  });
+
+  it("keeps the version vayada reads now, never one the AI sends (Flamur, 2026-11-24)", async () => {
+    const { propose, proposed, log, reads } = setUp();
+    const context = await worldContext(OWNER, ORG_A, CALENDAR);
+    const result = await propose(context, {
+      action: "room_block_release@1",
+      arguments: { propertyId: P1, blockId: BLOCK.toUpperCase() },
+      client: "vayada:pms",
+    });
+    expect(result).toMatchObject({ ok: true, pendingActionId: OP });
+    // Read once, as this tool call, for the record as the change names it (ids in lower case).
+    expect(reads).toEqual([
+      [context.delegation!.toolCallId, "room_block_release@1", { propertyId: P1, blockId: BLOCK }],
+    ]);
+    // The change keeps it beside the AI's arguments (not in the business key): the route and the
+    // card compare it.
+    expect(proposed[0]).toMatchObject({
+      arguments: { propertyId: P1, blockId: BLOCK },
+      versions: { expectedVersion: "3" },
+    });
+    expect(log.rows).toEqual([expect.objectContaining({ outcome: "ok", operationId: OP })]);
+
+    // A version from the AI is no input at all.
+    const sent = setUp();
+    expect(
+      await sent.propose(context, {
+        action: "room_block_release@1",
+        arguments: { propertyId: P1, blockId: BLOCK, expectedVersion: "1" },
+        client: "vayada:pms",
+      }),
+    ).toMatchObject({ ok: false, error: { code: "invalid_input" } });
+    expect(sent.reads).toEqual([]);
+    expect(sent.proposed).toEqual([]);
+
+    // Something new has no version to read.
+    const created = setUp();
+    await created.propose(context, {
+      action: "room_block_create@1",
+      arguments: args(),
+      client: "vayada:pms",
+    });
+    expect(created.reads).toEqual([]);
+    expect(created.proposed).toHaveLength(1);
+  });
+
+  it.each([
+    [
+      "a record that is not there",
+      { ok: false, reason: "missing" },
+      "not_found",
+      "What this change is for is not there any more.",
+      "invalid",
+    ],
+    [
+      "a record the person can't read",
+      { ok: false, reason: "not_allowed" },
+      "not_allowed",
+      "You can't make this change on this property.",
+      "denied",
+    ],
+    [
+      "a read that can't answer now",
+      { ok: false, reason: "unavailable" },
+      "unavailable",
+      "vayada can't check this change right now. Try again.",
+      "failed",
+    ],
+    [
+      "a version of another shape",
+      { ok: true, values: { expectedVersion: 3 } },
+      "unavailable",
+      "vayada can't check this change right now. Try again.",
+      "failed",
+    ],
+    [
+      "a read that answers more than the version",
+      { ok: true, values: { expectedVersion: "3", blockId: R12 } },
+      "unavailable",
+      "vayada can't check this change right now. Try again.",
+      "failed",
+    ],
+    [
+      "a read without the version",
+      { ok: true, values: {} },
+      "unavailable",
+      "vayada can't check this change right now. Try again.",
+      "failed",
+    ],
+  ] as const)("refuses %s, and keeps nothing", async (_label, current, code, message, outcome) => {
+    const { propose, proposed, log } = setUp(undefined, false, current as CurrentState);
+    expect(
+      await propose(await worldContext(OWNER, ORG_A, CALENDAR), {
+        action: "room_block_release@1",
+        arguments: { propertyId: P1, blockId: BLOCK },
+        client: "vayada:pms",
+      }),
+    ).toEqual({ ok: false, error: { code, message } });
+    expect(proposed).toEqual([]);
+    expect(log.rows).toEqual([expect.objectContaining({ outcome, errorCode: code })]);
+  });
+
+  it("gives a retry the run that made its record go (a block it released), never a second card", async () => {
+    const done = { id: OP, status: "done", expiresAt: null } as AiOperation;
+    const { propose, proposed, log, runsLookedUp } = setUp(
+      undefined,
+      false,
+      { ok: false, reason: "missing" },
+      done,
+    );
+    const context = await worldContext(OWNER, ORG_A, CALENDAR);
+    expect(
+      await propose(context, {
+        action: "room_block_release@1",
+        arguments: { propertyId: P1, blockId: BLOCK },
+        client: "vayada:pms",
+        requestScope: "turn-7",
+      }),
+    ).toEqual({ ok: true, pendingActionId: OP, status: "done", expiresAt: null, created: false });
+    // Looked up by the AI's own ask, in its turn; nothing new is stored.
+    expect(runsLookedUp).toEqual([
+      expect.objectContaining({
+        arguments: { propertyId: P1, blockId: BLOCK },
+        requestScope: "turn-7",
+        conversationId: CONVERSATION,
+      }),
+    ]);
+    expect(runsLookedUp[0]!.versions).toBeUndefined();
+    expect(proposed).toEqual([]);
+    expect(log.rows).toEqual([expect.objectContaining({ outcome: "ok", operationId: OP })]);
+  });
+
+  it("reads nothing before the person's rights allow the change", async () => {
+    const { propose, reads } = setUp();
+    // The member may use P1 only.
+    const member = await worldContext(MEMBER, ORG_A, CALENDAR);
+    expect(
+      await propose(member, {
+        action: "room_block_release@1",
+        arguments: { propertyId: P2, blockId: BLOCK },
+        client: "x",
+      }),
+    ).toMatchObject({ ok: false, error: { code: "not_allowed" } });
+    expect(reads).toEqual([]);
+  });
+
+  it("logs a read that broke, then throws", async () => {
+    const { propose, proposed, log } = setUp(undefined, false, new Error("inject failed"));
+    await expect(
+      propose(await worldContext(OWNER, ORG_A, CALENDAR), {
+        action: "room_block_release@1",
+        arguments: { propertyId: P1, blockId: BLOCK },
+        client: "vayada:pms",
+      }),
+    ).rejects.toThrow("inject failed");
+    expect(log.rows).toEqual([
+      expect.objectContaining({ outcome: "failed", errorCode: "read_failed", operationId: null }),
+    ]);
+    expect(proposed).toEqual([]);
   });
 
   it("asks on MCP on the connection", async () => {

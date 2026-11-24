@@ -3,7 +3,8 @@
 // waits as "pending" for the person's Yes, the Yes starts it for exactly one caller under a lease,
 // the run records each step and finishes it, and a run whose lease ran out is taken over and run
 // again with the same keys. A retried or regenerated tool call with the same arguments, in the same
-// request scope, gets the same operation back, never a second change.
+// request scope, gets the same operation back, never a second change: also once the change has run
+// and moved its record on, since the versions vayada read for it are kept but are not the ask.
 //
 // "failed" means the change certainly did not happen (refused, or nothing was sent). An outcome the
 // executor can't be sure of stays "running", so the recovery job runs it again with the same keys;
@@ -103,7 +104,15 @@ export type ProposedChange = {
   requestScope?: string;
   client: string;
   action: Pick<ChangeAction, "name" | "version" | "group">;
+  /** The AI's arguments: with who, where and the action, the business key. */
   arguments: Record<string, unknown>;
+  /**
+   * The record's versions vayada read when the AI asked (the action's preconditions, VAY-2524):
+   * kept with the arguments for the run, never in the business key, so a retry finds the change
+   * also after it ran. A pending change that kept other versions is closed as changed and asked
+   * anew.
+   */
+  versions?: Readonly<Record<string, unknown>>;
   /** The route's own preview the Yes binds to, and its expiry if sooner than 15 minutes. */
   previewSha256?: string;
   expiresInMs?: number;
@@ -118,6 +127,13 @@ export type AiOperationStore = {
    * Throws for arguments that are not plain JSON or name another property.
    */
   propose(change: ProposedChange, now: Date): Promise<{ operation: AiOperation; created: boolean }>;
+  /**
+   * What a retry of this change joins, as `propose` joins it: a running change, or an ended one
+   * (done, declined, revoked, AI switched off, failed after sending) in its scope and window; never
+   * a pending one, and nothing is written. For an ask whose record is gone, maybe because that run
+   * made it go (a block it released): the retry gets that outcome.
+   */
+  findRun(change: ProposedChange, now: Date): Promise<AiOperation | null>;
   /**
    * Starts a pending change for exactly one caller (`won`); every other caller gets the row as it
    * is (a running change: join it). An unanswered change past its expiry is closed as expired.
@@ -306,6 +322,43 @@ async function run<T extends pg.QueryResultRow>(
   }
 }
 
+/**
+ * The row a retry of `business_key` ($1) joins, newest first: `live` rows always, ended ones within
+ * the join window ($2: the earliest end) and their request scope ($3), as RETRY_JOIN_MS says.
+ */
+const joinableSql = (live: string) =>
+  `SELECT ${COLUMNS} FROM platform.ai_operations operation
+    WHERE business_key = $1
+      AND (${live}
+           OR (finished_at > $2::timestamptz
+               AND request_scope IS NOT DISTINCT FROM $3
+               AND (status = 'done'
+                    OR (status = 'closed'
+                        AND close_reason IN ('declined', 'revoked', 'ai_switched_off'))
+                    -- It sent a request, or gave up (nobody knows if it changed anything).
+                    OR (status = 'failed'
+                        AND (jsonb_array_length(steps) > 0 OR error_code = 'gave_up')))
+               -- A retry comes before anything new is asked in its conversation or
+               -- connection after it ended ("block, release, block again" asks again);
+               -- its own turn's other changes don't count.
+               AND NOT EXISTS (
+                 SELECT 1 FROM platform.ai_operations later
+                  WHERE later.user_id = operation.user_id
+                    AND later.connection_id IS NOT DISTINCT FROM operation.connection_id
+                    AND later.conversation_id IS NOT DISTINCT FROM operation.conversation_id
+                    AND later.created_at > operation.finished_at
+                    AND (operation.request_scope IS NULL
+                         OR later.request_scope IS DISTINCT FROM operation.request_scope))))
+    ORDER BY created_at DESC
+    LIMIT 1`;
+const joinableValues = (businessKey: string, change: ProposedChange, now: Date) => [
+  businessKey,
+  new Date(
+    now.getTime() - (change.requestScope ? RETRY_JOIN_MS : UNSCOPED_RETRY_JOIN_MS),
+  ).toISOString(),
+  change.requestScope ?? null,
+];
+
 export function createPgAiOperationStore(config: {
   connectionString: string;
   max?: number;
@@ -329,7 +382,11 @@ export function createPgAiOperationStore(config: {
   return {
     async propose(change, now) {
       if (change.action.group !== "ask") throw new Error("Only Ask-first AI changes exist yet");
-      const { json } = storedArguments(change.arguments);
+      const versions = storedArguments(change.versions ?? {}).parsed as Record<string, unknown>;
+      if (Object.keys(versions).some((field) => Object.hasOwn(change.arguments, field))) {
+        throw new AiOperationStoreError("AI change versions clash with its arguments");
+      }
+      const { json } = storedArguments({ ...change.arguments, ...versions });
       const named = change.arguments["propertyId"];
       if (typeof named !== "string" || named.toLowerCase() !== change.propertyId.toLowerCase()) {
         throw new AiOperationStoreError("AI change arguments name another property");
@@ -358,38 +415,10 @@ export function createPgAiOperationStore(config: {
             WHERE business_key = $1 AND status = 'pending' AND expires_at <= $2::timestamptz`,
           [businessKey, now.toISOString()],
         );
-        const joinMs = change.requestScope ? RETRY_JOIN_MS : UNSCOPED_RETRY_JOIN_MS;
         const existing = await run<Row>(
           client,
-          `SELECT ${COLUMNS} FROM platform.ai_operations operation
-            WHERE business_key = $1
-              AND (status IN ('pending', 'running')
-                   OR (finished_at > $2::timestamptz
-                       AND request_scope IS NOT DISTINCT FROM $3
-                       AND (status = 'done'
-                            OR (status = 'closed'
-                                AND close_reason IN ('declined', 'revoked', 'ai_switched_off'))
-                            -- It sent a request, or gave up (nobody knows if it changed anything).
-                            OR (status = 'failed'
-                                AND (jsonb_array_length(steps) > 0 OR error_code = 'gave_up')))
-                       -- A retry comes before anything new is asked in its conversation or
-                       -- connection after it ended ("block, release, block again" asks again);
-                       -- its own turn's other changes don't count.
-                       AND NOT EXISTS (
-                         SELECT 1 FROM platform.ai_operations later
-                          WHERE later.user_id = operation.user_id
-                            AND later.connection_id IS NOT DISTINCT FROM operation.connection_id
-                            AND later.conversation_id IS NOT DISTINCT FROM operation.conversation_id
-                            AND later.created_at > operation.finished_at
-                            AND (operation.request_scope IS NULL
-                                 OR later.request_scope IS DISTINCT FROM operation.request_scope))))
-            ORDER BY created_at DESC
-            LIMIT 1`,
-          [
-            businessKey,
-            new Date(now.getTime() - joinMs).toISOString(),
-            change.requestScope ?? null,
-          ],
+          joinableSql("status IN ('pending', 'running')"),
+          joinableValues(businessKey, change, now),
         );
         const found = existing.rows[0];
         // Only a digest given on both sides can differ: a retry that brings none joins the card.
@@ -398,7 +427,15 @@ export function createPgAiOperationStore(config: {
           found.previewSha256 !== null &&
           change.previewSha256 !== undefined &&
           found.previewSha256 !== change.previewSha256;
-        if (found && newPreview) {
+        // The record moved on before anyone answered: the old card is about a state that is gone.
+        // (Of two copies of one call that straddle a move, the later one wins; its card then closes
+        // as changed when shown, and the AI asks again.)
+        const moved =
+          found?.status === "pending" &&
+          Object.entries(versions).some(
+            ([field, value]) => canonicalJson(found.arguments[field]) !== canonicalJson(value),
+          );
+        if (found && (newPreview || moved)) {
           // What the card shows changed: the old card can't be answered, a new one asks.
           const closed = await run(
             client,
@@ -456,6 +493,16 @@ export function createPgAiOperationStore(config: {
       } finally {
         client.release();
       }
+    },
+
+    async findRun(change, now) {
+      const businessKey = operationBusinessKey(change);
+      const result = await run<Row>(
+        db,
+        joinableSql("status = 'running'"),
+        joinableValues(businessKey, change, now),
+      );
+      return result.rows[0] ? toOperation(result.rows[0]) : null;
     },
 
     async start(id, holder, now) {

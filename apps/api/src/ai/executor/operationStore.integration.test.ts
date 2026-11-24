@@ -166,6 +166,58 @@ describe.skipIf(!URL_)("AI operations on PostgreSQL (VAY-2524)", () => {
     return operation.id;
   }
 
+  it("keeps the versions vayada read beside the ask, out of its business key", async () => {
+    // As proposeChange asks: the AI's arguments, and the thread's version vayada read.
+    const asked = change({
+      arguments: { propertyId: PROPERTY, threadId: randomUUID() },
+      versions: { expectedThreadVersion: 4 },
+    });
+    const first = await store.propose(asked, T0);
+    expect(first.created).toBe(true);
+    // The run sends them: they are stored with the arguments.
+    expect(first.operation.arguments).toEqual({ ...asked.arguments, expectedThreadVersion: 4 });
+    expect(first.operation.businessKey).toBe(operationBusinessKey(asked));
+    // The same ask, the record unchanged: the same card.
+    expect(await store.propose(asked, at(1_000))).toMatchObject({
+      operation: { id: first.operation.id },
+      created: false,
+    });
+    // The record moved on before an answer: the old card is about a state that is gone.
+    const moved = await store.propose(
+      { ...asked, versions: { expectedThreadVersion: 5 } },
+      at(2_000),
+    );
+    expect(moved.created).toBe(true);
+    expect(moved.operation.arguments).toMatchObject({ expectedThreadVersion: 5 });
+    expect(await store.find(first.operation.id)).toMatchObject({
+      status: "closed",
+      closeReason: "changed",
+    });
+    // Once it ran, the record is at its next version: a retry in its turn still finds the change,
+    // never a second card for what is already done.
+    const token = (await store.start(moved.operation.id, A, at(3_000)))!.operation.leaseOwner!;
+    await store.recordStep(moved.operation.id, token, step(1));
+    await store.finish(moved.operation.id, token, { status: "done", result: { ok: 1 } }, at(4_000));
+    expect(
+      await store.propose({ ...asked, versions: { expectedThreadVersion: 6 } }, at(5_000)),
+    ).toMatchObject({ operation: { id: moved.operation.id, status: "done" }, created: false });
+    // A record the run made go (a block it released) has no version left to read: the retry finds
+    // the run itself, never a pending card.
+    expect(await store.findRun(asked, at(5_000))).toMatchObject({
+      id: moved.operation.id,
+      status: "done",
+    });
+    expect(await store.findRun({ ...asked, requestScope: "turn-2" }, at(5_000))).toBeNull();
+    expect(await store.findRun(asked, at(4_000 + RETRY_JOIN_MS + 1))).toBeNull();
+    const waiting = change({ arguments: { propertyId: PROPERTY, threadId: randomUUID() } });
+    await store.propose(waiting, at(0));
+    expect(await store.findRun(waiting, at(1_000))).toBeNull();
+    // Versions never stand in for the AI's own arguments.
+    await expect(
+      store.propose({ ...asked, versions: { threadId: randomUUID() } }, at(6_000)),
+    ).rejects.toThrow(AiOperationStoreError);
+  });
+
   it("writes an Ask-first change as pending, waiting 15 minutes or its preview's expiry", async () => {
     const asked = change();
     const { operation, created } = await store.propose(asked, T0);

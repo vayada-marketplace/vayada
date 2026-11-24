@@ -1,7 +1,9 @@
 // Marking a guest conversation done, for follow-up or open again (VAY-2522, first change batch).
 import { z } from "zod";
 
-import { defineChangeAction } from "./defineChangeAction.js";
+import { defineChangeAction, sameRecordId } from "./defineChangeAction.js";
+
+const thread = z.object({ thread: z.object({ id: z.string(), version: z.number() }) });
 
 const shared = {
   version: 1,
@@ -9,6 +11,16 @@ const shared = {
   // The thread's version: a conversation that changed meanwhile is refused, not overwritten.
   idempotency: { in: "header" },
   preconditions: ["expectedThreadVersion"],
+  // The conversation's version; one message is the least the route reads, and only the version is
+  // kept.
+  currentState: {
+    route: "GET /api/pms/properties/:propertyId/messaging/threads/:threadId",
+    query: { messageLimit: 1 },
+    pick(answer: unknown, input: Readonly<Record<string, unknown>>) {
+      const { id, version } = thread.parse(answer).thread;
+      return sameRecordId(id, input.threadId) ? { expectedThreadVersion: version } : null;
+    },
+  },
   authoritySites: ["pms_inbox_triage_scope"],
   group: "ask",
   permission: "pms.inbox.reply",

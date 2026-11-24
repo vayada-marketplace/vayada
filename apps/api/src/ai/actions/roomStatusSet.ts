@@ -1,7 +1,17 @@
 // A room's state: available, maintenance or out of order (VAY-2522, first change batch).
 import { z } from "zod";
 
-import { defineChangeAction } from "./defineChangeAction.js";
+import { defineChangeAction, sameRecordId } from "./defineChangeAction.js";
+
+const rooms = z.object({
+  items: z.array(
+    z.object({
+      roomId: z.string(),
+      roomTypeId: z.string(),
+      metadata: z.object({ roomUnitsRevision: z.number().optional() }).nullish(),
+    }),
+  ),
+});
 
 export const roomStatusSet = defineChangeAction({
   name: "room_status_set",
@@ -20,6 +30,20 @@ export const roomStatusSet = defineChangeAction({
   }),
   idempotency: { in: "header" },
   preconditions: ["expectedRevision"],
+  // The room type's rooms revision, from the rooms list, as the PMS sends it back.
+  currentState: {
+    route: "GET /api/pms/properties/:propertyId/rooms",
+    pick(answer, input) {
+      const room = rooms
+        .parse(answer)
+        .items.find(
+          (item) =>
+            sameRecordId(item.roomId, input.roomUnitId) &&
+            sameRecordId(item.roomTypeId, input.roomTypeId),
+        );
+      return room ? { expectedRevision: room.metadata?.roomUnitsRevision } : null;
+    },
+  },
   authoritySites: ["pms_physical_room_scope", "pms_calendar_room_follow_up"],
   group: "ask",
   permission: "pms.operations.manage",

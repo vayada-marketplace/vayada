@@ -31,6 +31,10 @@ const base = {
   body: z.strictObject({ expectedVersion: z.string() }),
   idempotency: { in: "body", fields: ["commandId", "idempotencyKey"] },
   preconditions: ["expectedVersion"],
+  currentState: {
+    route: "GET /api/pms/properties/:propertyId/room-blocks",
+    pick: () => ({ expectedVersion: "3" }),
+  },
   authoritySites: [],
   group: "ask",
   permission: "pms.calendar.manage",
@@ -40,7 +44,7 @@ const base = {
 } as const;
 
 describe("defineChangeAction (VAY-2522)", () => {
-  it("takes path parameters and body fields as one strict input", () => {
+  it("takes path parameters and body fields as one strict input; the AI's has no precondition", () => {
     const action = defineChangeAction(base);
     expect(action).toMatchObject({
       key: "test_release@1",
@@ -48,10 +52,30 @@ describe("defineChangeAction (VAY-2522)", () => {
       pathParamNames: ["propertyId", "blockId"],
       bodyFields: ["expectedVersion"],
     });
-    const input = { propertyId: PROPERTY, blockId: BLOCK, expectedVersion: "3" };
+    const input = { propertyId: PROPERTY, blockId: BLOCK };
     expect(action.input.safeParse(input).success).toBe(true);
     expect(action.input.safeParse({ ...input, extra: 1 }).success).toBe(false);
     expect(action.input.safeParse({ ...input, blockId: "b1" }).success).toBe(false);
+    // vayada fills the version in (VAY-2524): the AI can't send one.
+    expect(action.input.safeParse({ ...input, expectedVersion: "3" }).success).toBe(false);
+    // What the change keeps and sends: the AI's input with the version.
+    expect(action.requestInput.safeParse({ ...input, expectedVersion: "3" }).success).toBe(true);
+    expect(action.requestInput.safeParse(input).success).toBe(false);
+    expect(action.requestInput.safeParse({ ...input, expectedVersion: "3", x: 1 }).success).toBe(
+      false,
+    );
+  });
+
+  it("never lets the AI send a registered change's preconditions", () => {
+    for (const action of CHANGE_ACTIONS) {
+      const ai = z.toJSONSchema(action.input) as { properties: Record<string, unknown> };
+      const kept = z.toJSONSchema(action.requestInput) as { properties: Record<string, unknown> };
+      for (const field of action.preconditions) {
+        expect(Object.keys(ai.properties), action.key).not.toContain(field);
+        expect(Object.keys(kept.properties), action.key).toContain(field);
+      }
+      expect(Boolean(action.currentState), action.key).toBe(action.preconditions.length > 0);
+    }
   });
 
   it.each([
@@ -74,9 +98,42 @@ describe("defineChangeAction (VAY-2522)", () => {
     ],
     ["a body retry key without fields", { idempotency: { in: "body", fields: [] } }],
     ["a precondition that is not a body field", { preconditions: ["version"] }],
+    ["a precondition listed twice", { preconditions: ["expectedVersion", "expectedVersion"] }],
     ["a change to something that exists without a precondition", { preconditions: [] }],
     ["a precondition on something said to be new", { addsNew: true }],
-    ["something new on a DELETE", { addsNew: true, preconditions: [] }],
+    ["something new on a DELETE", { addsNew: true, preconditions: [], currentState: undefined }],
+    ["preconditions without the read vayada takes them from", { currentState: undefined }],
+    [
+      "a read of preconditions a new thing does not have",
+      {
+        route: "POST /api/pms/properties/:propertyId/room-blocks",
+        pathParams: {},
+        body: z.strictObject({ roomTypeId: z.uuid() }),
+        preconditions: [],
+        addsNew: true,
+      },
+    ],
+    [
+      "preconditions read by a write",
+      { currentState: { ...base.currentState, route: "DELETE /api/pms/properties/:propertyId" } },
+    ],
+    [
+      "preconditions read outside the property",
+      { currentState: { ...base.currentState, route: "GET /api/pms/properties" } },
+    ],
+    [
+      "preconditions read with a parameter the change does not have",
+      {
+        currentState: {
+          ...base.currentState,
+          route: "GET /api/pms/properties/:propertyId/messaging/threads/:threadId",
+        },
+      },
+    ],
+    [
+      "preconditions read without saying where they are",
+      { currentState: { route: base.currentState.route } },
+    ],
     [
       "a rule across body fields, which the input would lose",
       {
@@ -123,6 +180,7 @@ describe("defineChangeAction (VAY-2522)", () => {
         body: z.strictObject({ body: z.string() }),
         preconditions: [],
         addsNew: true,
+        currentState: undefined,
       }),
     ).not.toThrow();
   });
@@ -205,9 +263,13 @@ describe("changeRequest (VAY-2522)", () => {
 
 describe("the change registry (VAY-2522)", () => {
   it("lets the AI reach exactly each change's route, with its own method", () => {
+    const versionReads = new Set(CHANGE_ACTIONS.map((action) => action.currentState?.route));
     for (const action of CHANGE_ACTIONS) {
       expect(aiActionRouteGate.allowsRoute(action.method, action.routeUrl)).toBe(true);
-      expect(aiActionRouteGate.allowsRoute("GET", action.routeUrl)).toBe(false);
+      // A GET only where vayada reads a change's versions (the room-block list).
+      expect(aiActionRouteGate.allowsRoute("GET", action.routeUrl)).toBe(
+        versionReads.has(`GET ${action.routeUrl}` as never),
+      );
       expect(findChangeAction(action.key)).toBe(action);
     }
     // The room-block edit and the room's number stay out.
@@ -225,15 +287,38 @@ describe("the change registry (VAY-2522)", () => {
     ).toBe(false);
   });
 
-  it("lets the AI reach exactly the routes of registered actions, nothing else", () => {
+  it("lets the AI reach exactly the routes of registered actions and their versions' reads", () => {
     const reachable = ROUTE_MANIFEST.filter((route) => {
       const space = route.indexOf(" ");
       return aiActionRouteGate.allowsRoute(route.slice(0, space), route.slice(space + 1));
     });
-    expect(reachable.sort()).toEqual(
-      [...AI_ACTIONS, ...CHANGE_ACTIONS].map((action) => action.route).sort(),
+    const versionReads = CHANGE_ACTIONS.flatMap((action) =>
+      action.currentState ? [action.currentState.route] : [],
     );
-    expect(reachable).toHaveLength(10);
+    expect(reachable.sort()).toEqual(
+      [
+        ...new Set([...[...AI_ACTIONS, ...CHANGE_ACTIONS].map((a) => a.route), ...versionReads]),
+      ].sort(),
+    );
+    // The rooms list is rooms_list's own; the blocks and one conversation are read for versions only.
+    expect(reachable).toHaveLength(12);
+    expect(reachable).toEqual(
+      expect.arrayContaining([
+        "GET /api/pms/properties/:propertyId/room-blocks",
+        "GET /api/pms/properties/:propertyId/messaging/threads/:threadId",
+      ]),
+    );
+  });
+
+  it.each([
+    ["not in the route list", "GET /api/pms/properties/:propertyId/made-up", /route list/],
+    ["not for the AI at all", "GET /api/pms/properties/:propertyId/profile", /broken/],
+  ])("refuses a versions' read %s", (_label, route, reason) => {
+    const action = defineChangeAction({
+      ...base,
+      currentState: { ...base.currentState, route: route as never },
+    });
+    expect(() => assertChangeRegistry([action], [])).toThrow(reason);
   });
 
   it("registers one change per route: the app holds a write to the change of its route", () => {
