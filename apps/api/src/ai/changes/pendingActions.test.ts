@@ -395,7 +395,7 @@ describe("answering AI changes (VAY-2524)", () => {
     await app!.close();
     app = undefined;
 
-    // The in-app chat that asked was deleted (30 days without activity): the same.
+    // The in-app chat that asked is gone (or the assistant is off): the same.
     const inApp = operation();
     const third = await setUp([inApp], { channelActive: false });
     const late = await third.answer(inApp.id, { answer: "yes", cardSha256: "a".repeat(64) });

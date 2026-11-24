@@ -24,7 +24,7 @@ const runtimeConfig = (overrides: Partial<RuntimeConfig> = {}): RuntimeConfig =>
   identity: worldIdentity,
   authorizationResolver: worldAuthorization([]).resolver,
   aiEnabled: async () => true,
-  chatExists: async () => true,
+  chats: () => ({ exists: async () => true }),
   allowedOrigins: [],
   backgroundWorkersEnabled: false,
   ...overrides,
@@ -36,12 +36,14 @@ describe("AI changes in the API (VAY-2524)", () => {
     const gone = randomUUID();
     const runtime = createAiChangesRuntime(
       runtimeConfig({
-        chatExists: async (owner, conversationId) => {
-          asked.push([owner, conversationId]);
-          if (conversationId === WORLD.CONVERSATION) return true;
-          if (conversationId === gone) return false;
-          throw new Error("chat store query failed (57P01)");
-        },
+        chats: () => ({
+          async exists(owner, conversationId) {
+            asked.push([owner, conversationId]);
+            if (conversationId === WORLD.CONVERSATION) return true;
+            if (conversationId === gone) return false;
+            throw new Error("chat store query failed (57P01)");
+          },
+        }),
       }),
     );
     const owner = { organizationId: WORLD.ORG_A, propertyId: WORLD.P1, userId: WORLD.OWNER };
@@ -66,6 +68,23 @@ describe("AI changes in the API (VAY-2524)", () => {
     } as AiOperation;
     expect(await runtime.routes.channelActive(mcp)).toBe(false);
     expect(asked).toHaveLength(3);
+  });
+
+  it("answers no in-app change while the assistant is off: no chat is there", async () => {
+    let chats: { exists(): Promise<boolean> } | undefined;
+    const runtime = createAiChangesRuntime(runtimeConfig({ chats: () => chats }));
+    const inApp = {
+      organizationId: WORLD.ORG_A,
+      propertyId: WORLD.P1,
+      userId: WORLD.OWNER,
+      surface: "in_app",
+      connectionId: null,
+      conversationId: WORLD.CONVERSATION,
+    } as AiOperation;
+    expect(await runtime.routes.channelActive(inApp)).toBe(false);
+    // The chats are looked up when a change is answered, not when the runtime is built.
+    chats = { exists: async () => true };
+    expect(await runtime.routes.channelActive(inApp)).toBe(true);
   });
 
   it("mounts no Yes/No routes without the setting", async () => {

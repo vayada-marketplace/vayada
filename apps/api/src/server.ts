@@ -495,10 +495,8 @@ const aiChanges =
           ),
           aiEnabled: async (organizationId) =>
             (await budget.monthStatus(organizationId)).limitMicroUsd > 0,
-          // The assistant's chats (built below, read at answer time). With the assistant off
-          // there is no chat, so no in-app change can be answered.
-          chatExists: (owner, conversationId) =>
-            assistant ? assistant.store.exists(owner, conversationId) : Promise.resolve(false),
+          // The assistant's chats, built below and read when a change is answered.
+          chats: () => assistant?.store,
           allowedOrigins: config.authSession?.authAllowedOrigins ?? [],
           backgroundWorkersEnabled: config.backgroundWorkersEnabled,
         });

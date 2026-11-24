@@ -9,6 +9,7 @@ import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import pg from "pg";
 
 import { createPgAiActionLog } from "../actionLog/actionLog.js";
+import type { ConversationStore } from "../assistant/conversationStore.js";
 import { createAiChangeExecutor, type AiChangeExecutor } from "../executor/executor.js";
 import { createPgAiOperationStore } from "../executor/operationStore.js";
 import { startAiChangeRecoveryWorker } from "../executor/recoveryWorker.js";
@@ -22,13 +23,10 @@ export function createAiChangesRuntime(config: {
   /** AI is on for the account: its monthly budget is above 0. */
   aiEnabled(organizationId: string): Promise<boolean>;
   /**
-   * The in-app chat still exists and is the person's (VAY-2518's conversationStore.exists).
-   * Without the assistant there is no chat, so no in-app change can be answered.
+   * The assistant's chats (VAY-2518), read when a change is answered; undefined with the
+   * assistant off.
    */
-  chatExists(
-    owner: { organizationId: string; propertyId: string; userId: string },
-    conversationId: string,
-  ): Promise<boolean>;
+  chats(): Pick<ConversationStore, "exists"> | undefined;
   allowedOrigins: readonly string[];
   /** The recovery job runs only where background workers do. */
   backgroundWorkersEnabled: boolean;
@@ -68,19 +66,15 @@ export function createAiChangesRuntime(config: {
         return executor.startAndRun(operationId);
       },
       aiEnabled: config.aiEnabled,
-      // An in-app change needs its chat. No MCP change can be answered before its connection can
-      // be checked (VAY-2528).
-      channelActive: async (operation) =>
-        operation.surface === "in_app" && operation.conversationId
-          ? config.chatExists(
-              {
-                organizationId: operation.organizationId,
-                propertyId: operation.propertyId,
-                userId: operation.userId,
-              },
-              operation.conversationId,
-            )
-          : false,
+      // An in-app change needs its chat, still the person's: with the assistant off there is
+      // none (Flamur, 2026-11-24: fail closed). No MCP change can be answered before its
+      // connection can be checked (VAY-2528).
+      async channelActive(operation) {
+        const chats = config.chats();
+        if (operation.surface !== "in_app" || !operation.conversationId || !chats) return false;
+        const { organizationId, propertyId, userId } = operation;
+        return chats.exists({ organizationId, propertyId, userId }, operation.conversationId);
+      },
       allowedOrigins: config.allowedOrigins,
     } satisfies Omit<PendingActionRouteOptions, "root">,
 
