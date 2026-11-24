@@ -16,6 +16,7 @@ import { createPgPartnerPromoCodesRepository } from "./domains/partnerPromoCodes
 import {
   deliverPartnerWebhooks,
   deriveWebhookSigningSecret,
+  partnerJobPoolConfig,
   webhookSignature,
 } from "./domains/partnerWebhooks.js";
 import {
@@ -23,6 +24,7 @@ import {
   type HotelSetupOrdinaryLoginFixture,
 } from "./hotelSetupOrdinaryLogin.fixture.js";
 import { registerPartnerApp } from "./platform/partnerAppRegistration.js";
+import { installPostgresPoolRuntime } from "./platform/postgresRuntime.js";
 
 /**
  * VAY-2438: bookings that used a connected partner app's code reach its webhook, signed, as
@@ -453,4 +455,72 @@ describe.skipIf(!url)("signed booking updates for partner codes (VAY-2438)", () 
     );
     expect((await sweep()).queued).toBe(0);
   });
+
+  it("runs each job on one connection of its own that gives up on a held lock instead of waiting", async () => {
+    // As in production: next-api's pool runtime decides what a pool really gets.
+    const postgres = { Pool: pg.Pool };
+    const runtime = installPostgresPoolRuntime(postgres);
+    const shared = new postgres.Pool({ connectionString: fixture.connectionString });
+    const sweepPool = new postgres.Pool(partnerJobPoolConfig(fixture.connectionString, "sweep"));
+    const deliveryPool = new postgres.Pool(
+      partnerJobPoolConfig(fixture.connectionString, "delivery"),
+    );
+    let locked = false;
+    try {
+      expect(runtime.snapshot()).toMatchObject({ physicalPoolCount: 3, maxConnections: 10 });
+      const settings = await sweepPool.query<Record<string, string>>(
+        `SELECT current_setting('application_name') AS app,
+                current_setting('statement_timeout') AS statement,
+                current_setting('lock_timeout') AS lock,
+                current_setting('idle_in_transaction_session_timeout') AS idle`,
+      );
+      expect(settings.rows[0]).toEqual({
+        app: "vayada-partner-sweep",
+        statement: "30s",
+        lock: "5s",
+        idle: "1min",
+      });
+
+      // Another session holds what each job reads: each gives up after 5 s (SQLSTATE 55P03) and tries
+      // again on its next tick, instead of waiting for as long as the lock is held.
+      await admin.query("BEGIN");
+      locked = true;
+      await admin.query(
+        `LOCK TABLE distribution.partner_booking_states, distribution.external_api_clients
+         IN ACCESS EXCLUSIVE MODE`,
+      );
+      // Each run is cut off at 10 s, so a job that waits regardless releases the lock before asserting.
+      const outcomes: { outcome: unknown; ms: number }[] = [];
+      for (const run of [
+        () => runPartnerBookingSweep({ pool: sweepPool, now }),
+        () => deliverPartnerWebhooks({ pool: deliveryPool, signingKey, now }),
+      ]) {
+        const started = Date.now();
+        const outcome = await Promise.race([
+          run().then(
+            () => "finished",
+            (error: unknown) => error,
+          ),
+          new Promise((resolve) => setTimeout(() => resolve("still waiting"), 10_000).unref()),
+        ]);
+        outcomes.push({ outcome, ms: Date.now() - started });
+      }
+      await admin.query("ROLLBACK");
+      locked = false;
+      for (const { outcome, ms } of outcomes) {
+        expect(outcome).toMatchObject({ code: "55P03" });
+        expect(ms).toBeLessThan(9_000);
+      }
+
+      // And they work again once the lock is gone.
+      expect(await runPartnerBookingSweep({ pool: sweepPool, now })).toEqual({
+        queued: 0,
+        failed: [],
+      });
+    } finally {
+      if (locked) await admin.query("ROLLBACK");
+      await Promise.all([shared, sweepPool, deliveryPool].map((pool) => pool.end()));
+      await runtime.close();
+    }
+  }, 30_000);
 });

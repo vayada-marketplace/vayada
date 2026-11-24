@@ -1,12 +1,15 @@
 import { createHmac } from "node:crypto";
 
+import pg from "pg";
 import { describe, expect, it } from "vitest";
 
+import { installPostgresPoolRuntime } from "../platform/postgresRuntime.js";
 import {
   MAX_DELIVERY_ATTEMPTS,
   RETRY_DELAYS_SECONDS,
   deriveWebhookSigningSecret,
   parseWebhookSigningKey,
+  partnerJobPoolConfig,
   webhookSignature,
 } from "./partnerWebhooks.js";
 
@@ -44,5 +47,34 @@ describe("partner webhook signing and retries (VAY-2438)", () => {
     expect(() => parseWebhookSigningKey(Buffer.alloc(16, 1).toString("base64"))).toThrow(
       /32 bytes/,
     );
+  });
+
+  it("gives the sweep and the delivery one connection each, apart from the shared pool, in production", async () => {
+    const postgres = { Pool: pg.Pool };
+    const runtime = installPostgresPoolRuntime(postgres);
+    const connectionString = "postgresql://example/target";
+    const general = new postgres.Pool({ connectionString });
+    // What the jobs had before: the same settings as the general pool, so the runtime handed out the
+    // general pool itself (max 8, shared with requests) and ignored max: 2.
+    const before = new postgres.Pool({ connectionString, max: 2 });
+    const sweep = new postgres.Pool(partnerJobPoolConfig(connectionString, "sweep"));
+    const delivery = new postgres.Pool(partnerJobPoolConfig(connectionString, "delivery"));
+    try {
+      expect(before.options.max).toBe(8);
+      expect(sweep.options.max).toBe(1);
+      expect(delivery.options.max).toBe(1);
+      expect(runtime.snapshot()).toMatchObject({ physicalPoolCount: 3, maxConnections: 10 });
+      expect(partnerJobPoolConfig(connectionString, "sweep")).toEqual({
+        connectionString,
+        max: 1,
+        application_name: "vayada-partner-sweep",
+        statement_timeout: 30_000,
+        lock_timeout: 5_000,
+        idle_in_transaction_session_timeout: 60_000,
+      });
+    } finally {
+      await Promise.all([general, before, sweep, delivery].map((pool) => pool.end()));
+      await runtime.close();
+    }
   });
 });
