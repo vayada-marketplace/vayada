@@ -1929,6 +1929,10 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     booking.status === "expired" ||
     booking.status === "no_show";
   const hasDeadline = isPending && booking.hostResponseDeadline;
+  // VAY-2099: a card booking inside its payment window shows that deadline; until the guest's card
+  // is authorised there is nothing for the hotel to accept.
+  const cardNotAuthorised =
+    booking.paymentMethod === "card" && booking.paymentStatus !== "authorized";
   const hasAcceptedBankDeadline =
     booking.status === "confirmed" &&
     booking.paymentMethod === "bank_transfer" &&
@@ -3267,13 +3271,22 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         {isPending && booking.hostResponseDeadline && (
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
             <p className="mb-2 text-xs text-gray-500">
+              {/* VAY-2099: a booking-page request (pay at property, or a card the guest authorised)
+                  waits for the hotel's answer, not for a payment. */}
               {booking.awaitingPaymentConfirmation
                 ? t("bookings.detail.confirmManualPaymentReceipt")
-                : t("bookings.detail.reviewManualPayment")}
+                : booking.paymentMethod === "pay_at_property"
+                  ? t("bookings.detail.acceptAtPropertyRequest")
+                  : cardNotAuthorised
+                    ? t("bookings.detail.waitingForCardPayment")
+                    : booking.paymentMethod === "card"
+                      ? t("bookings.detail.acceptCardRequest")
+                      : t("bookings.detail.reviewManualPayment")}
             </p>
             <div className="flex flex-wrap gap-3">
-              {(booking.paymentMethod === "paypal" || booking.awaitingPaymentConfirmation) &&
-              !canConfirmPayment ? (
+              {cardNotAuthorised ? null : (booking.paymentMethod === "paypal" ||
+                  booking.awaitingPaymentConfirmation) &&
+                !canConfirmPayment ? (
                 <p className="text-xs text-gray-500">{t("bookings.detail.ownerConfirmsPayment")}</p>
               ) : booking.paymentMethod === "paypal" || booking.awaitingPaymentConfirmation ? (
                 <button

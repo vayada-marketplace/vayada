@@ -18,7 +18,11 @@ import type {
   ConversationSummary,
   ConversationView,
 } from "./conversationStore.js";
-import { ASSISTANT_INSTRUCTIONS, turnContext } from "./instructions.js";
+import {
+  ASSISTANT_INSTRUCTIONS,
+  ASSISTANT_INSTRUCTIONS_WITH_CHANGES,
+  turnContext,
+} from "./instructions.js";
 import { requestContract } from "./requestContract.js";
 
 /**
@@ -102,7 +106,12 @@ export function createAssistantRuntime(config: {
   now?: () => Date;
   drainGraceMs?: number;
 }): AssistantRuntime {
-  const instructions = config.instructions ?? ASSISTANT_INSTRUCTIONS;
+  // A person offered change tools gets the instructions that explain them (VAY-2524).
+  const instructionsFor = (tools: readonly AssistantTool[]) =>
+    config.instructions ??
+    (tools.some((tool) => tool.asksFirst)
+      ? ASSISTANT_INSTRUCTIONS_WITH_CHANGES
+      : ASSISTANT_INSTRUCTIONS);
   const now = config.now ?? (() => new Date());
   const running = new Set<Running>();
   let draining = false;
@@ -115,6 +124,7 @@ export function createAssistantRuntime(config: {
       conversationId,
     });
     if (!tools) return undefined;
+    const instructions = instructionsFor(tools);
     const owner: ConversationOwner = {
       organizationId: scope.session.selectedOrganization.organizationId,
       propertyId: scope.propertyId,
@@ -170,7 +180,7 @@ export function createAssistantRuntime(config: {
           ...(request.conversationId ? { conversationId } : { newConversationId: conversationId }),
           question: request.question,
           context,
-          instructions,
+          instructions: instructionsFor(granted.tools),
           tools: granted.tools,
           requestId: request.requestId,
           emit: (event) => {

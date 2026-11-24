@@ -16,6 +16,8 @@ import { listActionsFor, toolDefinition } from "../actions/registry.js";
 import { runRouteAction } from "../actions/runRouteAction.js";
 import type { AssistantToolsFor } from "./assistantRuntime.js";
 import type { AssistantTool, ToolOutcome } from "./assistantTurn.js";
+import type { ChangeAction } from "../actions/defineChangeAction.js";
+import { changeTools, type AssistantChangeProposer } from "./changeTools.js";
 
 /**
  * The registry's in-app actions this user may use, as the assistant's tools (VAY-2518). Each call
@@ -50,6 +52,14 @@ export function registryTools(
   }));
 }
 
+/** `providerIdentity.impersonated` (VAY-2524 follow-up, #4225); absent before it lands. */
+export function isImpersonated(session: RequestContext): boolean {
+  const identity = session.actor.providerIdentity as
+    | (typeof session.actor.providerIdentity & { impersonated?: true })
+    | undefined;
+  return identity?.impersonated === true;
+}
+
 function abandoned(signal: AbortSignal): Promise<ToolOutcome> {
   return new Promise((resolve) => {
     const answer = () =>
@@ -79,6 +89,13 @@ export function delegatedAssistantTools(
     log: AiActionLog;
     /** The model route in use, for the log; null while AI is off. */
     model: () => string | null;
+    /**
+     * VAY-2524's proposer, only with AI_CHANGES_ENABLED: the change actions on the in-app surface
+     * become tools that ask for a change. Without it the assistant only reads.
+     */
+    propose?: AssistantChangeProposer;
+    /** For tests: the change actions to offer from (the registry's by default). */
+    changeActions?: readonly ChangeAction[];
   },
 ): AssistantToolsFor {
   return async ({ session, propertyId, conversationId }) => {
@@ -101,11 +118,20 @@ export function delegatedAssistantTools(
       throw error;
     }
     if (!delegatedPropertyIds(context).includes(propertyId)) return undefined;
-    return registryTools(app, {
-      context,
-      contextFor: delegate,
-      log: options.log,
-      model: options.model(),
-    });
+    const model = options.model();
+    const reads = registryTools(app, { context, contextFor: delegate, log: options.log, model });
+    // Staff signed in as the person (WorkOS impersonation, flagged by VAY-2524's follow-up) only
+    // read: a change they asked for would wait in the person's chat as if the person had asked.
+    if (!options.propose || isImpersonated(session)) return reads;
+    return [
+      ...reads,
+      ...changeTools({
+        context,
+        contextFor: delegate,
+        propose: options.propose,
+        model,
+        ...(options.changeActions ? { actions: options.changeActions } : {}),
+      }),
+    ];
   };
 }

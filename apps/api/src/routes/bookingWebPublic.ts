@@ -95,6 +95,7 @@ import {
   projectBookingRoomSelection,
 } from "../domains/bookingRoomSelectionProjection.js";
 import { appendMissingAddonRevenueEvidence } from "../domains/bookingAddonRevenueEvidence.js";
+import { reverseTargetPromoRedemption } from "../domains/currentQuotePromoRedemption.js";
 import type { BankTransferBookingOperations } from "../domains/financeBankTransferBooking.js";
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
 import { createBookingLookupRateLimit } from "../platform/bookingLookupRateLimit.js";
@@ -5260,32 +5261,6 @@ export async function redeemTargetPromo(
   );
   if (redemption.rows.length !== 1)
     throw createHttpError(409, "Promo redemption changed. Please refresh.");
-}
-
-export async function reverseTargetPromoRedemption(
-  pool: BookingWebQueryExecutor,
-  propertyId: string,
-  guestBookingId: string,
-  occurredAt: Date,
-): Promise<void> {
-  await pool.query(
-    `WITH reversed AS (
-       UPDATE booking.promo_applications
-          SET application_status = 'reversed',
-              metadata = metadata || jsonb_build_object('reversedAt', $3::text)
-        WHERE property_id = $1::uuid
-          AND guest_booking_id = $2::uuid
-          AND application_status = 'applied'
-      RETURNING promo_definition_id
-     )
-     UPDATE booking.promo_definitions promo
-        SET current_uses = GREATEST(promo.current_uses - 1, 0),
-            updated_at = $3::timestamptz
-       FROM reversed
-      WHERE promo.id = reversed.promo_definition_id
-        AND promo.property_id = $1::uuid`,
-    [propertyId, guestBookingId, occurredAt.toISOString()],
-  );
 }
 
 export async function enqueuePmsReservationHandoff(

@@ -27,7 +27,11 @@ export async function stagePricingBookingRevenue(
   };
   const scope = await lockPublicPricingAuthority(client, slug);
   const quote = current.quote;
-  const projection = pricingRoomRevenueProjection(quote, current.calculation?.charges);
+  const projection = pricingRoomRevenueProjection(
+    quote,
+    current.calculation?.charges,
+    current.calculation?.code,
+  );
   const scale = pricingCurrencyScale(quote.stay.currency);
   if (
     !scope ||

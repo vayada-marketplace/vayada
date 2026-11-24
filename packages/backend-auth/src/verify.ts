@@ -9,6 +9,11 @@ export type VerifiedSession = {
   expiresAt: number;
   /** Signed time of active authentication; absent/malformed values cannot prove freshness. */
   authenticatedAt?: number;
+  /**
+   * Staff signed in as this user (WorkOS impersonation): the token carries an `act` claim. Such a
+   * token still reaches /api; routes that need the person themselves refuse it.
+   */
+  impersonated?: true;
 };
 
 /** A function that verifies a raw access token and returns the parsed session. */
@@ -75,6 +80,8 @@ export function createWorkOSVerifier(config: WorkOSVerifierConfig): TokenVerifie
         claims["auth_time"] > 0
           ? { authenticatedAt: claims["auth_time"] }
           : {}),
+        // Any `act` value at all counts: an actor other than the user is signed in.
+        ...(claims["act"] !== undefined ? { impersonated: true as const } : {}),
       };
     } catch (error) {
       if (error instanceof AuthError) throw error;

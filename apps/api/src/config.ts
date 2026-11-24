@@ -301,6 +301,11 @@ export type ApiConfig = {
   contactNotificationRecipient?: string;
   /** VAY-2504: the monthly AI budget of every hotel account staff have not set; 0 = no AI. */
   aiDefaultMonthlyBudgetMicroUsd: number;
+  /**
+   * VAY-2524: AI changes (Ask first): the Yes/No routes, the one executor and its recovery job.
+   * Off by default; nothing asks for a change until the assistant and MCP do.
+   */
+  aiChangesEnabled: boolean;
   /** VAY-2504: one email a month when vayada's total AI spend passes the threshold; unset sends none. */
   aiSpendAlertEmail?: string;
   aiSpendAlertThresholdMicroUsd: number;
@@ -1664,6 +1669,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       Boolean(bookingEmailDelivery),
     ),
     aiDefaultMonthlyBudgetMicroUsd: defaultMonthlyBudgetFromEnv(env),
+    aiChangesEnabled: readBooleanEnv(env, "AI_CHANGES_ENABLED", false),
     aiSpendAlertEmail: readSingleRecipientEnv(
       env,
       "AI_SPEND_ALERT_EMAIL",

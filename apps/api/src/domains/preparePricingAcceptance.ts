@@ -83,7 +83,11 @@ export async function preparePricingAcceptance(
   if (
     !command ||
     !(payAtProperty || card || manual) ||
-    !pricingRoomRevenueProjection(current.quote, current.calculation?.charges)
+    !pricingRoomRevenueProjection(
+      current.quote,
+      current.calculation?.charges,
+      current.calculation?.code,
+    )
   )
     return fail();
   const finance = await lockFinancePricingAcceptanceTerms(client, slug);

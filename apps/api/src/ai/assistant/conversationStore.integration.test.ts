@@ -245,8 +245,15 @@ describe.skipIf(!url)("assistant conversation store on PostgreSQL (VAY-2518)", (
         }),
       ).toEqual({ status: "not_found" });
       expect(await store.list(stranger, CONTRACT.sha256, { limit: 100 })).toEqual([]);
+      // exists() ignores the app (VAY-2524: an AI change's operation doesn't store it).
+      expect(await store.exists(stranger, conversationId)).toBe(stranger.app !== owner.app);
     }
+    expect(await store.exists(owner, conversationId)).toBe(true);
+    const person = { organizationId: org, propertyId: property, userId: user };
+    expect(await store.exists(person, conversationId)).toBe(true);
     expect(await read("not-a-uuid")).toBeUndefined();
+    expect(await store.exists(owner, "not-a-uuid")).toBe(false);
+    expect(await store.exists(owner, randomUUID())).toBe(false);
   });
 
   it("runs one turn per conversation at a time: a second tab or a double click is busy", async () => {
@@ -393,6 +400,8 @@ describe.skipIf(!url)("assistant conversation store on PostgreSQL (VAY-2518)", (
     expect((await read(long.conversationId))!.readOnlyReason).toBe("too_long");
     // A stored reason holds whether a model can be asked or not.
     expect((await store.read(owner, long.conversationId, null))!.readOnlyReason).toBe("too_long");
+    // Read-only, but still there: an answer to it still belongs to a chat the person can open.
+    expect(await store.exists(owner, long.conversationId)).toBe(true);
 
     const big = await start("Read me everything");
     for (let n = 0; n < 3; n += 1)
@@ -570,6 +579,8 @@ describe.skipIf(!url)("assistant conversation store on PostgreSQL (VAY-2518)", (
     ).toBeGreaterThanOrEqual(1);
     expect(await read(old.conversationId)).toBeUndefined();
     expect(await read(recent.conversationId)).toBeDefined();
+    expect(await store.exists(owner, old.conversationId)).toBe(false);
+    expect(await store.exists(owner, recent.conversationId)).toBe(true);
     const left = await admin.query<{ turns: number; messages: number }>(
       `SELECT (SELECT count(*)::int FROM platform.ai_conversation_turns WHERE conversation_id = $1::uuid) AS turns,
               (SELECT count(*)::int FROM platform.ai_conversation_messages WHERE conversation_id = $1::uuid) AS messages`,
