@@ -1354,5 +1354,7 @@
   "notifications.sync.synced": "Синхронизация с channel manager выполнена",
   "notifications.toast.syncDetail": "Наличие номеров и бронирования в других каналах могут быть неактуальны.",
   "notifications.toast.dismiss": "Закрыть уведомление",
-  "bookings.detail.notProvidedByChannel": "Не передано через {channel}"
+  "bookings.detail.notProvidedByChannel": "Не передано через {channel}",
+  "bookings.detail.phoneNotProvidedByBookingCom": "Не передано через Booking.com – см. экстранет Booking.com",
+  "bookings.detail.phoneNotProvidedByAirbnb": "Не передано через Airbnb – см. приложение Airbnb"
 }

@@ -1358,5 +1358,7 @@
   "notifications.sync.synced": "Channel manager sincronizado",
   "notifications.toast.syncDetail": "La disponibilidad y las reservas de sus otros canales pueden estar desactualizadas.",
   "notifications.toast.dismiss": "Descartar notificación",
-  "bookings.detail.notProvidedByChannel": "No proporcionado por {channel}"
+  "bookings.detail.notProvidedByChannel": "No proporcionado por {channel}",
+  "bookings.detail.phoneNotProvidedByBookingCom": "No proporcionado por Booking.com – consulta la extranet de Booking.com",
+  "bookings.detail.phoneNotProvidedByAirbnb": "No proporcionado por Airbnb – consulta la app de Airbnb"
 }

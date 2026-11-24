@@ -1984,7 +1984,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
   const channelKey = normalizeChannelKey(booking.channel);
   // VAY-2577: an email or phone the channel never sent says so, instead of a blank.
-  const contactNotProvided = notProvidedByChannel(booking.channel, t);
+  const emailNotProvided = notProvidedByChannel(booking.channel, "email", t);
+  const phoneNotProvided = notProvidedByChannel(booking.channel, "phone", t);
   const channelLabel =
     channelKey === "direct"
       ? t("calendar.channelDirect")
@@ -2897,8 +2898,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 </div>
                 <div>
                   <p className="text-xs text-gray-500">{t("bookings.detail.email")}</p>
-                  {!booking.guestEmail && contactNotProvided ? (
-                    <p className="text-gray-500">{contactNotProvided}</p>
+                  {!booking.guestEmail && emailNotProvided ? (
+                    <p className="text-gray-500">{emailNotProvided}</p>
                   ) : (
                     <p className="font-medium text-gray-900 break-words">{booking.guestEmail}</p>
                   )}
@@ -2906,8 +2907,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 {guestFieldStatus?.phone !== "off" && (
                   <div>
                     <p className="text-xs text-gray-500">{t("bookings.detail.phone")}</p>
-                    {!booking.guestPhone && contactNotProvided ? (
-                      <p className="text-gray-500">{contactNotProvided}</p>
+                    {!booking.guestPhone && phoneNotProvided ? (
+                      <p className="text-gray-500">{phoneNotProvided}</p>
                     ) : (
                       <p className="font-medium text-gray-900">{booking.guestPhone || "—"}</p>
                     )}

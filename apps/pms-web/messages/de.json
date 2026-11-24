@@ -423,6 +423,8 @@
   "bookings.detail.ratePlan": "Tarifplan",
   "bookings.detail.channelManaged": "Über Buchungskanal verwaltet",
   "bookings.detail.notProvidedByChannel": "Nicht von {channel} übermittelt",
+  "bookings.detail.phoneNotProvidedByBookingCom": "Nicht von Booking.com übermittelt – siehe Booking.com-Extranet",
+  "bookings.detail.phoneNotProvidedByAirbnb": "Nicht von Airbnb übermittelt – siehe Airbnb-App",
   "bookings.detail.grossAmount": "Bruttobetrag",
   "bookings.detail.stripeFee": "Stripe-Gebühr",
   "bookings.detail.vayadaCommission": "vayada-Provision",

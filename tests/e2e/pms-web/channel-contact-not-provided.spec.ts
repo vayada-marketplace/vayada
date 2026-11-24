@@ -12,6 +12,10 @@ import { watchPageHealth } from "../support/pageHealth";
 
 // VAY-2577: an email or phone a channel booking came without says which channel didn't send it,
 // as approved in Paper ("VAY-2577 Not provided by Airbnb / Booking.com", Vayada – Proposals).
+// Booking.com and Airbnb no longer send phones (Channex support, 2026-11-24), so a missing phone
+// there also says where the host still sees it.
+const BOOKING_COM_PHONE = "Not provided by Booking.com – see the Booking.com extranet";
+const AIRBNB_PHONE = "Not provided by Airbnb – see the Airbnb app";
 const reservationPath = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}`;
 
 async function mockReservation(page: Page, channel: string, contact: Record<string, unknown>) {
@@ -48,11 +52,24 @@ test("says which channel sent no email or phone on the booking (VAY-2577)", asyn
   await expect(main.getByText("Not provided by Airbnb", { exact: true })).toHaveCount(1);
   await expect(main.getByText("+49 151 2345 6789", { exact: true })).toBeVisible();
 
-  // Booking.com sends its masked address; a guest who gave no phone has none.
+  // Booking.com sends its masked address, and no phone: the host finds it in the extranet.
   await page.unroute(reservationPath);
   await openBooking(page, "booking_com", { email: "lena.h7k2@guest.booking.com", phone: null });
   await expect(main.getByText("lena.h7k2@guest.booking.com", { exact: true })).toBeVisible();
-  await expect(main.getByText("Not provided by Booking.com", { exact: true })).toHaveCount(1);
+  await expect(main.getByText(BOOKING_COM_PHONE, { exact: true })).toHaveCount(1);
+  await expect(main.getByText("Not provided by Booking.com", { exact: true })).toHaveCount(0);
+
+  // An Airbnb booking without either: the email stays plain, the phone points to the Airbnb app.
+  await page.unroute(reservationPath);
+  await openBooking(page, "airbnb", { email: null, phone: null });
+  await expect(main.getByText("Not provided by Airbnb", { exact: true })).toHaveCount(1);
+  await expect(main.getByText(AIRBNB_PHONE, { exact: true })).toHaveCount(1);
+
+  // Other channels keep the plain wording for a phone too.
+  await page.unroute(reservationPath);
+  await openBooking(page, "expedia", { email: "guest@example.com", phone: null });
+  await expect(main.getByText("Not provided by Expedia", { exact: true })).toHaveCount(1);
+  await expect(main.getByText(/ – see the /)).toHaveCount(0);
 
   // Contact the property may not see yet stays hidden, not "not provided".
   await page.unroute(reservationPath);
@@ -86,7 +103,7 @@ test("shows the booker's missing phone as not provided by the channel at check-i
   const form = main.getByRole("form", { name: "Ada Lovelace" });
   const phone = form.getByRole("textbox", { name: /^Phone/ });
   // Said under the field, in full; staff can still type the number the guest gives at the desk.
-  await expect(form.getByText("Not provided by Booking.com", { exact: true })).toBeVisible();
+  await expect(form.getByText(BOOKING_COM_PHONE, { exact: true })).toBeVisible();
   await expect(phone).toHaveValue("");
   await expect(phone).toBeEditable();
   await expect(form.getByRole("textbox", { name: /^Email/ })).toHaveValue("ada@example.com");
@@ -113,7 +130,7 @@ test("says so in the booker's locked phone when their guest record can't be reac
   const form = main.getByRole("form", { name: "Ada Lovelace" });
   await expect(form.getByRole("textbox", { name: /^Phone/ })).not.toBeEditable();
   // The lock line says what the channel didn't send instead of "From the booking".
-  await expect(form.getByText("Not provided by Booking.com", { exact: true })).toBeVisible();
+  await expect(form.getByText(BOOKING_COM_PHONE, { exact: true })).toBeVisible();
   await assertHealthy();
 });
 
@@ -145,6 +162,23 @@ test("names the channel on a guest who only booked through it (VAY-2577)", async
   await expect(data.getByText("Not provided by Airbnb", { exact: true })).toHaveCount(1);
   // Other details keep the plain wording.
   await expect(data.getByText("Not provided", { exact: true })).toHaveCount(4);
+  await assertHealthy();
+});
+
+test("says where to find the phone on a guest who only booked through Airbnb (VAY-2577)", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockGuests(page, {
+    email: null,
+    phone: null,
+    fields: { ...noEmail, phone: null },
+    stays: [airbnbStay],
+  });
+  await page.goto(`/guests/${TIMO}`);
+  const data = page.getByRole("region", { name: "Guest data" });
+  await expect(data.getByText("Not provided by Airbnb", { exact: true })).toHaveCount(1);
+  await expect(data.getByText(AIRBNB_PHONE, { exact: true })).toHaveCount(1);
   await assertHealthy();
 });
 

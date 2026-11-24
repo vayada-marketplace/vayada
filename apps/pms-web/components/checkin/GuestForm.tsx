@@ -8,6 +8,7 @@ import type { GuestDocumentType, GuestGender } from "@/services/bookings";
 import type { CheckinGuestField, CheckinSettings } from "@/services/settings";
 import { guestRegistrationStatus, type GuestRegistrationStatus } from "@/lib/checkin/registration";
 import type { CheckinRoom } from "@/lib/checkin/rooms";
+import type { ContactNotProvided } from "@/lib/bookings/channelLabel";
 import {
   BIRTH_DATE_PLACEHOLDER,
   birthDateInput,
@@ -95,7 +96,7 @@ export function GuestForm({
    * can't be reached. */
   lockedFields: ReadonlySet<GuestLockableField>;
   /** Shown under an email or phone the booking's channel didn't send (VAY-2577). */
-  notProvided?: string | null;
+  notProvided?: ContactNotProvided | null;
   canReadIdentity: boolean;
   /** The registration fields on record; the status uses them when the ID fields are hidden. */
   savedFilledFields: readonly string[];
@@ -291,7 +292,9 @@ export function GuestForm({
         const key = name as "email" | "phone" | "documentNumber";
         // VAY-2577: what the channel didn't send, under the field (a placeholder gets cut off).
         const channelHint =
-          (key === "email" || key === "phone") && notProvided && !initial[key] ? notProvided : null;
+          (key === "email" || key === "phone") && !initial[key]
+            ? (notProvided?.[key] ?? null)
+            : null;
         if ((key === "email" || key === "phone") && lockedFields.has(key))
           return lockedInput(label, required(name), values[key], channelHint ?? undefined);
         return (

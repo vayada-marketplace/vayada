@@ -348,7 +348,10 @@ export default function CheckInPage() {
 
   const ota = isChannelBooking(booking?.channel);
   // VAY-2577: the booker's empty email or phone says the channel didn't send it.
-  const bookerNotProvided = notProvidedByChannel(booking?.channel, t);
+  const bookerNotProvided = {
+    email: notProvidedByChannel(booking?.channel, "email", t),
+    phone: notProvidedByChannel(booking?.channel, "phone", t),
+  };
   const lockedFields = (guest: RegistrationGuest) => {
     const locked = new Set<GuestLockableField>();
     // The booker is edited through their guest record (VAY-2420), also on channel bookings (a

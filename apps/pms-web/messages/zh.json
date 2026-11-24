@@ -1354,5 +1354,7 @@
   "notifications.sync.synced": "渠道管理器已同步",
   "notifications.toast.syncDetail": "您其他渠道上的房态和预订可能不是最新的。",
   "notifications.toast.dismiss": "关闭通知",
-  "bookings.detail.notProvidedByChannel": "{channel} 未提供"
+  "bookings.detail.notProvidedByChannel": "{channel} 未提供",
+  "bookings.detail.phoneNotProvidedByBookingCom": "Booking.com 未提供 – 请在 Booking.com 管理后台（Extranet）查看",
+  "bookings.detail.phoneNotProvidedByAirbnb": "Airbnb 未提供 – 请在 Airbnb App 中查看"
 }
