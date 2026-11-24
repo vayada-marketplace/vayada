@@ -11,7 +11,13 @@ const SYMBOLS: Record<string, string> = {
   SGD: "S$",
 };
 
-export function formatCurrency(amount: number, currency: string, fractionDigits = 0): string {
+/** `locale` sets the digit grouping (the PMS language's, e.g. "de" → 1.167.958); none follows the browser. */
+export function formatCurrency(
+  amount: number,
+  currency: string,
+  fractionDigits = 0,
+  locale?: string,
+): string {
   const symbol = SYMBOLS[currency] || currency + " ";
-  return `${symbol}${amount.toLocaleString(undefined, { minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits })}`;
+  return `${symbol}${amount.toLocaleString(locale, { minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits })}`;
 }

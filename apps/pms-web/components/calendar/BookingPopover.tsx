@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import Link from "next/link";
 import { differenceInDays, parseISO } from "date-fns";
 import { bookingChannelLabel } from "@/lib/bookings/channelLabel";
+import { nightlyPriceSummary, priceDigits } from "@/lib/bookings/nightlyPrices";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { useTranslation } from "@/lib/i18n";
 import { useGuestStayTimes } from "@/lib/settings/useGuestStayTimes";
@@ -26,15 +27,15 @@ function useStayText() {
       month: "short",
       day: "numeric",
     });
-  const stay = (from: string, to: string) => {
-    const nights = differenceInDays(parseISO(to), parseISO(from));
-    return t("calendar.popover.nightsHeader", {
+  const nightCount = (nights: number) =>
+    `${nights} ${t(nights === 1 ? "common.night" : "common.nights")}`;
+  const stay = (from: string, to: string) =>
+    t("calendar.popover.nightsHeader", {
       from: day(from),
       to: day(to),
-      nights: `${nights} ${t(nights === 1 ? "common.night" : "common.nights")}`,
+      nights: nightCount(differenceInDays(parseISO(to), parseISO(from))),
     });
-  };
-  return { day, stay, t };
+  return { day, locale, nightCount, stay, t };
 }
 
 function Detail({ label, children }: { label: string; children: React.ReactNode }) {
@@ -63,12 +64,42 @@ export default function BookingPopover({
   onChangeRoom: () => void;
   onClose: () => void;
 }) {
-  const { day, stay, t } = useStayText();
+  const { day, locale, nightCount, stay, t } = useStayText();
+  const [showNights, setShowNights] = useState(false);
+  const nightsId = useId();
   // The check-in time guests see; staff who can't read it see the arrival day alone.
   const checkInTime = useGuestStayTimes()?.checkInTime ?? null;
   const guest = `${booking.guestFirstName} ${booking.guestLastName}`.trim();
   const value = booking.bookingValue;
   const amount = value ? Number(value.amountDecimal) : null;
+  // VAY-2576: the booked price per night, for the whole booking like its value.
+  const prices = nightlyPriceSummary(
+    value && amount !== null ? { amount, currency: value.currency } : null,
+    booking.stayNights ?? differenceInDays(parseISO(booking.checkOut), parseISO(booking.checkIn)),
+    booking.bookedNights,
+  );
+  const nights = prices?.nights ?? null;
+  // Grouped in the PMS language (Ø IDR 1.167.958 in German). The value and the list's total show alike.
+  const money = (price: number, digits: number) =>
+    formatCurrency(price, value?.currency ?? "", digits, locale);
+  const valueDigits = value && amount !== null ? priceDigits(value.currency, amount) : 0;
+  const nightDigits = priceDigits(
+    value?.currency ?? "",
+    prices?.feesAndExtras ?? 0,
+    ...(nights ?? []).map((night) => night.amount),
+  );
+  // "{amount} avg" / "Ø {amount}": the amount in bold, the word around it in grey.
+  const [averageBefore = "", averageAfter = ""] = t("calendar.popover.averagePrice", {
+    amount: "{amount}",
+  }).split("{amount}");
+  // A multi-room reservation's total covers all its rooms.
+  const forRooms = booking.numberOfRooms > 1 && (
+    <span className="block text-[11px] font-normal text-gray-500">
+      {t("calendar.popover.forRooms", {
+        rooms: t("calendar.bookingDetail.roomsCount", { count: booking.numberOfRooms }),
+      })}
+    </span>
+  );
 
   return (
     <CalendarPopover
@@ -79,33 +110,109 @@ export default function BookingPopover({
       badge={<PopoverBadge tone="blue">{t(STATUS_KEYS[booking.status])}</PopoverBadge>}
       onClose={onClose}
     >
-      <dl className="px-4 py-3 text-sm">
-        <Detail label={t("calendar.popover.guest")}>{guest}</Detail>
-        <Detail label={t("calendar.popover.channel")}>
-          {bookingChannelLabel(booking.channel, t)}
-        </Detail>
-        <Detail label={t("calendar.popover.value")}>
-          {value && amount !== null && Number.isFinite(amount)
-            ? formatCurrency(amount, value.currency, Number.isInteger(amount) ? 0 : 2)
-            : "—"}
-          {/* A multi-room reservation's total covers all its rooms. */}
-          {value && booking.numberOfRooms > 1 && (
-            <span className="block text-[11px] font-normal text-gray-500">
-              {t("calendar.popover.forRooms", {
-                rooms: t("calendar.bookingDetail.roomsCount", { count: booking.numberOfRooms }),
-              })}
+      <div className="px-4 py-3 text-sm">
+        <dl>
+          <Detail label={t("calendar.popover.guest")}>{guest}</Detail>
+          <Detail label={t("calendar.popover.channel")}>
+            {bookingChannelLabel(booking.channel, t)}
+          </Detail>
+          <Detail label={t("calendar.popover.value")}>
+            <span className="font-semibold">
+              {value && amount !== null && Number.isFinite(amount)
+                ? money(amount, valueDigits)
+                : "—"}
             </span>
-          )}
-        </Detail>
-        <Detail label={t("calendar.popover.arrival")}>
-          {checkInTime
-            ? t("calendar.popover.arrivalAt", {
-                date: day(booking.checkIn, true),
-                time: checkInTime,
-              })
-            : day(booking.checkIn, true)}
-        </Detail>
-      </dl>
+            {value && forRooms}
+          </Detail>
+          <Detail label={t("calendar.popover.pricePerNight")}>
+            {prices ? (
+              <span className="tabular-nums">
+                {averageBefore && (
+                  <span className="font-normal text-gray-500">{averageBefore}</span>
+                )}
+                {money(prices.average, priceDigits(prices.currency, prices.average))}
+                {averageAfter && <span className="font-normal text-gray-500">{averageAfter}</span>}
+              </span>
+            ) : (
+              "—"
+            )}
+            {prices && forRooms}
+          </Detail>
+        </dl>
+        {nights && (
+          <div className="flex justify-end">
+            <button
+              type="button"
+              aria-expanded={showNights}
+              aria-controls={showNights ? nightsId : undefined}
+              onClick={() => setShowNights((shown) => !shown)}
+              className="inline-flex min-h-[28px] items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700"
+            >
+              {t(
+                showNights
+                  ? "calendar.popover.hideNightlyRates"
+                  : "calendar.popover.showNightlyRates",
+              )}
+              <svg
+                aria-hidden="true"
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                viewBox="0 0 24 24"
+              >
+                <path d={showNights ? "M6 15l6-6 6 6" : "M6 9l6 6 6-6"} />
+              </svg>
+            </button>
+          </div>
+        )}
+        {prices && nights && showNights && (
+          <div
+            id={nightsId}
+            className="mt-1 mb-2 rounded-lg border border-gray-200 bg-slate-50 px-3 py-1.5 text-[13px] tabular-nums"
+          >
+            {/* Fourteen nights fit; a longer stay scrolls its nights (by keyboard too), and the total stays. */}
+            <ul
+              aria-label={t("calendar.popover.pricePerNight")}
+              tabIndex={nights.length > 14 ? 0 : undefined}
+              className="max-h-[19.25rem] overflow-y-auto"
+            >
+              {nights.map((night) => (
+                <li key={night.date} className="flex justify-between gap-3 py-px">
+                  <span className="text-gray-700">{day(night.date, true)}</span>
+                  <span className="font-medium text-gray-900">
+                    {money(night.amount, nightDigits)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {prices.feesAndExtras !== null && (
+              <div className="flex justify-between gap-3 py-px">
+                <span className="text-gray-700">{t("calendar.popover.feesAndExtras")}</span>
+                <span className="font-medium text-gray-900">
+                  {money(prices.feesAndExtras, nightDigits)}
+                </span>
+              </div>
+            )}
+            <div className="mt-1 flex justify-between gap-3 border-t border-gray-200 pt-2 pb-0.5 font-semibold text-gray-900">
+              <span>{`${t("calendar.popover.total")} · ${nightCount(nights.length)}`}</span>
+              <span>{money(prices.total, valueDigits)}</span>
+            </div>
+          </div>
+        )}
+        <dl>
+          <Detail label={t("calendar.popover.arrival")}>
+            {checkInTime
+              ? t("calendar.popover.arrivalAt", {
+                  date: day(booking.checkIn, true),
+                  time: checkInTime,
+                })
+              : day(booking.checkIn, true)}
+          </Detail>
+        </dl>
+      </div>
       <div className="px-4 pb-3 flex gap-2">
         <Link
           href={`/bookings/${booking.id}`}
