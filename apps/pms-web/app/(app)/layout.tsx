@@ -10,6 +10,11 @@ import HotelAccountAgreementsBanner from "@vayada/product-onboarding/HotelAccoun
 import { hotelAccountAgreementsApi } from "@/services/api/hotelAccountAgreementsClient";
 import { authService } from "@/services/auth";
 import { resolvePmsSetupGuard } from "@/lib/utils/sharedSetupGuard";
+import {
+  chooseLinkedPmsProperty,
+  linkedPmsPropertyId,
+  withoutLinkedPmsProperty,
+} from "@/lib/utils/linkedProperty";
 import { pmsSetupExitPropertyId } from "@vayada/product-onboarding";
 import { useTranslation } from "@/lib/i18n";
 import { PmsAccessProvider } from "@/lib/settings/PmsAccessContext";
@@ -44,6 +49,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       if (!authorized || !authService.isHotelAdmin()) {
         router.replace(loginPathForCurrentRoute("/dashboard"));
         return;
+      }
+      // VAY-2099: a link that names its hotel (the booking request email) opens that hotel.
+      const linkedPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      if (linkedPmsPropertyId(linkedPath)) {
+        await chooseLinkedPmsProperty(linkedPath);
+        if (cancelled) return;
+        window.history.replaceState(null, "", withoutLinkedPmsProperty(linkedPath));
       }
       let liveAccess: PmsSelfAccess;
       try {

@@ -766,8 +766,9 @@ describe("booking lifecycle email jobs", () => {
       /Accept or reject it in your PMS by Wed, 2 Sept? 2026, 18:00 GMT\+8\. If you don't answer by then, the request expires and the rooms are released\./,
     );
     expect(payload.text).toContain("\n\nProperty: Hotel Alpenrose\n\n");
+    // The link names the hotel too, so a login with several hotels opens this one.
     expect(payload.pmsBookingPath).toBe(
-      `/bookings/${encodeURIComponent(input.booking.guestBookingId)}`,
+      `/bookings/${encodeURIComponent(input.booking.guestBookingId)}?property=${input.booking.propertyId}`,
     );
 
     // An older target request: only the expiry the pending-booking sweep reads.

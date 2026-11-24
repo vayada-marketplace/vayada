@@ -82,11 +82,17 @@ describe("booking email delivery", () => {
   );
 
   // VAY-2099: a booking request's hotel email links to the booking in the PMS, when the PMS origin
-  // is known and the job names a well-formed booking page.
+  // is known and the job names a well-formed booking page: with its hotel, or without one for jobs
+  // queued before the link named it.
+  const bookingPath = "/bookings/3f2b6c1e-0000-4000-8000-000000000001";
+  const withHotel = `${bookingPath}?property=93000000-0000-4000-8000-000000000001`;
   it.each([
-    ["https://next-pms.vayada.com", "/bookings/3f2b6c1e-0000-4000-8000-000000000001", true],
-    [undefined, "/bookings/3f2b6c1e-0000-4000-8000-000000000001", false],
+    ["https://next-pms.vayada.com", withHotel, true],
+    ["https://next-pms.vayada.com", bookingPath, true],
+    [undefined, withHotel, false],
     ["https://next-pms.vayada.com", "https://elsewhere.example/bookings/x", false],
+    ["https://next-pms.vayada.com", `${withHotel}&next=https://elsewhere.example`, false],
+    ["https://next-pms.vayada.com", `${bookingPath}?returnTo=//elsewhere.example`, false],
     ["https://next-pms.vayada.com", undefined, false],
   ])("links a request to the PMS (origin %s, path %s)", async (origin, path, linked) => {
     const pool = {
@@ -135,7 +141,7 @@ describe("booking email delivery", () => {
     expect(send).toHaveBeenCalledWith(
       expect.objectContaining({
         text: linked
-          ? "A new booking request requires review.\n\nOpen the request in your PMS: https://next-pms.vayada.com/bookings/3f2b6c1e-0000-4000-8000-000000000001"
+          ? `A new booking request requires review.\n\nOpen the request in your PMS: https://next-pms.vayada.com${path}`
           : "A new booking request requires review.",
       }),
     );

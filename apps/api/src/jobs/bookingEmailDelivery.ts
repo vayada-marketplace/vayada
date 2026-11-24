@@ -220,10 +220,15 @@ async function claimBookingEmailJob(
   return job;
 }
 
-/** VAY-2099: `${origin}/bookings/<id>` for a job that names its PMS booking page; nothing without
- * an origin (local runs) or a well-formed path. */
+/** VAY-2099: `${origin}/bookings/<id>?property=<id>` for a job that names its PMS booking page
+ * (jobs queued before the hotel was added have no `?property=`); nothing without an origin (local
+ * runs) or a well-formed path. */
 function pmsBookingLink(origin: string | undefined, path: unknown): string | null {
-  if (!origin || typeof path !== "string" || !/^\/bookings\/[A-Za-z0-9_-]+$/.test(path))
+  if (
+    !origin ||
+    typeof path !== "string" ||
+    !/^\/bookings\/[A-Za-z0-9_-]+(\?property=[A-Za-z0-9_-]+)?$/.test(path)
+  )
     return null;
   try {
     return new URL(path, origin).toString();

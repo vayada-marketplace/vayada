@@ -10,6 +10,7 @@ import {
   type AuthOrganizationSelectionResponse,
 } from "@/services/auth/sessionStore";
 import { resolvePmsSetupGuard } from "@/lib/utils/sharedSetupGuard";
+import { chooseLinkedPmsProperty } from "@/lib/utils/linkedProperty";
 import { useTranslation } from "@/lib/i18n";
 
 // Booking Admin hosts hotel sign-up and setup (VAY-2261).
@@ -57,6 +58,9 @@ export function LoginContent({
       router.push(returnTo);
       return;
     }
+    // VAY-2099: a link that names its hotel opens it, also for a login with no hotel chosen yet
+    // (which would otherwise land on the hotel picker and lose the link).
+    await chooseLinkedPmsProperty(returnTo);
     const decision = await resolvePmsSetupGuard(returnTo);
     if (decision.action === "redirect_to_setup") {
       window.location.replace(decision.redirectPath);
