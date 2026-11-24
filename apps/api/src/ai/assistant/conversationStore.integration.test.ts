@@ -362,6 +362,12 @@ describe.skipIf(!url)("assistant conversation store on PostgreSQL (VAY-2518)", (
     await store.endTurn(turnId, { status: "done" });
     expect(await ask(NEW_CONTRACT)).toEqual({ status: "read_only", reason: "contract_changed" });
     expect((await read(conversationId, NEW_CONTRACT))!.readOnlyReason).toBe("contract_changed");
+    // No model to ask (AI off): nothing to compare with, so the chat isn't "changed".
+    expect((await store.read(owner, conversationId, null))!.readOnlyReason).toBeNull();
+    expect(
+      (await store.list(owner, null, { limit: 100 })).find((chat) => chat.id === conversationId)
+        ?.readOnlyReason,
+    ).toBeNull();
     expect(
       (await store.list(owner, NEW_CONTRACT.sha256, { limit: 100 })).find(
         (chat) => chat.id === conversationId,
@@ -392,6 +398,8 @@ describe.skipIf(!url)("assistant conversation store on PostgreSQL (VAY-2518)", (
       });
     expect(await continueLong()).toEqual({ status: "read_only", reason: "too_long" });
     expect((await read(long.conversationId))!.readOnlyReason).toBe("too_long");
+    // A stored reason holds whether a model can be asked or not.
+    expect((await store.read(owner, long.conversationId, null))!.readOnlyReason).toBe("too_long");
     // Read-only, but still there: an answer to it still belongs to a chat the person can open.
     expect(await store.exists(owner, long.conversationId)).toBe(true);
 

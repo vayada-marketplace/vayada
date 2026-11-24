@@ -109,15 +109,18 @@ export type ConversationStore = {
    * turn as stopped; that task sees it at its next heartbeat. False when nothing was running.
    */
   stopTurn(owner: ConversationOwner, conversationId: string, turnId?: string): Promise<boolean>;
-  /** `contractSha256`: the request contract this user's next question would use. */
+  /**
+   * `contractSha256`: the request contract this user's next question would use; null when no
+   * model can be asked (AI off), then only a stored reason (too long) makes a chat read-only.
+   */
   read(
     owner: ConversationOwner,
     conversationId: string,
-    contractSha256: string,
+    contractSha256: string | null,
   ): Promise<ConversationView | undefined>;
   list(
     owner: ConversationOwner,
-    contractSha256: string,
+    contractSha256: string | null,
     page: { limit: number; before?: { lastActivityAt: string; id: string } },
   ): Promise<ConversationSummary[]>;
   /**
@@ -529,7 +532,7 @@ export function createPgConversationStore(config: { pool: pg.Pool }): Conversati
       return rows.map((row) => ({
         id: row.id,
         readOnlyReason: readOnlyReason(row, contractSha256),
-        preview: preview(row.first),
+        preview: chatPreview(row.first),
         createdAt: row.created_at,
         lastActivityAt: row.last_activity_at,
       }));
@@ -583,9 +586,10 @@ function ownerValues(owner: ConversationOwner): string[] {
 
 function readOnlyReason(
   conversation: { contract_sha256: string; read_only_reason: "too_long" | null },
-  contractSha256: string,
+  contractSha256: string | null,
 ): ReadOnlyReason | null {
   if (conversation.read_only_reason) return conversation.read_only_reason;
+  if (contractSha256 === null) return null;
   return conversation.contract_sha256 === contractSha256 ? null : "contract_changed";
 }
 
@@ -738,7 +742,11 @@ function checkTurnEnd(end: TurnEnd): void {
     throw new Error("A turn's end reason is a short snake_case code");
 }
 
-function preview(message: ChatMessage | null): string {
+/**
+ * The chat list's line: the person's first question. vayada's note sent with it (today's date, the
+ * property; a text part marked `providerOptions.vayada.context`) is left out (VAY-2519).
+ */
+export function chatPreview(message: ChatMessage | null): string {
   const content = message?.content;
   const text =
     typeof content === "string"
@@ -746,10 +754,14 @@ function preview(message: ChatMessage | null): string {
       : Array.isArray(content)
         ? content
             .map((part: unknown) =>
-              isPlainObject(part) && part["type"] === "text" && typeof part["text"] === "string"
+              isPlainObject(part) &&
+              part["type"] === "text" &&
+              typeof part["text"] === "string" &&
+              !isContextNote(part)
                 ? part["text"]
                 : "",
             )
+            .filter(Boolean)
             .join(" ")
         : "";
   // By code point, so an emoji is never cut in half.
@@ -757,6 +769,15 @@ function preview(message: ChatMessage | null): string {
   return characters.length > PREVIEW_CHARS
     ? `${characters.slice(0, PREVIEW_CHARS - 1).join("")}…`
     : characters.join("");
+}
+
+function isContextNote(part: Record<string, unknown>): boolean {
+  const options = part["providerOptions"];
+  return (
+    isPlainObject(options) &&
+    isPlainObject(options["vayada"]) &&
+    options["vayada"]["context"] === true
+  );
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

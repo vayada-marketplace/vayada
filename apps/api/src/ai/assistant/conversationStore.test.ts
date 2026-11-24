@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ChatHistoryError,
   type ChatMessage,
+  chatPreview,
   checkMessage,
   MAX_MESSAGE_BYTES,
   unansweredResult,
@@ -150,5 +151,32 @@ describe("chat messages the store accepts (VAY-2518)", () => {
       type: "error-json",
       value: { error: "not_run", reason: "step_limit" },
     });
+  });
+});
+
+describe("chatPreview", () => {
+  it("shows the person's question without vayada's note (VAY-2519)", () => {
+    const note = {
+      type: "text",
+      text: "Note from vayada (not written by the person): today is Wednesday, 9 December 2026. ".repeat(
+        3,
+      ),
+      providerOptions: { vayada: { context: true } },
+    };
+    expect(
+      chatPreview({
+        role: "user",
+        content: [note, { type: "text", text: "What arrives\n today?" }],
+      }),
+    ).toBe("What arrives today?");
+    expect(chatPreview({ role: "user", content: "Plain question" })).toBe("Plain question");
+    expect(chatPreview(null)).toBe("");
+  });
+
+  it("cuts a long question at 120 characters without splitting an emoji", () => {
+    const long = `${"a".repeat(118)}😀😀😀`;
+    const shown = chatPreview({ role: "user", content: [{ type: "text", text: long }] });
+    expect(Array.from(shown)).toHaveLength(120);
+    expect(shown.endsWith("😀…")).toBe(true);
   });
 });

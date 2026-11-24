@@ -407,7 +407,10 @@ import { createAiChangesRuntime } from "./ai/changes/runtime.js";
 import { createPgAiBudgetAdmin } from "./ai/usage/budgetAdmin.js";
 import { createPgAiBudget } from "./ai/usage/budgetGate.js";
 import { createPgAiActionLog } from "./ai/actionLog/actionLog.js";
-import { createPgConversationStore } from "./ai/assistant/conversationStore.js";
+import {
+  createPgConversationStore,
+  type ConversationStore,
+} from "./ai/assistant/conversationStore.js";
 import { createAiProvider, enabledAiProvidersFromEnv } from "./ai/provider/aiProvider.js";
 import { createAiSpendAlert } from "./ai/usage/spendAlert.js";
 import {
@@ -477,7 +480,7 @@ const aiBudgetAdmin = createPgAiBudgetAdmin({
 const apiAuth = buildAuthOptions(config.auth);
 // VAY-2524: AI changes (Ask first): the record of every change, the one executor, its recovery job
 // and the person's Yes/No routes. Off unless AI_CHANGES_ENABLED; an account without an AI budget
-// can't answer a change either.
+// can't answer a change either, nor anyone whose chat that asked is gone.
 const aiChanges =
   config.aiChangesEnabled && apiAuth
     ? (() => {
@@ -495,6 +498,10 @@ const aiChanges =
           ),
           aiEnabled: async (organizationId) =>
             (await budget.monthStatus(organizationId)).limitMicroUsd > 0,
+          // The assistant's chats, built below and read when a change is answered. The return type
+          // is written out: the assistant gets this runtime's proposer, so TypeScript can't infer
+          // the assistant's type and this one's from each other.
+          chats: (): Pick<ConversationStore, "exists"> | undefined => assistant?.store,
           allowedOrigins: config.authSession?.authAllowedOrigins ?? [],
           backgroundWorkersEnabled: config.backgroundWorkersEnabled,
         });

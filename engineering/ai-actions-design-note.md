@@ -433,8 +433,8 @@ running with an expired lease --> resumed by the recovery job (same steps, same 
 - Ask-first rows expire after 15 minutes, or at the route preview's own expiry if sooner
   (host-action previews last 10 minutes). A preview is never refreshed behind a card; a new preview
   means a new card.
-- A Yes is refused, and the row closed, when the connection was revoked, the conversation closed
-  or an AI kill switch is on.
+- A Yes is refused, and the row closed, when the connection was revoked, the conversation was
+  deleted (or the assistant is off) or an AI kill switch is on.
 
 **Built (VAY-2524 PR1): the record.** `platform.ai_operations` (migration 0553) and its store
 ([`apps/api/src/ai/executor/operationStore.ts`](../apps/api/src/ai/executor/operationStore.ts)):
@@ -546,7 +546,10 @@ ask me again"). A second click, another tab or a resumed turn joins the same run
   travel in the Authorization header, which another site can't send, so a CSRF cookie adds
   nothing. Same user and selected account; the person's permissions and property now; AI on for
   the account (budget above 0, else closed `ai_switched_off`); the conversation or connection still
-  there (else `revoked`; until VAY-2518 and VAY-2528 bring them, MCP never and in-app always); and
+  there (else `revoked`): an in-app change needs its chat, still the person's (VAY-2518's
+  `conversationStore.exists`; with the assistant off there is no chat, so switch the assistant
+  on before AI changes), and no MCP change can be answered until VAY-2528 checks connections. A
+  check that can't answer is a 503, not a `revoked`; and
   the card's digest unchanged (else closed `changed`). Then the one executor runs it; a double
   click or a second tab joins the run. A person's edit meanwhile is refused by the route's own
   revision check and shows as "changed".
@@ -557,7 +560,7 @@ ask me again"). A second click, another tab or a resumed turn joins the same run
   last message. An ask the card could never show (a last night before the first) is refused as
   invalid input when the AI asks.
 - Card states: `needs_answer`, `running`, `done`, `declined`, `expired`, `changed`, `not_allowed`,
-  `stopped` (AI off or connection gone), `failed` (nothing changed) and `unsure` (gave up, outcome
+  `stopped` (AI off, or the chat or connection gone), `failed` (nothing changed) and `unsure` (gave up, outcome
   unknown).
 
 **MCP (D4a):** every Ask-first action, for every client, is answered on a **one-tap vayada page**:

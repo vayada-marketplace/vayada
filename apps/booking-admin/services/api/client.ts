@@ -257,6 +257,48 @@ export class ApiClient {
   async delete<T>(endpoint: string, options?: RequestInit): Promise<T> {
     return this.request<T>(endpoint, { ...options, method: "DELETE" });
   }
+
+  /**
+   * A POST whose response is handed back as it is, unread (VAY-2519: the assistant's answer
+   * streams as server-sent events). Same sign-in and session recovery as `post`; the caller reads
+   * the status and the body.
+   */
+  async stream(endpoint: string, data: unknown, signal?: AbortSignal): Promise<Response> {
+    const url = `${this.baseURL}${endpoint}`;
+    const send = (token: string | null) =>
+      fetch(url, {
+        method: "POST",
+        signal,
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(data),
+      });
+    const token = getAuthBearerToken();
+    const response = await send(token);
+    if (response.status !== 401) return response;
+    if (isAuthKitLoginEnabled() && this.sessionRecoveryHandlers) {
+      return recoverUnauthorizedResponse({
+        response,
+        failedToken: token,
+        getToken: getAuthBearerToken,
+        handlers: this.sessionRecoveryHandlers,
+        retry: send,
+      });
+    }
+    // Its detail says whether the session expired (the login page then says so).
+    const detail = await response
+      .clone()
+      .json()
+      .then(
+        (body: ApiError) => body,
+        () => ({}),
+      );
+    this.handleUnauthorized(new ApiErrorResponse(401, detail));
+    return response;
+  }
 }
 
 export const apiClient = new ApiClient();

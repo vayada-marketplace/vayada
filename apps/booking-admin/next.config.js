@@ -48,7 +48,7 @@ const nextConfig = {
     ...(authPublicHostname ? [authPublicHostname] : []),
   ],
   output: "standalone",
-  transpilePackages: ["@vayada/feature-hub", "@vayada/web-security"],
+  transpilePackages: ["@vayada/assistant-ui", "@vayada/feature-hub", "@vayada/web-security"],
   turbopack: {
     root: path.join(__dirname, "../.."),
   },

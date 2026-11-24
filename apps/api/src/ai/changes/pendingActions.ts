@@ -49,7 +49,7 @@ export type PendingActionState =
   | "changed"
   /** The person may not make this change (now). */
   | "not_allowed"
-  /** AI was switched off for the account, or the connection that asked was removed. */
+  /** AI was switched off for the account, or the chat or connection that asked is gone. */
   | "stopped"
   /** vayada tried and the change did not happen. */
   | "failed"
@@ -324,7 +324,7 @@ export async function registerPendingActionRoutes(
 
   /**
    * A waiting change as it stands now: closed if it can't be answered any more (expired, AI off,
-   * the connection gone, a record gone), with the refusal a Yes would get.
+   * the chat or connection gone, a record gone), with the refusal a Yes would get.
    */
   async function settle(
     context: RequestContext,
