@@ -51,7 +51,7 @@ keys; runtime policy infers no hidden hierarchy.
 | Billing/Plan          | manage: `finance.billing.manage`                                                                                                        |
 | Guest contact fields  | view: `pms.guest_contact.read`                                                                                                          |
 | Booking Dashboard     | view: `booking.analytics.read`                                                                                                          |
-| Booking Design Studio | view: `booking.design.read`; edit: + `booking.design.manage`                                                                            |
+| Booking Design Studio | view: `booking.design.read`; edit: + `booking.design.manage`, which also uploads and sets the cover and gallery (VAY-2610)              |
 | Booking Flow          | view: `booking.flow.read`; edit: + `booking.flow.manage`                                                                                |
 | Booking Settings      | view: `booking.settings.read`; edit: + `booking.settings.manage`                                                                        |
 

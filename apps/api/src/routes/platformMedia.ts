@@ -22,7 +22,11 @@ import {
   normalizePlatformMediaPathPrefix,
   PROPERTY_MEDIA_PUBLIC_VARIANT_MAX_DIMENSIONS,
 } from "../platform/propertyMediaVariantContract.js";
-import { enforceRoutePolicy } from "./policy.js";
+import {
+  enforceBookingDesignPhotoAccess,
+  enforceRoutePolicy,
+  firstHeldPermission,
+} from "./policy.js";
 import { sendPmsOperationsError, toPmsOperationsAccessError } from "./pmsOperations.js";
 
 export const PLATFORM_MEDIA_UPLOAD_CONTRACT_VERSION = "platform-media-upload.v1" as const;
@@ -518,6 +522,12 @@ const publicImageVariants = ["original_safe", "large", "thumbnail", "blur_previe
 const providerOriginalVariant = ["provider_original"] as const;
 const defaultMaxImagePixels = 60_000_000;
 const platformAdminMediaPurposes = new Set<PlatformMediaPurpose>(["property.hero_image"]);
+// The cover and gallery belong to the booking page design, so Design edit access (a Hotel Admin)
+// may upload them too (VAY-2610). The logo and room photos stay with hotel setup.
+const designPhotoPurposes = new Set<PlatformMediaPurpose>([
+  "property.hero_image",
+  "property.gallery_image",
+]);
 
 export function isAutoApprovedPublicMediaPurpose(purpose: PlatformMediaPurpose): boolean {
   return (
@@ -2101,18 +2111,22 @@ function authorizeMediaResource(
     }
     return { ok: true, context };
   }
-  return {
-    ok: true,
-    context: enforceRoutePolicy(request, {
-      permission: permissionForResource(policy),
-      resource: {
-        product: resource.product,
-        resourceType: resource.resourceType,
-        resourceId: resource.resourceId,
-        allowedRelationships: policy.allowedRelationships,
-      },
-    }),
-  };
+  const permission = designPhotoPurposes.has(policy.purpose)
+    ? firstHeldPermission(request, [permissionForResource(policy), "booking.design.manage"])
+    : permissionForResource(policy);
+  const context = enforceRoutePolicy(request, {
+    permission,
+    resource: {
+      product: resource.product,
+      resourceType: resource.resourceType,
+      resourceId: resource.resourceId,
+      allowedRelationships: policy.allowedRelationships,
+    },
+  });
+  if (permission === "booking.design.manage") {
+    enforceBookingDesignPhotoAccess(request, resource.resourceId);
+  }
+  return { ok: true, context };
 }
 
 function permissionForResource(policy: PlatformMediaPurposePolicy): PermissionKey {

@@ -3,8 +3,13 @@ import {
   type IdentityRepository,
   type LinkedResource,
   type PermissionKey,
+  type ProductEntitlement,
   type VerifiedSession,
 } from "@vayada/backend-auth";
+import type {
+  MembershipPropertyScope,
+  PropertyAccessRepository,
+} from "@vayada/backend-authorization";
 import { injectJson } from "@vayada/backend-test";
 import type {
   PropertyMediaCommandError,
@@ -128,6 +133,105 @@ describe("property media assignment routes", () => {
         ],
       }),
     );
+  });
+
+  it("lets Design edit access (a Hotel Admin) replace the cover and gallery, not the logo (VAY-2610)", async () => {
+    const replacePresentation = vi.fn(async () => successResponse());
+    const assignLogo = vi.fn(async () => successResponse());
+    const designEdit: PermissionKey[] = ["booking.design.read", "booking.design.manage"];
+    // What Design Studio needs: the property's booking hotel with an active booking engine.
+    const bookingHotel: LinkedResource = {
+      product: "booking",
+      resourceType: "booking_hotel",
+      resourceId: propertyId,
+      relationship: "owner",
+      status: "active",
+    };
+    const bookingEngine: ProductEntitlement = {
+      product: "booking",
+      key: "booking-engine",
+      status: "active",
+      resource: { product: "booking", resourceType: "booking_hotel", resourceId: propertyId },
+    };
+    const hotelAdmin = {
+      roleKey: "hotel_manager",
+      permissions: designEdit,
+      linkedResources: [propertyLink("owner", "active"), bookingHotel],
+      entitlements: [bookingEngine],
+    };
+    const presentation = (target: FastifyInstance, key: string) =>
+      target.inject({
+        method: "PUT",
+        url: `/api/hotel-setup/properties/${propertyId}/media/presentation`,
+        headers: { authorization: "Bearer valid-token", "idempotency-key": key },
+        payload: {
+          expectedProfileRevision: 1,
+          assignments: [{ mediaObjectId: mediaId, role: "cover", altText: null, sortOrder: 0 }],
+        },
+      });
+    app = buildPropertyMediaApp({
+      ...hotelAdmin,
+      repository: commandRepository({ replacePresentation, assignLogo }),
+    });
+
+    expect((await presentation(app, "design-presentation")).statusCode).toBe(200);
+    expect(replacePresentation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId,
+        propertyId,
+        idempotencyKey: "design-presentation",
+      }),
+    );
+    const logo = await app.inject({
+      method: "PUT",
+      url: `/api/hotel-setup/properties/${propertyId}/media/logo`,
+      headers: { authorization: "Bearer valid-token", "idempotency-key": "design-logo" },
+      payload: { expectedProfileRevision: 1, assignment: null },
+    });
+    expect(logo.statusCode).toBe(403);
+    expect(logo.json()).toMatchObject({ code: "missing_permission" });
+    expect(assignLogo).not.toHaveBeenCalled();
+    await app.close();
+
+    const scopeWith = (
+      override: (scope: MembershipPropertyScope) => MembershipPropertyScope,
+    ): PropertyAccessRepository => ({
+      async findMembershipPropertyScope(context) {
+        const scope = await agencyPropertyAccessRepository.findMembershipPropertyScope(context);
+        return scope && override(scope);
+      },
+    });
+    for (const denied of [
+      { permissions: ["booking.design.read"] as PermissionKey[] },
+      { permissions: ["booking.settings.manage"] as PermissionKey[] },
+      { linkedResources: [bookingHotel] },
+      { linkedResources: [propertyLink("owner", "active")] },
+      { entitlements: [] },
+      { entitlements: [{ ...bookingEngine, status: "suspended" as const }] },
+      {
+        propertyAccessRepository: scopeWith((scope) => ({
+          ...scope,
+          productAccess: { pms: true, booking: false },
+        })),
+      },
+      {
+        propertyAccessRepository: scopeWith((scope) => ({
+          ...scope,
+          mode: "assigned",
+          assignedPropertyIds: [mediaId],
+        })),
+      },
+    ]) {
+      app = buildPropertyMediaApp({
+        ...hotelAdmin,
+        ...denied,
+        repository: commandRepository({ replacePresentation }),
+      });
+      expect((await presentation(app, "denied-presentation")).statusCode).toBe(403);
+      await app.close();
+    }
+    app = undefined;
+    expect(replacePresentation).toHaveBeenCalledTimes(1);
   });
 
   it("normalizes an uppercase property UUID before resource authorization", async () => {
@@ -403,6 +507,8 @@ function buildPropertyMediaApp(options: {
   permissions?: PermissionKey[];
   linkedResources?: LinkedResource[];
   organizationKind?: "hotel_group" | "platform";
+  propertyAccessRepository?: PropertyAccessRepository;
+  entitlements?: ProductEntitlement[];
 }): FastifyInstance {
   return buildApp({
     logger: false,
@@ -411,10 +517,15 @@ function buildPropertyMediaApp(options: {
     auth: {
       verifier: createFakeVerifier(new Map([["valid-token", session]])),
       repository: identityRepository(options),
-      propertyAccessRepository: agencyPropertyAccessRepository,
+      propertyAccessRepository: options.propertyAccessRepository ?? agencyPropertyAccessRepository,
       rolePermissionRepository: {
         async findPermissionsForRole() {
           return options.permissions ?? ["hotel_catalog.setup.manage"];
+        },
+      },
+      entitlementRepository: {
+        async findEntitlementsForContext() {
+          return options.entitlements ?? [];
         },
       },
     },

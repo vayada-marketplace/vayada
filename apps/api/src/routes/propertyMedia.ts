@@ -15,7 +15,11 @@ import {
   propertyMediaCommandResultStatus,
   type PropertyMediaCommandRepository,
 } from "../domains/propertyMediaCommandRepository.js";
-import { enforceRoutePolicy } from "./policy.js";
+import {
+  enforceBookingDesignPhotoAccess,
+  enforceRoutePolicy,
+  firstHeldPermission,
+} from "./policy.js";
 
 type PropertyMediaParams = { propertyId?: string };
 type AuthorizedRequest = {
@@ -35,8 +39,9 @@ export async function registerPropertyMediaRoutes(
 ): Promise<void> {
   const authorized = new WeakMap<FastifyRequest, AuthorizedRequest>();
   const onRequestFor =
-    (ownerOnly: boolean) => async (request: FastifyRequest, reply: FastifyReply) => {
-      const access = authorizePropertyMediaRequest(request, reply, ownerOnly);
+    (ownerOnly: boolean, designPhotos = false) =>
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const access = authorizePropertyMediaRequest(request, reply, ownerOnly, designPhotos);
       if (!access) return;
       if (ownerOnly) {
         if (
@@ -53,7 +58,9 @@ export async function registerPropertyMediaRoutes(
       }
       authorized.set(request, access);
     };
-  const onRequest = onRequestFor(false);
+  // For the cover and gallery (VAY-2610): they belong to the booking page design, so Design edit
+  // access (a Hotel Admin) may change them too. The logo stays with hotel setup.
+  const onRequest = onRequestFor(false, true);
   const logoOnRequest = onRequestFor(!!options.logoAssignments);
 
   app.put(
@@ -103,11 +110,16 @@ function authorizePropertyMediaRequest(
   request: FastifyRequest,
   reply: FastifyReply,
   ownerOnly = false,
+  designPhotos = false,
 ): AuthorizedRequest | null {
+  const permission = designPhotos
+    ? firstHeldPermission(request, [
+        PROPERTY_MEDIA_AUTHORIZATION.permission,
+        "booking.design.manage",
+      ])
+    : PROPERTY_MEDIA_AUTHORIZATION.permission;
   try {
-    const baseContext = enforceRoutePolicy(request, {
-      permission: PROPERTY_MEDIA_AUTHORIZATION.permission,
-    });
+    const baseContext = enforceRoutePolicy(request, { permission });
     if (baseContext.selectedOrganization.kind !== "hotel_group") {
       reply
         .status(403)
@@ -127,7 +139,7 @@ function authorizePropertyMediaRequest(
     }
     const propertyId = rawPropertyId.toLowerCase();
     const context = enforceRoutePolicy(request, {
-      permission: PROPERTY_MEDIA_AUTHORIZATION.permission,
+      permission,
       resource: {
         product: PROPERTY_MEDIA_AUTHORIZATION.product,
         resourceType: PROPERTY_MEDIA_AUTHORIZATION.resourceType,
@@ -137,6 +149,8 @@ function authorizePropertyMediaRequest(
           : PROPERTY_MEDIA_AUTHORIZATION.allowedRelationships,
       },
     });
+    if (permission === "booking.design.manage")
+      enforceBookingDesignPhotoAccess(request, propertyId);
     return { propertyId, context };
   } catch (error) {
     if (error instanceof UnauthorizedError) {
@@ -146,9 +160,7 @@ function authorizePropertyMediaRequest(
       return null;
     }
     if (error instanceof AuthorizationError) {
-      const hasPermission = request.authContext?.membership.permissions.includes(
-        PROPERTY_MEDIA_AUTHORIZATION.permission,
-      );
+      const hasPermission = request.authContext?.membership.permissions.includes(permission);
       reply
         .status(403)
         .send(

@@ -45,6 +45,34 @@ export function enforceRoutePolicy(
   return enforceRouteRequirements(context, policy);
 }
 
+/** For a route that accepts any of several permissions: the first one the caller holds, else
+ * the first one, which enforceRoutePolicy then refuses as usual. */
+export function firstHeldPermission(
+  request: FastifyRequest,
+  permissions: readonly [PermissionKey, ...PermissionKey[]],
+): PermissionKey {
+  const held = request.authContext?.membership.permissions ?? [];
+  return permissions.find((permission) => held.includes(permission)) ?? permissions[0];
+}
+
+/** A cover or gallery change through Design edit access (VAY-2610) also needs what Design Studio
+ * needs: the property's booking hotel, with an active booking engine. */
+export function enforceBookingDesignPhotoAccess(
+  request: FastifyRequest,
+  propertyId: string,
+): ReturnType<typeof requireAuthContext> {
+  const resource = {
+    product: "booking",
+    resourceType: "booking_hotel",
+    resourceId: propertyId,
+  } as const;
+  return enforceRoutePolicy(request, {
+    permission: "booking.design.manage",
+    entitlement: { product: "booking", key: "booking-engine", resource },
+    resource: { ...resource, allowedRelationships: ["owner", "operator"] },
+  });
+}
+
 export async function enforcePropertyRoutePolicy(
   request: FastifyRequest,
   policy: RouteAuthorizationPolicy & { property: PropertyAccessRequirement },

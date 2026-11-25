@@ -2666,6 +2666,79 @@ describe("platform media upload routes", () => {
     expect((response.body as ErrorResponse).code).toBe("unsupported_media_type");
   });
 
+  it("lets Design edit access (a Hotel Admin) upload the cover and gallery, not the logo (VAY-2610)", async () => {
+    const propertyId = "00000000-0000-4000-8000-000000000040";
+    const hotelAdmin = {
+      permissions: ["booking.design.read", "booking.design.manage"] as PermissionKey[],
+      // What Design Studio needs: the property's booking hotel with an active booking engine.
+      resources: [
+        {
+          product: "hotel_catalog" as const,
+          resourceType: "property" as const,
+          resourceId: propertyId,
+          relationship: "owner" as const,
+        },
+        {
+          product: "booking" as const,
+          resourceType: "booking_hotel" as const,
+          resourceId: propertyId,
+          relationship: "owner" as const,
+        },
+      ],
+      entitlements: [
+        {
+          product: "booking",
+          key: "booking-engine",
+          status: "active",
+          resource: { product: "booking", resourceType: "booking_hotel", resourceId: propertyId },
+        } satisfies ProductEntitlement,
+      ],
+    };
+    const create = (target: ReturnType<typeof buildMediaApp>, purpose: string) =>
+      injectJson(target, {
+        method: "POST",
+        url: propertyGalleryCase.request.path,
+        headers: { authorization: "Bearer valid-token" },
+        payload: { ...propertyGalleryCase.request.body, purpose },
+      });
+    const app = buildMediaApp(hotelAdmin);
+    for (const purpose of ["property.hero_image", "property.gallery_image"] as const) {
+      const created = await create(app, purpose);
+      expect(created.statusCode).toBe(201);
+      const session = created.body as MediaCreateResponse;
+      const finalize = await injectJson(app, {
+        method: "POST",
+        url: `/api/media/upload-sessions/${session.uploadSession.sessionId}/finalize`,
+        headers: { authorization: "Bearer valid-token" },
+        payload: {
+          files: propertyGalleryCase.finalize!.files.map((file) => ({
+            ...file,
+            uploadTargetId: session.uploadTargets[0]!.uploadTargetId,
+          })),
+        },
+      });
+      expect(finalize.statusCode).toBe(propertyGalleryCase.expected.finalizeStatus);
+      expectPrivateHotelMediaResponse(
+        (finalize.body as PrivateHotelMediaFinalizeResponse).mediaObject,
+        purpose,
+      );
+    }
+    expect((await create(app, "property.logo")).statusCode).toBe(403);
+    await app.close();
+
+    // Design view only, Booking settings only, no booking engine, or no booking hotel: refused.
+    for (const denied of [
+      { permissions: ["booking.design.read"] as PermissionKey[] },
+      { permissions: ["booking.settings.manage"] as PermissionKey[] },
+      { entitlements: [] },
+      { resources: hotelAdmin.resources.slice(0, 1) },
+    ]) {
+      const deniedApp = buildMediaApp({ ...hotelAdmin, ...denied });
+      expect((await create(deniedApp, "property.gallery_image")).statusCode).toBe(403);
+      await deniedApp.close();
+    }
+  });
+
   it("allows any signed-in account to upload only their own profile image", async () => {
     const app = buildMediaApp({ permissions: [], resources: [] });
     const payload = {
