@@ -831,6 +831,9 @@ const bookingCustomDomainRepository: BookingCustomDomainRepository = {
   async isHostnameSaved() {
     return false;
   },
+  async listVerifiedHostnames() {
+    return ["book.alpenrose.example"];
+  },
   async projectPublicProfile() {},
   async recordCheckResult(propertyId, domain, status) {
     if (propertyId !== "f6853000-0000-0000-0000-000000000001") return null;
@@ -5517,6 +5520,34 @@ describe("vayada-api", () => {
     }
   });
 
+  it("saves nothing when the current domain can't be read (VAY-2579)", async () => {
+    const upserts: string[] = [];
+    app = buildAuthenticatedApp({
+      customDomainRepository: {
+        ...bookingCustomDomainRepository,
+        async findByPropertyId() {
+          throw new Error("connection reset");
+        },
+        async upsertForPropertyId(propertyId, domain) {
+          upserts.push(domain);
+          return bookingCustomDomainRepository.upsertForPropertyId(propertyId, domain);
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+      headers: { authorization: "Bearer valid-token" },
+      payload: { domain: "book.alpenrose.example" },
+    });
+
+    // A verified domain saved again must stay verified; resetting it would need the TXT record.
+    expect(response.statusCode).toBe(500);
+    expect(response.body).toMatchObject({ code: "read_model_unavailable" });
+    expect(upserts).toEqual([]);
+  });
+
   it("says a domain another hotel connected is taken, with a conflict (VAY-2579)", async () => {
     app = buildAuthenticatedApp({
       customDomainRepository: {
@@ -5711,6 +5742,33 @@ describe("vayada-api", () => {
       };
       return { checked, verifier };
     };
+
+    it("lists no ownership record for a verified domain (VAY-2579)", async () => {
+      const { verifier } = verifierAnswering({
+        status: "verified",
+        issue: null,
+        recordHost: null,
+        errors: [],
+      });
+      verifier.proofRecord = () => ({
+        name: "_vayada.book.alpenrose.example",
+        value: "vayada-domain-verification=0123456789abcdef0123456789abcdef",
+      });
+      // The shared repository holds book.alpenrose.example as verified, as Tiga and Aether are.
+      app = buildAuthenticatedApp({ customDomainVerifier: verifier });
+
+      const stored = await injectJson(app, {
+        method: "GET",
+        url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+        headers: { authorization: "Bearer valid-token" },
+      });
+
+      expect(stored.statusCode).toBe(200);
+      expect(stored.body).toMatchObject({ status: "verified" });
+      expect((stored.body as { dnsRecords: Array<{ type: string }> }).dnsRecords).toEqual([
+        expect.objectContaining({ type: "CNAME", status: "verified" }),
+      ]);
+    });
 
     it("names the ownership record in every answer and marks it after a check (VAY-2579)", async () => {
       const proof = {
@@ -5997,15 +6055,16 @@ describe("vayada-api", () => {
       expect(refreshes).toEqual([]);
     });
 
-    it("keeps a ready domain pending until Vayada routes it to the new booking page", async () => {
+    it("keeps a proven domain pending while it still goes to the old booking frontend", async () => {
       let writes = 0;
       const { verifier } = verifierAnswering({
         status: "pending",
         issue: { code: "routing_pending", foundTarget: null },
-        recordHost: null,
+        recordHost: "book",
         errors: [
-          "book.alpenrose.example is ready; Vayada still has to route it to the booking page.",
+          "book.alpenrose.example is ready; Vayada still has to move it to the new booking page.",
         ],
+        proofStatus: "verified",
       });
       app = buildAuthenticatedApp({
         customDomainRepository: {

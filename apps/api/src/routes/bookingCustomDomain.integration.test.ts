@@ -105,6 +105,19 @@ describe.skipIf(!TEST_DATABASE_URL)("booking custom-domain checks in PostgreSQL 
     expect(await readModelDomain()).toBeNull();
   });
 
+  it("lists only verified domains for the Maps key's website list (VAY-2579)", async () => {
+    expect(await repository.listVerifiedHostnames()).not.toContain(hostname);
+    await repository.recordCheckResult(propertyId, hostname, "failed");
+    expect(await repository.listVerifiedHostnames()).not.toContain(hostname);
+
+    await repository.recordCheckResult(propertyId, hostname, "verified");
+    expect(await repository.listVerifiedHostnames()).toContain(hostname);
+
+    // A domain removed from the hotel leaves the list.
+    await repository.deleteForPropertyId(propertyId);
+    expect(await repository.listVerifiedHostnames()).not.toContain(hostname);
+  });
+
   it("ignores a check for a hostname the hotel has replaced meanwhile", async () => {
     await repository.upsertForPropertyId(propertyId, "www.vay2568.example");
 

@@ -1326,14 +1326,17 @@ describe("api config", () => {
     ).toBeUndefined();
   });
 
-  it("reads the custom domains routed to the new booking frontend with their properties", () => {
-    expect(loadConfig({}).bookingCustomDomainRoutes).toEqual(new Map());
+  it("reads the hotel domains still on the old booking frontend (VAY-2579)", () => {
+    expect(loadConfig({}).bookingCustomDomainOldFrontendHosts).toBeUndefined();
+    expect(
+      loadConfig({ BOOKING_CUSTOM_DOMAIN_OLD_FRONTEND_HOSTS: " none " })
+        .bookingCustomDomainOldFrontendHosts,
+    ).toEqual(new Set());
     expect(
       loadConfig({
-        BOOKING_CUSTOM_DOMAIN_ROUTES:
-          " WWW.Booking.Hotel.example =AAAA0000-0000-4000-8000-000000000001,bad,x=y=z,",
-      }).bookingCustomDomainRoutes,
-    ).toEqual(new Map([["www.booking.hotel.example", "aaaa0000-0000-4000-8000-000000000001"]]));
+        BOOKING_CUSTOM_DOMAIN_OLD_FRONTEND_HOSTS: " WWW.Old.example ,www.other.example.,, ",
+      }).bookingCustomDomainOldFrontendHosts,
+    ).toEqual(new Set(["www.old.example", "www.other.example"]));
   });
 
   it("reads the domain ownership secret and refuses a short one (VAY-2579)", () => {

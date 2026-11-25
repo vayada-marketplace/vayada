@@ -12,6 +12,7 @@ export type BookingCustomDomainIssueCode =
   | "dns_record_missing"
   | "dns_record_wrong_target"
   | "certificate_pending"
+  // VAY-2579: proven, but the load balancer still sends the domain to the old booking frontend.
   | "routing_pending"
   | "hostname_rejected"
   | "check_unavailable"
@@ -38,11 +39,7 @@ export type BookingCustomDomainCheckResult = {
 
 export type BookingCustomDomainVerifier = {
   check(hostname: string, propertyId: string): Promise<BookingCustomDomainCheckResult>;
-  /**
-   * The TXT record this property must add to prove the hostname is its own (VAY-2579); null when
-   * none is needed: no proof secret configured, or platform already routes the hostname for this
-   * property (ops confirmed those by hand).
-   */
+  /** The TXT record this property must add to prove the hostname is its own (VAY-2579). */
   proofRecord(hostname: string, propertyId: string): BookingCustomDomainProofRecord | null;
   /**
    * Deletes a Cloudflare hostname that a check registered (`registeredHostnameId`), once its domain
@@ -222,31 +219,37 @@ export function createCustomDomainDns(
 }
 
 /**
- * Cloudflare decides: a hostname with an active certificate is verified, but only for the
- * property the load balancer routes it for (`routes`, from platform's next_booking_custom_domains).
- * A verified domain becomes the page's address and booking-web redirects guests to it, so it must
- * reach the new booking frontend; and Vayada naming the property proves whose domain it is (an
- * old-system hotel's hostname is already active in Cloudflare). Otherwise the hotel's DNS explains
- * why. The hostname is only registered with Cloudflare once its CNAME is right, so typos and
- * abandoned domains leave nothing behind.
+ * A hotel's domain is verified once both are true (VAY-2579):
+ *   - its Cloudflare for SaaS hostname is active (the hotel's CNAME is right and the certificate issued);
+ *   - the domain carries this property's TXT record (`proofRecord`), so it is the hotel's own. An
+ *     old-system hotel's hostname is active in Cloudflare already, so it needs the record too.
+ * Otherwise the hotel's DNS explains why. The hostname is only registered with Cloudflare once its
+ * CNAME and TXT record are right, so typos, abandoned and other hotels' domains leave nothing behind.
+ * A verified domain becomes the page's address (booking-web redirects guests to it), so it must reach
+ * the new booking frontend. The load balancer's catch-all sends every domain it doesn't name there
+ * (vayada-platform, VAY-2579 step 4); the old system's hotel domains still have rules of their own to
+ * the old frontend, and platform passes that list (`oldFrontendHosts`). Such a domain stays
+ * `routing_pending` even when proven, until ops moves it.
  *
- * VAY-2579: with a proof secret, a hostname platform doesn't route for this property must also carry
- * this property's TXT record (`proofRecord`) before it is registered or counts as ready. An old-system
- * hotel's hostname is active in Cloudflare already, so it needs the record too.
+ * Without the proof secret or that list, no check verifies anything (it fails as unavailable); the
+ * Cloudflare cleanup of removed domains (`release`) still works.
  */
 export function createBookingCustomDomainVerifier(dependencies: {
   cloudflare: CloudflareCustomHostnames;
   dns: CustomDomainDns;
-  /** hostname → the property id it is routed for. */
-  routes: ReadonlyMap<string, string>;
-  /** Keys each property's ownership code; without it no TXT record is asked for (today's rule). */
+  /** Keys each property's ownership code. Never change it: every hotel's code changes with it. */
   proofSecret?: string;
+  /** Hotel domains the load balancer still sends to the OLD booking frontend (platform's
+   * legacy_booking_custom_domains); they are never verified here. */
+  oldFrontendHosts?: ReadonlySet<string>;
+  /** Called when a check verifies a domain (the Maps key's website list follows verified domains). */
+  onVerified?: (hostname: string) => void;
 }): BookingCustomDomainVerifier {
   const active = (custom: CloudflareCustomHostname) =>
     custom.status === "active" && custom.sslStatus === "active";
   const proofRecord = (hostname: string, propertyId: string) => {
+    if (!dependencies.proofSecret) return null;
     const property = propertyId.toLowerCase();
-    if (!dependencies.proofSecret || dependencies.routes.get(hostname) === property) return null;
     const code = createHmac("sha256", dependencies.proofSecret)
       .update(`${property}\n${hostname}`)
       .digest("hex")
@@ -288,30 +291,41 @@ export function createBookingCustomDomainVerifier(dependencies: {
       proofStatus: "failed",
     };
   };
-  const ready = (
+  const verified = (
     hostname: string,
-    propertyId: string,
     recordHost: string | null,
-  ): BookingCustomDomainCheckResult =>
-    dependencies.routes.get(hostname) === propertyId.toLowerCase()
-      ? { status: "verified", issue: null, recordHost: null, errors: [] }
-      : {
-          status: "pending",
-          issue: { code: "routing_pending", foundTarget: null },
-          recordHost,
-          errors: [`${hostname} is ready; Vayada still has to route it to the booking page.`],
-        };
+  ): BookingCustomDomainCheckResult => {
+    if (dependencies.oldFrontendHosts?.has(hostname)) {
+      return {
+        status: "pending",
+        issue: { code: "routing_pending", foundTarget: null },
+        recordHost,
+        errors: [`${hostname} is ready; Vayada still has to move it to the new booking page.`],
+        proofStatus: "verified",
+      };
+    }
+    dependencies.onVerified?.(hostname);
+    return {
+      status: "verified",
+      issue: null,
+      recordHost: null,
+      errors: [],
+      proofStatus: "verified",
+    };
+  };
 
   return {
     async check(hostname, propertyId) {
       const proof = proofRecord(hostname, propertyId);
-      const proven = proof ? ({ proofStatus: "verified" } as const) : {};
+      if (!proof || !dependencies.oldFrontendHosts) {
+        throw new Error(
+          "Custom-domain verification needs BOOKING_CUSTOM_DOMAIN_PROOF_SECRET and BOOKING_CUSTOM_DOMAIN_OLD_FRONTEND_HOSTS.",
+        );
+      }
       const found = await dependencies.cloudflare.find(hostname);
       if (found && active(found)) {
-        if (!proof) return ready(hostname, propertyId, null);
         const recordHost = await dependencies.dns.recordHost(hostname);
-        const failure = await ownershipFailure(proof, recordHost);
-        return failure ?? { ...ready(hostname, propertyId, recordHost), ...proven };
+        return (await ownershipFailure(proof, recordHost)) ?? verified(hostname, recordHost);
       }
 
       const [target, recordHost] = await Promise.all([
@@ -339,10 +353,8 @@ export function createBookingCustomDomainVerifier(dependencies: {
         };
       }
 
-      if (proof) {
-        const failure = await ownershipFailure(proof, recordHost);
-        if (failure) return failure;
-      }
+      const failure = await ownershipFailure(proof, recordHost);
+      if (failure) return failure;
 
       // Only a hostname this check registered is recorded, and only such a one is ever deleted: the
       // old booking-api's hostnames share the zone, and its pages may still use them.
@@ -364,7 +376,7 @@ export function createBookingCustomDomainVerifier(dependencies: {
             ...custom.errors,
           ],
           ...registered,
-          ...proven,
+          proofStatus: "verified",
         };
       }
       // The record is right now: validation that timed out, expired or lost the CNAME starts over.
@@ -376,16 +388,14 @@ export function createBookingCustomDomainVerifier(dependencies: {
       ) {
         custom = await dependencies.cloudflare.restartValidation(custom.id);
       }
-      if (active(custom)) {
-        return { ...ready(hostname, propertyId, recordHost), ...registered, ...proven };
-      }
+      if (active(custom)) return { ...verified(hostname, recordHost), ...registered };
       return {
         status: "pending",
         issue: { code: "certificate_pending", foundTarget: null },
         recordHost,
         errors: custom.errors,
         ...registered,
-        ...proven,
+        proofStatus: "verified",
       };
     },
     proofRecord,

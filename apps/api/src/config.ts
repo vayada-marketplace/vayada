@@ -267,12 +267,13 @@ export type ApiConfig = {
   /** VAY-2568: Cloudflare for SaaS (zone vayada.com) for hotels' own booking domains; without it
    * a domain check answers "could not be checked". The token needs SSL and Certificates: Edit. */
   bookingCustomDomainCloudflare?: { apiToken: string; zoneId: string };
-  /** VAY-2568: hotel domains the ALB sends to the new booking frontend, each with the property it
-   * belongs to (platform's next_booking_custom_domains). Only these can be verified. */
-  bookingCustomDomainRoutes: ReadonlyMap<string, string>;
   /** VAY-2579: keys each hotel's domain ownership code (the TXT record `_vayada.<domain>`). Without
-   * it, no record is asked for and only the routed domains above can be verified. */
+   * it, no domain is verified. */
   bookingCustomDomainProofSecret?: string;
+  /** VAY-2579: hotel domains the load balancer still sends to the OLD booking frontend (platform's
+   * legacy_booking_custom_domains, comma-separated; "none" when there are none). Never verified here;
+   * without the list, no domain is verified. */
+  bookingCustomDomainOldFrontendHosts?: ReadonlySet<string>;
   /** VAY-2589: the browser Maps key (projects/<project>/locations/global/keys/<id>) and the JSON key of
    * the service account that may read and update it. With both, next-api adds hotels' booking domains
    * to the key's website list; without them, nothing is added. */
@@ -375,14 +376,18 @@ function readGoogleMapsKeyEditor(env: NodeJS.ProcessEnv): ApiConfig["googleMapsK
   return keyName && credentialsJson ? { keyName, credentialsJson } : undefined;
 }
 
-/** "host=propertyId,host=propertyId"; Terraform validates it, so a malformed entry is skipped. */
-function readBookingCustomDomainRoutes(env: NodeJS.ProcessEnv): ReadonlyMap<string, string> {
-  const routes = new Map<string, string>();
-  for (const entry of (readOptionalEnv(env, "BOOKING_CUSTOM_DOMAIN_ROUTES") ?? "").split(",")) {
-    const [host, propertyId, ...rest] = entry.split("=").map((part) => part.trim().toLowerCase());
-    if (host && propertyId && rest.length === 0) routes.set(host.replace(/\.$/, ""), propertyId);
-  }
-  return routes;
+function readBookingCustomDomainOldFrontendHosts(
+  env: NodeJS.ProcessEnv,
+): ReadonlySet<string> | undefined {
+  const value = readOptionalEnv(env, "BOOKING_CUSTOM_DOMAIN_OLD_FRONTEND_HOSTS");
+  if (!value) return undefined;
+  if (value.toLowerCase() === "none") return new Set();
+  return new Set(
+    value
+      .split(",")
+      .map((host) => host.trim().toLowerCase().replace(/\.$/, ""))
+      .filter(Boolean),
+  );
 }
 
 /** At least 32 characters (`openssl rand -hex 32` gives 64): a short one would make codes guessable. */
@@ -1613,8 +1618,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     hotelFirstRunEnabled: readBooleanEnv(env, "HOTEL_FIRST_RUN_ENABLED"),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
     bookingCustomDomainCloudflare: readBookingCustomDomainCloudflare(env),
-    bookingCustomDomainRoutes: readBookingCustomDomainRoutes(env),
     bookingCustomDomainProofSecret: readBookingCustomDomainProofSecret(env),
+    bookingCustomDomainOldFrontendHosts: readBookingCustomDomainOldFrontendHosts(env),
     googleMapsKeyEditor: readGoogleMapsKeyEditor(env),
     platformMediaServing,
     platformMediaCleanupEnabled: readBooleanEnv(env, "PLATFORM_MEDIA_CLEANUP_ENABLED", true),
