@@ -71,6 +71,8 @@ export type BookingCustomDomainRepository = {
   ): Promise<BookingCustomDomainState | null>;
   /** Whether any property has this hostname saved (VAY-2580). */
   isHostnameSaved(hostname: string): Promise<boolean>;
+  /** Every verified hotel domain (VAY-2579: the Maps key's website list follows these). */
+  listVerifiedHostnames(): Promise<string[]>;
   /** Re-projects the public profile read model, which carries the verified domain. */
   projectPublicProfile(propertyId: string): Promise<void>;
   close?(): Promise<void>;
@@ -335,6 +337,13 @@ export function createTargetBookingCustomDomainRepository(config: {
       );
       return result.rows.length > 0;
     },
+    async listVerifiedHostnames() {
+      const result = await pool.query<{ hostname: string }>(
+        `SELECT hostname FROM hotel_catalog.property_domains
+         WHERE verification_status = 'verified' ORDER BY hostname`,
+      );
+      return result.rows.map((row) => row.hostname);
+    },
     async projectPublicProfile(propertyId) {
       await projectPropertyPublicProfile(pool, { propertyId });
     },
@@ -353,11 +362,14 @@ export async function registerBookingCustomDomainRoutes(
   options: BookingCustomDomainRouteOptions = {},
 ): Promise<void> {
   const authorizedPropertyIds = new WeakMap<FastifyRequest, string>();
-  // VAY-2579: the answer names the TXT record that proves the domain, when one is needed.
+  // VAY-2579: the answer names the TXT record that proves the domain while it isn't verified yet. A
+  // verified domain needs nothing more (and those platform used to route by hand never had one).
   const respond = (state: BookingCustomDomainState) =>
     toBookingCustomDomainResponse(
       state,
-      state.domain ? (options.verifier?.proofRecord(state.domain, state.propertyId) ?? null) : null,
+      state.domain && state.verificationStatus !== "verified"
+        ? (options.verifier?.proofRecord(state.domain, state.propertyId) ?? null)
+        : null,
     );
   // A live page shows the verified domain (and booking-web redirects to it), so every change of
   // the verified domain republishes it. Fire and forget, like settings saves; failures are logged.
@@ -475,8 +487,20 @@ export async function registerBookingCustomDomainRoutes(
         });
       }
 
-      // Saving the verified domain again keeps it verified (and on the live page) as it is.
-      const previous = await repository.findByPropertyId(propertyId).catch(() => null);
+      // Saving the verified domain again keeps it verified (and on the live page) as it is. If the
+      // current domain can't be read, nothing is saved: a re-save would otherwise reset a verified
+      // domain, which then needs the ownership record (VAY-2579).
+      let previous: BookingCustomDomainState | null;
+      try {
+        previous = await repository.findByPropertyId(propertyId);
+      } catch {
+        return sendBookingCustomDomainError(reply, {
+          statusCode: 500,
+          code: "read_model_unavailable",
+          category: "read_model",
+          message: "Booking custom-domain status is unavailable.",
+        });
+      }
       if (previous?.domain === parsed.value.domain && previous.verificationStatus === "verified") {
         return respond({ ...previous, hotelId });
       }
@@ -573,11 +597,11 @@ export async function registerBookingCustomDomainRoutes(
       }
 
       if (result.issue?.code === "routing_pending") {
-        // Vayada's turn: platform's next_booking_custom_domains needs "<domain>" for this property.
+        // Vayada's turn: the domain is proven, but platform still sends it to the old booking
+        // frontend (legacy_booking_custom_domains); remove it there to move the hotel.
         request.log.warn(
-          // proven: the hotel's ownership TXT record is there (VAY-2579), so ops may route it.
-          { propertyId, domain, proven: result.proofStatus === "verified" },
-          "Custom domain is ready in Cloudflare but not routed to the new booking frontend",
+          { propertyId, domain },
+          "Custom domain is proven but still routed to the old booking frontend",
         );
       }
 

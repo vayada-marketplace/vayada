@@ -610,12 +610,17 @@ const routePmsInventoryPublicOfferProjector = pmsInventoryPublicOfferProjector
 const bookingCustomDomainRepository = createTargetBookingCustomDomainRepository({
   connectionString: targetDatabaseUrl,
 });
+// VAY-2579: a domain is verified on Cloudflare plus the hotel's TXT record, and never while the load
+// balancer still sends it to the old booking frontend. Without the proof secret or that list, checks
+// verify nothing ("could not be checked"); removing a domain still deletes its Cloudflare hostname.
+let mapsKeyWebsitesSoon = () => {};
 const bookingCustomDomainVerifier = config.bookingCustomDomainCloudflare
   ? createBookingCustomDomainVerifier({
       cloudflare: createCloudflareCustomHostnames(config.bookingCustomDomainCloudflare),
       dns: createCustomDomainDns(),
-      routes: config.bookingCustomDomainRoutes,
       proofSecret: config.bookingCustomDomainProofSecret,
+      oldFrontendHosts: config.bookingCustomDomainOldFrontendHosts,
+      onVerified: () => mapsKeyWebsitesSoon(),
     })
   : undefined;
 
@@ -3384,14 +3389,22 @@ app.addHook("onClose", async () => {
   await aiBudgetPool.end();
 });
 
+if (
+  config.bookingCustomDomainCloudflare &&
+  (!config.bookingCustomDomainProofSecret || !config.bookingCustomDomainOldFrontendHosts)
+) {
+  app.log.warn(
+    "Custom-domain checks verify nothing: BOOKING_CUSTOM_DOMAIN_PROOF_SECRET or BOOKING_CUSTOM_DOMAIN_OLD_FRONTEND_HOSTS is missing (VAY-2579)",
+  );
+}
+
 // VAY-2589: Google refuses the booking page's Maps key on any website missing from its list, so the
-// hotel domains routed to the booking page (BOOKING_CUSTOM_DOMAIN_ROUTES) go onto it, a minute after
-// start and then hourly. A domain is routed before its hotel can verify it (when VAY-2579 drops the
-// per-domain routes, this must read the verified domains instead).
-const stopMapsKeyWebsitesSync = config.googleMapsKeyEditor
+// verified hotel domains (VAY-2579) go onto it: a minute after start, hourly, and a few seconds after
+// a check verifies one.
+const mapsKeyWebsitesSync = config.googleMapsKeyEditor
   ? startMapsKeyWebsitesSync({
       websites: createGoogleMapsKeyWebsites(config.googleMapsKeyEditor),
-      hosts: [...config.bookingCustomDomainRoutes.keys()],
+      hosts: () => bookingCustomDomainRepository.listVerifiedHostnames(),
       report: (outcome) => {
         if ("error" in outcome) {
           app.log.warn({ err: outcome.error }, "Maps key website list check failed");
@@ -3404,8 +3417,9 @@ const stopMapsKeyWebsitesSync = config.googleMapsKeyEditor
       },
     })
   : undefined;
+if (mapsKeyWebsitesSync) mapsKeyWebsitesSoon = mapsKeyWebsitesSync.runSoon;
 app.addHook("onClose", async () => {
-  stopMapsKeyWebsitesSync?.();
+  mapsKeyWebsitesSync?.stop();
 });
 
 // VAY-2304: the sweep behind the after-commit re-publish. It re-publishes every hotel whose prices

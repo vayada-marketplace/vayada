@@ -301,7 +301,7 @@ type BookingAdminCustomDomainResponse = {
       | "dns_record_missing"
       | "dns_record_wrong_target"
       | "certificate_pending"
-      | "routing_pending"
+      | "routing_pending" // VAY-2579: proven, but still routed to the old booking frontend
       | "hostname_rejected"
       | "check_unavailable"
       | "ownership_record_missing" // VAY-2579
@@ -327,26 +327,37 @@ Validation and behavior:
   model through platform/domain verification, hotel catalog, and distribution
   projections.
 - `DELETE` disconnects the domain and returns `204`.
-- `POST …/check` (VAY-2568) checks a domain that is not verified yet:
-  - A hostname already active in Cloudflare for SaaS (zone vayada.com, `CLOUDFLARE_API_TOKEN` +
-    `CLOUDFLARE_ZONE_ID`) is verified only for the property that `BOOKING_CUSTOM_DOMAIN_ROUTES` names
-    for it. That list is platform's `next_booking_custom_domains`, the domains the ALB sends to the
-    new booking frontend. Any other property gets `routing_pending`.
-  - Verifying makes the domain canonical, re-projects the public profile and republishes a live page.
-  - Otherwise the hotel's CNAME decides: missing or wrong → `failed` with the reason. If it is right,
-    the hostname is registered in Cloudflare (as the old booking-api did) and stays `pending` while
-    the certificate is issued. Validation that timed out, expired or lost the CNAME is restarted.
-  - Ownership proof (VAY-2579), with `BOOKING_CUSTOM_DOMAIN_PROOF_SECRET` set: a domain that
-    `BOOKING_CUSTOM_DOMAIN_ROUTES` doesn't route for this property must also have the TXT record
-    `_vayada.<domain>` = `vayada-domain-verification=<code>`. The code is the first 32 hex characters
-    of HMAC-SHA256(secret, `<property id>\n<domain>`), so it never changes for a property and domain;
-    no column stores it. The check reads it after a correct CNAME and before registering the hostname
-    in Cloudflare. An already active hostname (such as an old-system hotel's) needs it too. Without
-    it the check answers `failed` with `ownership_record_missing`, or `ownership_record_mismatch` when
-    only other well-formed codes are there (a mistyped one counts as missing). The secret must never
-    change: every hotel's code would change with it. A proven domain then continues as before (`routing_pending` until
-    platform routes it). Domains routed for the property, and every domain when the secret is unset,
-    need no TXT record.
+- `POST …/check` (VAY-2568, VAY-2579) checks a domain that is not verified yet. A domain is verified
+  once its Cloudflare for SaaS hostname (zone vayada.com, `CLOUDFLARE_API_TOKEN` +
+  `CLOUDFLARE_ZONE_ID`) is active **and** it carries this property's TXT record:
+  - The record is `_vayada.<domain>` = `vayada-domain-verification=<code>`. The code is the first 32
+    hex characters of HMAC-SHA256(`BOOKING_CUSTOM_DOMAIN_PROOF_SECRET`, `<property id>\n<domain>`),
+    so it never changes for a property and domain; no column stores it. The secret must never
+    change: every hotel's code would change with it.
+  - A hostname that is already active (such as an old-system hotel's) is verified only with the
+    record. Without it the check answers `failed` with `ownership_record_missing`, or
+    `ownership_record_mismatch` when only other well-formed codes are there (a mistyped one counts as
+    missing).
+  - Otherwise the hotel's CNAME is checked first: missing or wrong → `failed` with the reason. Then
+    the TXT record. Only when both are right is the hostname registered in Cloudflare (as the old
+    booking-api did); it stays `pending` while the certificate is issued. Validation that timed out,
+    expired or lost the CNAME is restarted.
+  - Verifying makes the domain canonical, re-projects the public profile and republishes a live page,
+    and booking-web then redirects guests to it. The load balancer sends every domain no rule names to
+    the new booking frontend (vayada-platform, VAY-2579 step 4), so no per-domain route is needed and
+    `BOOKING_CUSTOM_DOMAIN_ROUTES` is no longer read. The old system's hotel domains still have rules
+    to the old frontend; platform passes them as `BOOKING_CUSTOM_DOMAIN_OLD_FRONTEND_HOSTS` (`none`
+    when empty), and such a domain stays `pending` with `routing_pending` even when proven, until ops
+    removes it there.
+  - Without `BOOKING_CUSTOM_DOMAIN_PROOF_SECRET` or `BOOKING_CUSTOM_DOMAIN_OLD_FRONTEND_HOSTS` no
+    check verifies anything (`check_unavailable`, with a warning at startup); removing a domain still
+    deletes the Cloudflare hostname its check registered.
+  - Answers list the TXT record next to the CNAME while the domain isn't verified; a verified domain
+    lists only the CNAME.
+  - The verified domains (`listVerifiedHostnames`) are added to the Maps browser key's website list
+    (it only ever adds): hourly, and a few seconds after a check verifies one.
+  - `PUT` answers `500` without saving when the current domain can't be read, so a verified domain
+    is never reset by a re-save.
   - A verified domain is never re-checked.
   - Without Cloudflare settings, or when DNS/Cloudflare fail, it answers `check_unavailable` and
     stores nothing.

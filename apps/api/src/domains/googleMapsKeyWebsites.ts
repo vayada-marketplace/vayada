@@ -183,25 +183,33 @@ export function createGoogleMapsKeyWebsites(config: {
 }
 
 /**
- * Puts every hotel domain the booking page is served on (platform's next_booking_custom_domains) onto
- * the Maps key's website list a minute after start and then hourly; once they are all there, it is one
- * read. A domain is routed before its hotel can verify it, so it is listed by then; this also covers
- * the hotels connected before VAY-2589 and retries a failed addition. Returns the stop function, which
- * leaves a pass in flight to finish on its own (adding is safe to repeat).
+ * Adds the hotel domains `hosts` reads on each pass to the website list (it never removes one): a
+ * minute after start, then hourly, and a few seconds after `runSoon` (VAY-2579: once a check verifies
+ * a domain, so its page's map works right away; the hourly pass covers a verification the database
+ * didn't keep yet). `stop` leaves a pass in flight to finish on its own (adding is safe to repeat). Passes never overlap: a timer tick during a pass is skipped, while a
+ * `runSoon` during a pass runs once it ends.
  */
 export function startMapsKeyWebsitesSync(options: {
   websites: MapsKeyWebsites;
-  hosts: readonly string[];
+  hosts: () => Promise<readonly string[]>;
   report: (outcome: { added: string[] } | { error: unknown }) => void;
   firstRunMs?: number;
   intervalMs?: number;
-}): () => void {
+  soonMs?: number;
+}): { stop(): void; runSoon(): void } {
   let running = false;
-  const run = () => {
-    if (running) return;
+  let again = false;
+  let stopped = false;
+  let soon: ReturnType<typeof setTimeout> | undefined;
+  const run = (queue = false) => {
+    if (running) {
+      again ||= queue;
+      return;
+    }
     running = true;
-    options.websites
-      .allow(options.hosts)
+    Promise.resolve()
+      .then(options.hosts)
+      .then((hosts) => options.websites.allow(hosts))
       .then(
         (added) => options.report({ added }),
         (error: unknown) => options.report({ error }),
@@ -209,15 +217,31 @@ export function startMapsKeyWebsitesSync(options: {
       .catch(() => undefined)
       .finally(() => {
         running = false;
+        if (again && !stopped) {
+          again = false;
+          run();
+        }
       });
   };
-  const first = setTimeout(run, options.firstRunMs ?? 60_000);
-  const timer = setInterval(run, options.intervalMs ?? 60 * 60_000);
+  const first = setTimeout(() => run(), options.firstRunMs ?? 60_000);
+  const timer = setInterval(() => run(), options.intervalMs ?? 60 * 60_000);
   first.unref();
   timer.unref();
-  return () => {
-    clearTimeout(first);
-    clearInterval(timer);
+  return {
+    stop() {
+      stopped = true;
+      clearTimeout(first);
+      clearInterval(timer);
+      if (soon) clearTimeout(soon);
+    },
+    runSoon() {
+      if (soon || stopped) return;
+      soon = setTimeout(() => {
+        soon = undefined;
+        run(true);
+      }, options.soonMs ?? 5_000);
+      soon.unref();
+    },
   };
 }
 

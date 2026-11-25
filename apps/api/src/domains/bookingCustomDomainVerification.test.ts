@@ -238,6 +238,9 @@ describe("custom-domain DNS", () => {
 
 describe("custom-domain verifier", () => {
   const propertyId = "aaaa0000-0000-4000-8000-000000000001";
+  const proofSecret = "test-proof-secret-0123456789abcdef0123";
+  // Pinned: hotels publish this value in their DNS, so the derivation must never change.
+  const ours = "vayada-domain-verification=b490b25bff50745a88a53e557041722e";
   const active = { id: "ch-1", status: "active", sslStatus: "active", errors: [] };
   const pending = { id: "ch-1", status: "pending", sslStatus: "pending_validation", errors: [] };
   function verifier(
@@ -246,8 +249,10 @@ describe("custom-domain verifier", () => {
     options: {
       created?: CloudflareCustomHostname;
       adopted?: boolean;
-      routes?: Map<string, string>;
-      proofSecret?: string;
+      secret?: string | null;
+      /** Hosts the load balancer still sends to the old booking frontend; none by default. */
+      oldFrontend?: string[] | null;
+      /** The TXT values at _vayada.<domain>; this property's code by default. */
       txt?: string[];
     } = {},
   ) {
@@ -263,56 +268,44 @@ describe("custom-domain verifier", () => {
     const dns: CustomDomainDns = {
       cnameTarget: vi.fn(async () => dnsAnswer.target),
       recordHost: vi.fn(async () => dnsAnswer.host ?? "booking"),
-      txtValues: vi.fn(async () => options.txt ?? []),
+      txtValues: vi.fn(async () => options.txt ?? [ours]),
     };
-    const routes = options.routes ?? new Map([[hostname, propertyId]]);
+    const onVerified = vi.fn();
     const { check, release, proofRecord } = createBookingCustomDomainVerifier({
       cloudflare,
       dns,
-      routes,
-      proofSecret: options.proofSecret,
+      proofSecret: options.secret === null ? undefined : (options.secret ?? proofSecret),
+      oldFrontendHosts:
+        options.oldFrontend === null ? undefined : new Set(options.oldFrontend ?? []),
+      onVerified,
     });
     return {
       cloudflare,
       dns,
+      onVerified,
       check: (host = hostname) => check(host, propertyId.toUpperCase()),
       release,
       proofRecord,
     };
   }
 
-  it("verifies an active hostname routed for this property, without asking DNS", async () => {
-    const { dns, check } = verifier(active, { target: null });
+  it("verifies an active hostname carrying this property's record, with no route list (VAY-2579)", async () => {
+    const { dns, onVerified, check } = verifier(active, { target: null });
 
     await expect(check()).resolves.toEqual({
       status: "verified",
       issue: null,
       recordHost: null,
       errors: [],
+      proofStatus: "verified",
     });
+    expect(dns.txtValues).toHaveBeenCalledWith("_vayada.booking.hotel.example");
     expect(dns.cnameTarget).not.toHaveBeenCalled();
-  });
-
-  it("keeps an active hostname pending until Vayada routes it for this property", async () => {
-    for (const routes of [
-      new Map<string, string>(),
-      new Map([[hostname, "bbbb0000-0000-4000-8000-000000000002"]]),
-    ]) {
-      const { check } = verifier(active, { target: null }, { routes });
-
-      await expect(check()).resolves.toEqual({
-        status: "pending",
-        issue: { code: "routing_pending", foundTarget: null },
-        recordHost: null,
-        errors: [
-          "booking.hotel.example is ready; Vayada still has to route it to the booking page.",
-        ],
-      });
-    }
+    expect(onVerified).toHaveBeenCalledWith(hostname);
   });
 
   it("fails with the exact record when the CNAME is missing, registering nothing", async () => {
-    const { cloudflare, check } = verifier(null, { target: null });
+    const { cloudflare, dns, check } = verifier(null, { target: null });
 
     await expect(check()).resolves.toEqual({
       status: "failed",
@@ -323,6 +316,7 @@ describe("custom-domain verifier", () => {
       ],
     });
     expect(cloudflare.create).not.toHaveBeenCalled();
+    expect(dns.txtValues).not.toHaveBeenCalled();
   });
 
   it("fails naming the wrong target", async () => {
@@ -335,8 +329,10 @@ describe("custom-domain verifier", () => {
     expect(cloudflare.create).not.toHaveBeenCalled();
   });
 
-  it("registers the hostname once the record is right and waits for the certificate", async () => {
-    const { cloudflare, check } = verifier(null, { target: "custom.booking.vayada.com" });
+  it("registers the hostname once both records are right and waits for the certificate", async () => {
+    const { cloudflare, onVerified, check } = verifier(null, {
+      target: "custom.booking.vayada.com",
+    });
 
     await expect(check()).resolves.toEqual({
       status: "pending",
@@ -344,8 +340,10 @@ describe("custom-domain verifier", () => {
       recordHost: "booking",
       errors: [],
       registeredHostnameId: "ch-1",
+      proofStatus: "verified",
     });
     expect(cloudflare.create).toHaveBeenCalledWith(hostname);
+    expect(onVerified).not.toHaveBeenCalled();
   });
 
   it("keeps waiting on an existing hostname without registering it again", async () => {
@@ -363,7 +361,7 @@ describe("custom-domain verifier", () => {
     expect(cloudflare.restartValidation).not.toHaveBeenCalled();
   });
 
-  it("restarts validation that timed out, expired or lost the CNAME once the record is right", async () => {
+  it("restarts validation that timed out, expired or lost the CNAME once the records are right", async () => {
     for (const stale of [
       { ...pending, sslStatus: "validation_timed_out" },
       { ...pending, sslStatus: "deployment_timed_out" },
@@ -393,6 +391,7 @@ describe("custom-domain verifier", () => {
         issue: { code: "hostname_rejected", foundTarget: null },
         recordHost: "booking",
         errors: [`Cloudflare rejected booking.hotel.example (${status}).`, "blocked for abuse"],
+        proofStatus: "verified",
       });
       expect(cloudflare.restartValidation).not.toHaveBeenCalled();
     }
@@ -408,14 +407,49 @@ describe("custom-domain verifier", () => {
     });
   });
 
-  describe("the ownership record (VAY-2579)", () => {
-    const proofSecret = "test-proof-secret-0123456789abcdef0123";
-    // Pinned: hotels publish this value in their DNS, so the derivation must never change.
-    const ours = "vayada-domain-verification=b490b25bff50745a88a53e557041722e";
-    const unrouted = { routes: new Map<string, string>(), proofSecret };
+  it("verifies nothing without the proof secret or the old-frontend list, asking no one", async () => {
+    for (const missing of [{ secret: null }, { oldFrontend: null }]) {
+      const { cloudflare, dns, check } = verifier(active, { target: null }, missing);
 
+      await expect(check()).rejects.toThrow(
+        "Custom-domain verification needs BOOKING_CUSTOM_DOMAIN_PROOF_SECRET and BOOKING_CUSTOM_DOMAIN_OLD_FRONTEND_HOSTS.",
+      );
+      expect(cloudflare.find).not.toHaveBeenCalled();
+      expect(dns.txtValues).not.toHaveBeenCalled();
+    }
+    // Removing a domain still deletes the Cloudflare hostname its check registered.
+    const { cloudflare, release } = verifier(null, { target: null }, { secret: null });
+    await expect(release("ch-1")).resolves.toBe("deleted");
+    expect(cloudflare.remove).toHaveBeenCalledWith("ch-1");
+  });
+
+  it("keeps a proven domain the load balancer still sends to the old frontend pending", async () => {
+    for (const [found, created] of [
+      [active, undefined],
+      [null, active],
+    ] as const) {
+      const { onVerified, check } = verifier(
+        found,
+        { target: "custom.booking.vayada.com" },
+        { created, oldFrontend: ["www.other.example", hostname] },
+      );
+
+      await expect(check()).resolves.toMatchObject({
+        status: "pending",
+        issue: { code: "routing_pending", foundTarget: null },
+        recordHost: "booking",
+        errors: [
+          "booking.hotel.example is ready; Vayada still has to move it to the new booking page.",
+        ],
+        proofStatus: "verified",
+      });
+      expect(onVerified).not.toHaveBeenCalled();
+    }
+  });
+
+  describe("the ownership record (VAY-2579)", () => {
     it("is this property's code under _vayada, stable and different per property and domain", () => {
-      const { proofRecord } = verifier(null, { target: null }, unrouted);
+      const { proofRecord } = verifier(null, { target: null });
 
       expect(proofRecord(hostname, propertyId.toUpperCase())).toEqual({
         name: "_vayada.booking.hotel.example",
@@ -428,45 +462,16 @@ describe("custom-domain verifier", () => {
       const { proofRecord: otherSecret } = verifier(
         null,
         { target: null },
-        {
-          ...unrouted,
-          proofSecret: "another-proof-secret-0123456789abcdef",
-        },
+        { secret: "another-proof-secret-0123456789abcdef" },
       );
       expect(otherSecret(hostname, propertyId)?.value).not.toBe(ours);
     });
 
-    it("is not needed without a secret, or for a domain platform routes for this property", async () => {
-      expect(
-        verifier(null, { target: null }, { routes: new Map() }).proofRecord(hostname, propertyId),
-      ).toBeNull();
-      const routed = verifier(
-        { id: "ch-1", status: "active", sslStatus: "active", errors: [] },
-        { target: null },
-        { proofSecret },
-      );
-      expect(routed.proofRecord(hostname, propertyId)).toBeNull();
-
-      await expect(routed.check()).resolves.toEqual({
-        status: "verified",
-        issue: null,
-        recordHost: null,
-        errors: [],
-      });
-      expect(routed.dns.txtValues).not.toHaveBeenCalled();
-    });
-
-    it("checks the CNAME first, then registers nothing until the record is there", async () => {
-      const missingCname = verifier(null, { target: null }, unrouted);
-      await expect(missingCname.check()).resolves.toMatchObject({
-        issue: { code: "dns_record_missing" },
-      });
-      expect(missingCname.dns.txtValues).not.toHaveBeenCalled();
-
+    it("registers nothing while the record is missing", async () => {
       const { cloudflare, dns, check } = verifier(
         null,
         { target: "custom.booking.vayada.com" },
-        { ...unrouted, txt: ["v=spf1 -all"] },
+        { txt: ["v=spf1 -all"] },
       );
       await expect(check()).resolves.toEqual({
         status: "failed",
@@ -485,7 +490,7 @@ describe("custom-domain verifier", () => {
       const { cloudflare, check } = verifier(
         null,
         { target: "custom.booking.vayada.com" },
-        { ...unrouted, txt: ["vayada-domain-verification=00000000000000000000000000000000"] },
+        { txt: ["vayada-domain-verification=00000000000000000000000000000000"] },
       );
 
       await expect(check()).resolves.toMatchObject({
@@ -496,12 +501,11 @@ describe("custom-domain verifier", () => {
       expect(cloudflare.create).not.toHaveBeenCalled();
     });
 
-    it("registers the hostname once this property's record is there, quoted or in capitals", async () => {
+    it("accepts this property's code among others, quoted or in capitals", async () => {
       const { cloudflare, check } = verifier(
         null,
         { target: "custom.booking.vayada.com" },
         {
-          ...unrouted,
           txt: [
             "vayada-domain-verification=00000000000000000000000000000000",
             ` "${ours.toUpperCase()}" `,
@@ -509,12 +513,9 @@ describe("custom-domain verifier", () => {
         },
       );
 
-      await expect(check()).resolves.toEqual({
+      await expect(check()).resolves.toMatchObject({
         status: "pending",
-        issue: { code: "certificate_pending", foundTarget: null },
-        recordHost: "booking",
-        errors: [],
-        registeredHostnameId: "ch-1",
+        issue: { code: "certificate_pending" },
         proofStatus: "verified",
       });
       expect(cloudflare.create).toHaveBeenCalledWith(hostname);
@@ -524,7 +525,7 @@ describe("custom-domain verifier", () => {
       const { check } = verifier(
         null,
         { target: "custom.booking.vayada.com" },
-        { ...unrouted, txt: [ours.slice(0, -1), "vayada-domain-verification=not-a-code"] },
+        { txt: [ours.slice(0, -1), "vayada-domain-verification=not-a-code"] },
       );
 
       await expect(check()).resolves.toMatchObject({
@@ -542,7 +543,7 @@ describe("custom-domain verifier", () => {
       const { cloudflare, check } = verifier(
         timedOut,
         { target: "custom.booking.vayada.com" },
-        unrouted,
+        { txt: [] },
       );
 
       await expect(check()).resolves.toMatchObject({
@@ -552,49 +553,28 @@ describe("custom-domain verifier", () => {
       expect(cloudflare.create).not.toHaveBeenCalled();
     });
 
-    it("asks DNS for no record without a secret, as before", async () => {
-      const { dns, check } = verifier(
-        { id: "ch-old", status: "active", sslStatus: "active", errors: [] },
+    it("never verifies an active hostname without the record, such as an old-system hotel's", async () => {
+      const activeHostname = { id: "ch-old", status: "active", sslStatus: "active", errors: [] };
+      const { cloudflare, dns, onVerified, check } = verifier(
+        activeHostname,
         { target: null },
-        { routes: new Map() },
+        { txt: [] },
       );
 
       await expect(check()).resolves.toMatchObject({
-        status: "pending",
-        issue: { code: "routing_pending" },
-        recordHost: null,
-      });
-      expect(dns.txtValues).not.toHaveBeenCalled();
-      expect(dns.recordHost).not.toHaveBeenCalled();
-    });
-
-    it("needs the record for a hostname that is active already, such as an old-system hotel's", async () => {
-      const activeHostname = { id: "ch-old", status: "active", sslStatus: "active", errors: [] };
-      const without = verifier(activeHostname, { target: null }, unrouted);
-      await expect(without.check()).resolves.toMatchObject({
         status: "failed",
         issue: { code: "ownership_record_missing" },
         recordHost: "booking",
       });
-      expect(without.dns.cnameTarget).not.toHaveBeenCalled();
-
-      const proven = verifier(activeHostname, { target: null }, { ...unrouted, txt: [ours] });
-      await expect(proven.check()).resolves.toEqual({
-        status: "pending",
-        issue: { code: "routing_pending", foundTarget: null },
-        recordHost: "booking",
-        errors: [
-          "booking.hotel.example is ready; Vayada still has to route it to the booking page.",
-        ],
-        proofStatus: "verified",
-      });
-      expect(proven.cloudflare.create).not.toHaveBeenCalled();
+      expect(dns.cnameTarget).not.toHaveBeenCalled();
+      expect(cloudflare.create).not.toHaveBeenCalled();
+      expect(onVerified).not.toHaveBeenCalled();
     });
   });
 
   describe("only hostnames a check registered are recorded and deleted (VAY-2580)", () => {
     it("records the hostname it registered, also once the certificate is active", async () => {
-      const { check } = verifier(
+      const { onVerified, check } = verifier(
         null,
         { target: "custom.booking.vayada.com" },
         { created: active },
@@ -604,6 +584,7 @@ describe("custom-domain verifier", () => {
         status: "verified",
         registeredHostnameId: "ch-1",
       });
+      expect(onVerified).toHaveBeenCalledWith(hostname);
     });
 
     it("records nothing for a hostname that was there already or that it adopted", async () => {

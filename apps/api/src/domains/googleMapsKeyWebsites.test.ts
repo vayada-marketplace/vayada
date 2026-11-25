@@ -331,14 +331,16 @@ describe("Maps key website pass (VAY-2589)", () => {
         }),
     );
     const reports: unknown[] = [];
-    const stop = startMapsKeyWebsitesSync({
+    const hosts = vi.fn(async () => ["booking.hotel.example", "booking.other.example"]);
+    const { stop } = startMapsKeyWebsitesSync({
       websites: { allow },
-      hosts: ["booking.hotel.example", "booking.other.example"],
+      hosts,
       report: (outcome) => reports.push(outcome),
     });
 
     await vi.advanceTimersByTimeAsync(59_999);
     expect(allow).not.toHaveBeenCalled();
+    expect(hosts).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(allow).toHaveBeenCalledWith(["booking.hotel.example", "booking.other.example"]);
 
@@ -364,9 +366,9 @@ describe("Maps key website pass (VAY-2589)", () => {
     const error = new Error("offline");
     const reports: unknown[] = [];
     const allow = vi.fn(async () => Promise.reject(error));
-    const stop = startMapsKeyWebsitesSync({
+    const { stop } = startMapsKeyWebsitesSync({
       websites: { allow },
-      hosts: ["booking.hotel.example"],
+      hosts: async () => ["booking.hotel.example"],
       report: (outcome) => {
         reports.push(outcome);
         throw new Error("the logger failed");
@@ -378,6 +380,66 @@ describe("Maps key website pass (VAY-2589)", () => {
     expect(reports).toEqual([{ error }]);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(allow).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it("reads the verified domains on each pass, and runs soon after a verification (VAY-2579)", async () => {
+    vi.useFakeTimers();
+    let verified = ["booking.hotel.example"];
+    let finish: (added: string[]) => void = () => {};
+    const allow = vi.fn(
+      () =>
+        new Promise<string[]>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { stop, runSoon } = startMapsKeyWebsitesSync({
+      websites: { allow },
+      hosts: async () => verified,
+      report: () => {},
+      firstRunMs: 60_000,
+      soonMs: 5_000,
+    });
+
+    // A domain verified before the first pass: it runs 5 s later, once even if asked twice.
+    runSoon();
+    runSoon();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(allow).toHaveBeenCalledTimes(1);
+    expect(allow).toHaveBeenLastCalledWith(["booking.hotel.example"]);
+
+    // Another one verified during that pass: it runs as soon as the pass ends, with the new list.
+    verified = ["booking.hotel.example", "booking.other.example"];
+    runSoon();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(allow).toHaveBeenCalledTimes(1);
+    finish([]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(allow).toHaveBeenCalledTimes(2);
+    expect(allow).toHaveBeenLastCalledWith(["booking.hotel.example", "booking.other.example"]);
+    finish(["booking.other.example"]);
+
+    // Once stopped (the server closing), nothing more runs.
+    stop();
+    runSoon();
+    await vi.advanceTimersByTimeAsync(2 * 60 * 60_000);
+    expect(allow).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports a failed read of the verified domains", async () => {
+    vi.useFakeTimers();
+    const error = new Error("database unavailable");
+    const reports: unknown[] = [];
+    const allow = vi.fn(async () => []);
+    const { stop } = startMapsKeyWebsitesSync({
+      websites: { allow },
+      hosts: async () => Promise.reject(error),
+      report: (outcome) => reports.push(outcome),
+      firstRunMs: 10,
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(reports).toEqual([{ error }]);
+    expect(allow).not.toHaveBeenCalled();
     stop();
   });
 });
