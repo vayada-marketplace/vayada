@@ -10,7 +10,9 @@ export type StayOfferPrice =
       /** False when a promo code was sent but doesn't apply to this stay. */
       promoApplied: boolean;
     }
-  | { publicOfferKey: string; status: "unavailable" }
+  /** VAY-2613: `minNights` when a minimum stay from this arrival is what refuses the rate
+   * ("Minimum stay 2 nights for these dates"). Absent from older APIs. */
+  | { publicOfferKey: string; status: "unavailable"; minNights?: number }
   /** Bookable but not priced in this read (past the API's per-request cap): /book prices it. */
   | { publicOfferKey: string; status: "unpriced" };
 export type StayRoomPrices = {
@@ -66,7 +68,15 @@ function partOf(part: unknown): { part?: StayRoomPrices["part"] } {
 
 function offerPrice(offer: unknown): StayOfferPrice {
   if (!object(offer) || typeof offer.publicOfferKey !== "string") throw invalid();
-  if (offer.status === "unavailable" || offer.status === "unpriced")
+  if (offer.status === "unavailable")
+    // Additive: a reason that can't be read is left out, never the whole answer.
+    return {
+      publicOfferKey: offer.publicOfferKey,
+      status: "unavailable",
+      ...(Number.isSafeInteger(offer.minNights) &&
+        (offer.minNights as number) >= 2 && { minNights: offer.minNights as number }),
+    };
+  if (offer.status === "unpriced")
     return { publicOfferKey: offer.publicOfferKey, status: offer.status };
   if (
     offer.status !== "priced" ||

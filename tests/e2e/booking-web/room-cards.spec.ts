@@ -456,6 +456,74 @@ test("says why a room whose one choice can't be booked is not available (VAY-231
   await assertHealthy();
 });
 
+// VAY-2613: a minimum stay from this arrival is what refuses the rate: the card says so, instead of
+// only "Not available" (Sri Journeys: 1 night where the season asks for 2).
+test("says a room's minimum stay when that is why its choices can't be booked", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockBookingApis(page);
+  await mockRooms(page);
+  const priced = (publicOfferKey: string, totalMinor: string) => ({
+    publicOfferKey,
+    status: "priced",
+    totalMinor,
+    currency: "EUR",
+    promoApplied: false,
+  });
+  await page.route("**/pricing-offers/stay-prices**", (route) => {
+    const url = new URL(route.request().url());
+    const room = (roomTypeId: string, offers: unknown[]) => ({
+      roomTypeId,
+      roomCount: 1,
+      availability: "available",
+      roomsLeft: null,
+      offers,
+    });
+    return route.fulfill({
+      json: {
+        version: "public-pricing-stay-prices.v1",
+        checkIn: url.searchParams.get("checkIn"),
+        checkOut: url.searchParams.get("checkOut"),
+        rooms: [
+          // One of three choices asks for 3 nights; the others stay bookable.
+          room("deluxe", [
+            priced(key("a"), "29800"),
+            { publicOfferKey: key("b"), status: "unavailable", minNights: 3 },
+            priced(key("c"), "33800"),
+          ]),
+          room("family", [priced(key("d"), "43800")]),
+          // The only choice asks for 2 nights.
+          room("garden", [{ publicOfferKey: key("e"), status: "unavailable", minNights: 2 }]),
+        ],
+      },
+    });
+  });
+  // One night, where the rates ask for more.
+  await page.goto("/?checkIn=2026-11-06&checkOut=2026-11-07&adults=2");
+
+  const garden = page.getByTestId("room-card-garden");
+  await expect(garden.locator(`[data-offer-key="${key("e")}"]`)).toContainText("Min. 2 nights");
+  await expect(garden.getByText("Minimum stay 2 nights for these dates.")).toBeVisible();
+  await expect(garden.getByText("This room can't be booked for these dates.")).toHaveCount(0);
+  await expect(page.getByTestId("select-rate-garden")).toBeDisabled();
+  await garden.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("room-card-minimum-stay-1440.png") });
+
+  const deluxe = page.getByTestId("room-card-deluxe");
+  await expect(deluxe.locator(`[data-offer-key="${key("b")}"]`)).toContainText("Min. 3 nights");
+  await expect(deluxe.locator(`[data-offer-key="${key("b")}"]`)).toBeDisabled();
+  // Other choices are bookable, so no note under the button.
+  await expect(deluxe.getByText(/Minimum stay/)).toHaveCount(0);
+  await expect(page.getByTestId("select-rate-deluxe")).toBeEnabled();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await garden.getByText("Minimum stay 2 nights for these dates.").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("room-card-minimum-stay-390.png") });
+  await assertHealthy();
+});
+
 // VAY-2446: one room with a child. The room card's choice opens /book on the child's age, in the
 // room it was chosen for (the old room form is gone), and goes on from there.
 test("asks a child's age for a room card's choice, then goes on", async ({ page }, testInfo) => {

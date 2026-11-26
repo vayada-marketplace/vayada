@@ -171,6 +171,8 @@
     "notAvailable": "Tidak tersedia",
     "tooManyGuests": "Kamar ini muat hingga {count} tamu. Pilih kamar yang lebih besar, atau pesan lebih dari satu kamar.",
     "notBookableForDates": "Kamar ini tidak dapat dipesan untuk tanggal ini. Coba tanggal lain.",
+    "minimumStay": "Minimal menginap {count} malam untuk tanggal ini.",
+    "minimumStayRate": "Min. {count} malam",
     "promoNotApplied": "Kode Anda {code} tidak berlaku untuk masa inap ini.",
     "noChildren": "Kamar ini tidak menerima anak-anak. Pilih kamar lain untuk rombongan Anda.",
     "percentOff": "-{percent}% HEMAT",

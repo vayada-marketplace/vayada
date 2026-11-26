@@ -182,6 +182,11 @@ export default function RoomCard({
       ),
       priced: price?.status === "priced" ? price : null,
       unavailable: !!prices && price?.status !== "priced" && price?.status !== "unpriced",
+      // VAY-2613: a minimum stay from this arrival is what refuses it (longer than this stay).
+      minNights:
+        price?.status === "unavailable" && price.minNights && price.minNights > nights
+          ? price.minNights
+          : null,
       bookable:
         !soldOut &&
         (!tooSmall || !!part) &&
@@ -214,6 +219,10 @@ export default function RoomCard({
       );
     });
   const selectable = shown.filter(({ bookable }) => bookable);
+  // VAY-2613: the shortest minimum stay that refuses a shown rate: staying that long opens one.
+  const minimumStay = Math.min(
+    ...shown.flatMap(({ unavailable, minNights }) => (unavailable && minNights ? [minNights] : [])),
+  );
   // The cheapest choice starts selected, as the old card did with non-refundable; a room the group
   // chose starts on its rate (VAY-2393).
   const selected =
@@ -278,6 +287,11 @@ export default function RoomCard({
                   : [tc("nights", { count: nights }), t("taxesIncluded")]
               }
               discountPercent={discount(choice)}
+              unavailableText={
+                choice.unavailable && choice.minNights
+                  ? t("minimumStayRate", { count: choice.minNights })
+                  : undefined
+              }
               unavailable={
                 choice.unavailable ||
                 (!choice.bookable &&
@@ -405,7 +419,11 @@ export default function RoomCard({
         (!tooSmall || part) &&
         !usedUp &&
         all.every((choice) => choice.unavailable) && (
-          <p className="text-sm mt-3 text-gray-600">{t("notBookableForDates")}</p>
+          <p className="text-sm mt-3 text-gray-600">
+            {Number.isFinite(minimumStay)
+              ? t("minimumStay", { count: minimumStay })
+              : t("notBookableForDates")}
+          </p>
         )}
       {/* Rooms left only matter when a choice can be booked; never beside "Not available" (VAY-2319). */}
       {!soldOut && selected && fewLeft !== null && (
@@ -522,7 +540,11 @@ export default function RoomCard({
                 {t("pickRoom.alreadyYours", { number: pick!.takenBy.join(" & ") })}
               </span>
             ) : (tooSmall && !part) || (prices && !selected) ? (
-              <span className="text-sm font-semibold text-gray-500">{t("notAvailable")}</span>
+              <span className="text-sm font-semibold text-gray-500">
+                {!tooSmall && Number.isFinite(minimumStay)
+                  ? t("minimumStayRate", { count: minimumStay })
+                  : t("notAvailable")}
+              </span>
             ) : pricesState === "loading" ? (
               <span className="block h-5 w-16 animate-pulse rounded bg-gray-200" />
             ) : nightly ? (

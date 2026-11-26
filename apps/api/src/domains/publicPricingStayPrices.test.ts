@@ -3,8 +3,10 @@ import type { Pool } from "pg";
 
 const authority = vi.hoisted(() => vi.fn());
 const totals = vi.hoisted(() => vi.fn());
+const minimumStays = vi.hoisted(() => vi.fn());
 vi.mock("./publicPricingAuthority.js", () => ({ lockPublicPricingAuthority: authority }));
 vi.mock("./publicPricingChargeTotals.js", () => ({ lockPublicPricingChargeTotals: totals }));
+vi.mock("./publicPricingRefusals.js", () => ({ lockPublicPricingMinimumStays: minimumStays }));
 
 import {
   adultsForPart,
@@ -78,6 +80,7 @@ function expectShortReads({ queries, pool, client }: ReturnType<typeof setup>) {
 beforeEach(() => {
   authority.mockReset().mockResolvedValue({ propertyId: "property", organizationId: "org" });
   totals.mockReset();
+  minimumStays.mockReset().mockResolvedValue(new Map());
 });
 
 describe("parseStayPricesQuery", () => {
@@ -255,10 +258,65 @@ describe("createPublicPricingStayPrices", () => {
       addons: [],
       promoCode: null,
     });
-    // One read for free rooms, then one per offer.
-    expect(env.pool.connect).toHaveBeenCalledTimes(4);
+    // One read for free rooms, one per offer, and one for why a free room's rate was refused.
+    expect(env.pool.connect).toHaveBeenCalledTimes(5);
+    expect(minimumStays).toHaveBeenCalledWith(
+      expect.anything(),
+      "hotel",
+      { checkIn: "2026-11-06", checkOut: "2026-11-08" },
+      [{ publicOfferKey: "offer-a-nonref", guests: { adults: 2, childAges: [] } }],
+    );
     expectShortReads(env);
     expect(env.queries).toContain("SELECT inventory");
+  });
+
+  // VAY-2613: "Minimum stay 3 nights for these dates" instead of only "Not available".
+  it("says when a minimum stay refuses a free room's rate, on the booking page's read only", async () => {
+    const env = setup([
+      { roomTypeId: ROOM_A, nights: 2, free: 2 },
+      { roomTypeId: ROOM_B, nights: 2, free: 0 },
+    ]);
+    totals.mockImplementation(async (_client, _slug, selection) =>
+      selection.rooms[0].publicOfferKey === "offer-a-free" ? { totalMinor: "29800" } : null,
+    );
+    minimumStays.mockResolvedValue(new Map([["offer-a-nonref", 3]]));
+    const prices = await env.reader.read("hotel", stay);
+    expect(prices!.rooms[0]!.offers).toEqual([
+      expect.objectContaining({ publicOfferKey: "offer-a-free", status: "priced" }),
+      { publicOfferKey: "offer-a-nonref", status: "unavailable", minNights: 3 },
+    ]);
+    // A sold-out room's rates weren't priced: nothing to explain, and nothing asked.
+    expect(prices!.rooms[1]!.offers).toEqual([
+      { publicOfferKey: "offer-b", status: "unavailable" },
+    ]);
+    expect(minimumStays).toHaveBeenCalledTimes(1);
+    expect(minimumStays.mock.calls[0]![3]).toEqual([
+      { publicOfferKey: "offer-a-nonref", guests: { adults: 2, childAges: [] } },
+    ]);
+    expectShortReads(env);
+
+    // The reason only explains: a failed read leaves the plain "unavailable", never fails prices.
+    minimumStays.mockRejectedValueOnce(new Error("lock timeout"));
+    const plain = await env.reader.read("hotel", stay);
+    expect(plain!.rooms[0]!.offers[1]).toEqual({
+      publicOfferKey: "offer-a-nonref",
+      status: "unavailable",
+    });
+    expectShortReads(env);
+
+    // Agency pages and the live search read the same prices without reasons.
+    minimumStays.mockClear();
+    const agency = await env.reader.readOffered("hotel", stay, { rooms: defaultRooms() });
+    expect(agency!.rooms[0]!.offers[1]).toEqual({
+      publicOfferKey: "offer-a-nonref",
+      status: "unavailable",
+    });
+    expect(minimumStays).not.toHaveBeenCalled();
+
+    // Every rate priced: no extra read.
+    totals.mockResolvedValue({ totalMinor: "29800" });
+    await env.reader.read("hotel", stay);
+    expect(minimumStays).not.toHaveBeenCalled();
   });
 
   it("doesn't price a room that is closed, missing a night or taken on any night", async () => {
