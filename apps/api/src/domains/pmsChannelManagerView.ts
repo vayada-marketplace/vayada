@@ -36,7 +36,12 @@ const UNAVAILABLE: ChannelManagerChannels = { status: "unavailable" };
 export async function readChannelManagerView(
   pool: Pool,
   propertyId: string,
-  options: { now?: Date; readChannels?: ChannelManagerChannelReader } = {},
+  options: {
+    now?: Date;
+    readChannels?: ChannelManagerChannelReader;
+    /** Told why Channex couldn't be read; the page still shows everything else. */
+    onChannelsUnavailable?: (error: unknown) => void;
+  } = {},
 ): Promise<ChannelManagerView> {
   const now = (options.now ?? new Date()).toISOString();
   const connection = (
@@ -137,7 +142,10 @@ export async function readChannelManagerView(
     connection.externalPropertyId && options.readChannels
       ? options
           .readChannels({ externalPropertyId: connection.externalPropertyId })
-          .catch(() => UNAVAILABLE)
+          .catch((error: unknown) => {
+            options.onChannelsUnavailable?.(error);
+            return UNAVAILABLE;
+          })
       : Promise.resolve(UNAVAILABLE),
   ]);
 

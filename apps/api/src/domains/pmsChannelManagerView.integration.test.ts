@@ -1,5 +1,5 @@
 import pg from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { readChannelManagerView } from "./pmsChannelManagerView.js";
 
@@ -358,6 +358,37 @@ describe.skipIf(!url)("Channel manager view (VAY-2606)", () => {
         acknowledgedAt: expect.any(String),
       }),
     ]);
+  });
+
+  it("asks Channex for the connected hotel's channels, and still shows the page when that fails", async () => {
+    const channels = {
+      status: "ok" as const,
+      items: [
+        {
+          ota: "booking_com" as const,
+          active: true,
+          otaPropertyId: "4417201",
+          mappedCount: 3,
+          markup: { kind: "rules" as const, rules: [], currency: "EUR" },
+        },
+      ],
+    };
+    const readChannels = vi.fn().mockResolvedValue(channels);
+    expect((await readChannelManagerView(db, P, { readChannels })).channels).toEqual(channels);
+    expect(readChannels).toHaveBeenCalledWith({ externalPropertyId: "provider-2606" });
+
+    const onChannelsUnavailable = vi.fn();
+    const failed = await readChannelManagerView(db, P, {
+      readChannels: vi.fn().mockRejectedValue(new Error("channex_http_503")),
+      onChannelsUnavailable,
+    });
+    expect(failed.channels).toEqual({ status: "unavailable" });
+    expect(failed.rooms).toHaveLength(3);
+    expect(onChannelsUnavailable).toHaveBeenCalledWith(new Error("channex_http_503"));
+
+    const notAsked = vi.fn();
+    await readChannelManagerView(db, UNCONNECTED, { readChannels: notAsked });
+    expect(notAsked).not.toHaveBeenCalled();
   });
 
   it("shows a hotel without a Channex connection as not connected, with nothing else", async () => {
