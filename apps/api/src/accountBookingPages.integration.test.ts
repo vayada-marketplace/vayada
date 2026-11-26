@@ -255,6 +255,49 @@ describe.skipIf(!TEST_DATABASE_URL)("Agency booking page repository (runtime log
     expect(read!.properties.map((p) => p.propertyId)).not.toContain(stays.mandala);
   });
 
+  it("leaves out a deleted stay, as Manage Properties does, and refuses to keep it (VAY-2615)", async () => {
+    const { organizationId, stays } = await travelUbud();
+    expect(
+      await repository.save(
+        command(organizationId, update(stays, { propertyIds: [stays.escape, stays.mandala] })),
+      ),
+    ).toMatchObject({ ok: true });
+    // A hotel-side delete retires the property and keeps the account's link to it (VAY-2493). Its
+    // booking page stays visible here, so only the deletion keeps it off the list.
+    await admin.query(
+      `UPDATE hotel_catalog.properties
+       SET lifecycle_status = 'retired', retired_at = now(), retired_by_user_id = $2::uuid
+       WHERE id = $1::uuid`,
+      [stays.escape, actorUserId],
+    );
+
+    const read = await repository.read(organizationId);
+    expect(read!.properties.map((p) => p.propertyId)).not.toContain(stays.escape);
+    expect(read!.properties).toHaveLength(5);
+    expect(read!.page.propertyIds).toEqual([stays.mandala]);
+    // A Booking Admin tab opened before the delete can't put it back.
+    expect(
+      await repository.save(
+        command(
+          organizationId,
+          update(stays, { revision: 1, propertyIds: [stays.mandala, stays.escape] }),
+        ),
+      ),
+    ).toEqual({ ok: false, error: "property_not_in_account" });
+    const saved = await repository.save(
+      command(organizationId, update(stays, { revision: 1, propertyIds: [stays.mandala] })),
+    );
+    expect(saved).toMatchObject({ ok: true, summary: { page: { propertyIds: [stays.mandala] } } });
+    expect(
+      (
+        await admin.query(
+          "SELECT 1 FROM booking.account_booking_page_properties WHERE property_id = $1::uuid",
+          [stays.escape],
+        )
+      ).rowCount,
+    ).toBe(0);
+  });
+
   it("lets a live page be switched off after the account drops below two active stays", async () => {
     const { organizationId, stays } = await travelUbud();
     expect(
