@@ -1,4 +1,4 @@
-import { UnauthorizedError } from "@vayada/backend-auth";
+import { UnauthorizedError, type PermissionKey } from "@vayada/backend-auth";
 import { AuthorizationError } from "@vayada/backend-authorization";
 import {
   PMS_ROOM_FACTS_CONTRACT_VERSION,
@@ -23,7 +23,7 @@ import {
 } from "@vayada/domain-pms";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
-import { enforceRoutePolicy } from "./policy.js";
+import { enforceRoutePolicy, firstHeldPermission } from "./policy.js";
 
 type PropertyParams = { propertyId: string };
 type RoomTypeParams = PropertyParams & { roomTypeId: string };
@@ -255,9 +255,18 @@ export async function registerPmsRoomFactsRoutes(
     },
   );
 
+  // Adding a room starts from the room type's capacity, so Rooms & Rates staff read it (VAY-2612).
+  const authorizeCapacity = async (request: FastifyRequest, reply: FastifyReply) => {
+    const permission = firstHeldPermission(request, [
+      "pms.rooms_rates.read",
+      "pms.operations.read",
+    ]);
+    const scope = authorizeRequest(request, reply, permission);
+    if (scope) authorized.set(request, scope);
+  };
   app.get<{ Params: RoomTypeParams }>(
     "/properties/:propertyId/room-types/:roomTypeId/capacity",
-    { onRequest: authorize },
+    { onRequest: authorizeCapacity },
     async (request, reply) => {
       const scope = requireAuthorizedScope(authorized, request);
       const roomTypeId = readRoomTypeId(request.params, reply);
@@ -277,8 +286,13 @@ export async function registerPmsRoomFactsRoutes(
   );
 }
 
-function authorizeRequest(request: FastifyRequest, reply: FastifyReply): AuthorizedScope | null {
-  const permission = request.method === "GET" ? "pms.operations.read" : "pms.operations.manage";
+function authorizeRequest(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  permission: PermissionKey = request.method === "GET"
+    ? "pms.operations.read"
+    : "pms.operations.manage",
+): AuthorizedScope | null {
   try {
     const baseContext = enforceRoutePolicy(request, { permission });
     if (baseContext.selectedOrganization.kind !== "hotel_group") {

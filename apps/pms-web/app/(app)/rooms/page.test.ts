@@ -40,10 +40,23 @@ vi.mock("@vayada/product-onboarding/PreparedHotelImportPanel", () => ({
 vi.mock("@/components/settings/airbnbImportHref", () => ({
   airbnbImportHref: (propertyId: string) => `https://admin.test/import/${propertyId}`,
 }));
+// The account admin by default; a test sets a staff role's keys (VAY-2612).
+const OWNER = [
+  "hotel_catalog.setup.manage",
+  "pms.operations.manage",
+  "pms.room_status.read",
+  "pms.rooms_rates.manage",
+  "pms.rooms_rates.read",
+];
+const access = vi.hoisted(() => ({ permissions: [] as string[] }));
+vi.mock("@/lib/settings/PmsAccessContext", () => ({
+  useHasPmsPermission: (permission: string) => access.permissions.includes(permission),
+}));
 
 let view: ReactTestRenderer;
 const room = { id: "room-1", name: "Existing suite" } as RoomType;
 beforeEach(() => {
+  access.permissions = OWNER;
   pricingRead.mockReset().mockResolvedValue(null);
   notSellingRates.mockReset().mockResolvedValue([]);
   for (const mock of [routerPush, copiedRoomPrices, publishNewRoomPrices, keepNewRoomPrices])
@@ -213,6 +226,69 @@ it("keeps the setup tools in the ☰ menu and opens Linked inventory in a drawer
     "linked-inventory-title",
   );
   expect(view.root.findAllByType(LinkedInventoryGroupsPanel)).toHaveLength(1);
+  expect(view.root.findByType(LinkedInventoryGroupsPanel).props.canEdit).toBe(true);
+});
+
+describe("staff roles (VAY-2612)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("document", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+    vi.spyOn(roomsService, "list").mockResolvedValue([room]);
+    vi.spyOn(individualRoomsService, "list").mockResolvedValue([
+      { id: "unit-1", roomTypeId: "room-1", roomNumber: "101", status: "available" },
+      { id: "unit-2", roomTypeId: "room-1", roomNumber: "102", status: "available" },
+    ] as Awaited<ReturnType<typeof individualRoomsService.list>>);
+  });
+  async function expand() {
+    await act(async () =>
+      view.root
+        .findByProps({ "aria-label": "rooms.showRooms" })
+        .props.onClick({ stopPropagation: () => undefined }),
+    );
+  }
+  const roomControlsDisabled = () =>
+    [
+      ...view.root.findAllByProps({ "aria-label": "rooms.statusLabel" }),
+      ...view.root.findAllByProps({ "aria-label": "rooms.renameRoom" }),
+      ...view.root.findAllByProps({ "aria-label": "rooms.deleteRoom" }),
+      ...view.root
+        .findAllByType("button")
+        .filter((button) => button.children.includes("rooms.addRoom")),
+    ].map((control) => control.props.disabled);
+
+  it("lets Rooms & Rates edit change rooms, without the setup reads and linked-group edits", async () => {
+    access.permissions = ["pms.room_status.read", "pms.rooms_rates.read", "pms.rooms_rates.manage"];
+    await mount();
+    expect(view.root.findAllByType(PreparedHotelImportPanel)).toHaveLength(0);
+    expect(text()).not.toContain("rooms.loadFailed");
+    await expand();
+    expect(roomControlsDisabled()).toEqual(Array(7).fill(false));
+    await act(async () =>
+      view.root.findByProps({ "aria-label": "rooms.menu.label" }).props.onClick(),
+    );
+    expect(view.root.findAllByProps({ href: "/calendar?reorder=1" })).toHaveLength(1);
+    expect(view.root.findAllByProps({ href: "https://admin.test/import/test-property" })).toEqual(
+      [],
+    );
+    const linked = view.root
+      .findAllByType("button")
+      .find(
+        (button) =>
+          button.findAll((node) => node.children.includes("rooms.linkedInventory")).length,
+      )!;
+    await act(async () => linked.props.onClick());
+    expect(view.root.findByType(LinkedInventoryGroupsPanel).props.canEdit).toBe(false);
+  });
+
+  it("shows rooms read-only to Rooms & Rates read", async () => {
+    access.permissions = ["pms.room_status.read", "pms.rooms_rates.read"];
+    await mount();
+    await expand();
+    expect(roomControlsDisabled()).toEqual(Array(7).fill(true));
+    await act(async () =>
+      view.root.findByProps({ "aria-label": "rooms.menu.label" }).props.onClick(),
+    );
+    expect(view.root.findAllByProps({ href: "/calendar?reorder=1" })).toHaveLength(0);
+  });
 });
 
 it("offers no room reordering with a single room", async () => {

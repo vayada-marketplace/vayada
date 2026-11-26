@@ -85,7 +85,10 @@ function harness(
           { propertyId, roomTypeId, state: "operating", closureCommandId: null, cutoffDate: null },
         ]);
       if (sql.includes("FROM hotel_catalog.properties property")) {
-        return queryResult(options.scope === false ? [] : [{ id: propertyId }]);
+        return queryResult(options.scope === false ? [] : [{ roleKey: "hotel_owner" }]);
+      }
+      if (sql.includes("FROM identity.role_permission_grants")) {
+        return queryResult([{ permission_key: "pms.operations.manage" }]);
       }
       if (sql.includes("FROM identity.product_entitlements")) {
         return queryResult([

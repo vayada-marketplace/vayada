@@ -87,7 +87,10 @@ function harness(
         return result();
       }
       if (sql.includes("FROM hotel_catalog.properties property")) {
-        return result(options.scope === false ? [] : [{ id: propertyId }]);
+        return result(options.scope === false ? [] : [{ roleKey: "hotel_owner" }]);
+      }
+      if (sql.includes("FROM identity.role_permission_grants")) {
+        return result([{ permission_key: "pms.operations.manage" }]);
       }
       if (sql.includes("FROM identity.product_entitlements")) {
         return result([{ status: "active", startsAt: null, expiresAt: null }]);

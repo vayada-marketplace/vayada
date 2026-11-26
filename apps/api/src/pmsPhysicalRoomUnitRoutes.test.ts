@@ -626,6 +626,72 @@ describe("physical-room management authorization and conflicts", () => {
     expect(response.statusCode).toBe(400);
     expect(writes).toBe(2);
   });
+  it("lets Rooms & Rates edit add, rename and retire rooms, not Rooms & Rates read (VAY-2612)", async () => {
+    for (const [permissions, allowed] of [
+      [["pms.room_status.read", "pms.rooms_rates.read", "pms.rooms_rates.manage"], true],
+      [["pms.room_status.read", "pms.rooms_rates.read"], false],
+    ] as const) {
+      const actions: string[] = [];
+      app = await scopedApp(
+        async (instance) =>
+          instance.register(registerPmsPhysicalRoomManagementRoutes, {
+            commandPort: {
+              async managePhysicalRoom(command) {
+                actions.push(command.action);
+                return {
+                  ok: true,
+                  response: {
+                    propertyId,
+                    roomTypeId,
+                    roomUnitId,
+                    roomUnitsRevision: command.expectedRevision + 1,
+                    outcome:
+                      command.action === "create"
+                        ? "created"
+                        : command.action === "update"
+                          ? "updated"
+                          : "retired",
+                  },
+                };
+              },
+            },
+          }),
+        { permissions: [...permissions] },
+      );
+      const path = `/properties/${propertyId}/room-types/${roomTypeId}/physical-units`;
+      const statuses: number[] = [];
+      for (const [method, payload] of [
+        ["POST", { expectedRevision: 1, changes: { operationalLabel: "101" } }],
+        ["PUT", { expectedRevision: 2, changes: { operationalLabel: "Villa 1" } }],
+        ["DELETE", { expectedRevision: 3 }],
+      ] as const) {
+        const response = await app.inject({
+          method,
+          url: path + (method === "POST" ? "" : `/${roomUnitId}`),
+          headers: { authorization: "Bearer valid-token", "idempotency-key": `${method}-1` },
+          payload,
+        });
+        statuses.push(response.statusCode);
+      }
+      expect(statuses).toEqual(allowed ? [201, 200, 200] : [403, 403, 403]);
+      expect(actions).toEqual(allowed ? ["create", "update", "retire"] : []);
+      await app.close();
+      app = null;
+    }
+  });
+  it("keeps room counts and the label route on the owner key (VAY-2612)", async () => {
+    const permissions: PermissionKey[] = ["pms.rooms_rates.read", "pms.rooms_rates.manage"];
+    const units = fakePort();
+    app = await testApp(units.options, { permissions });
+    expect(await request(app)).toMatchObject({ statusCode: 403 });
+    expect(units.calls).toEqual([]);
+    await app.close();
+
+    const labels = labelPort();
+    app = await labelApp(labels.options, { permissions });
+    expect(await labelRequest(app)).toMatchObject({ statusCode: 403 });
+    expect(labels.calls).toEqual([]);
+  });
   it("passes only scoped versioned commands and reports repository blockers", async () => {
     const calls: unknown[] = [];
     app = await scopedApp(async (instance) =>

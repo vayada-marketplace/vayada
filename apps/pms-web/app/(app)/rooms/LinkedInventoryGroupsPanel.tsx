@@ -18,10 +18,13 @@ type Draft = {
 };
 
 export default function LinkedInventoryGroupsPanel({
+  canEdit = true,
   groups,
   roomTypes,
   onChange,
 }: {
+  /** Groups are changed with the owner key; others see them read-only (VAY-2612). */
+  canEdit?: boolean;
   groups: LinkedInventoryGroup[];
   roomTypes: RoomType[];
   onChange: (update: (groups: LinkedInventoryGroup[]) => LinkedInventoryGroup[]) => void;
@@ -112,7 +115,7 @@ export default function LinkedInventoryGroupsPanel({
           <p className="mt-1 max-w-xs text-sm text-gray-500">{t("rooms.linkedEmptyHint")}</p>
           <button
             type="button"
-            disabled={saving}
+            disabled={saving || !canEdit}
             onClick={() => edit()}
             className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-50"
           >
@@ -131,9 +134,9 @@ export default function LinkedInventoryGroupsPanel({
           </p>
           <button
             type="button"
-            disabled={saving}
+            disabled={saving || !canEdit}
             onClick={() => edit()}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-[13px] font-semibold text-gray-700 hover:bg-gray-50"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-[13px] font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <PlusIcon className="h-4 w-4" /> {t("rooms.linkedAddGroup")}
           </button>
@@ -157,19 +160,19 @@ export default function LinkedInventoryGroupsPanel({
               </div>
               <button
                 type="button"
-                disabled={saving}
+                disabled={saving || !canEdit}
                 aria-label={t("rooms.linkedEditNamed", { name: group.name })}
                 onClick={() => edit(group)}
-                className="rounded-lg p-2 text-gray-400 hover:bg-gray-50 hover:text-gray-700"
+                className="rounded-lg p-2 text-gray-400 hover:bg-gray-50 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <PencilIcon className="h-4 w-4" />
               </button>
               <button
                 type="button"
-                disabled={saving}
+                disabled={saving || !canEdit}
                 aria-label={t("rooms.linkedDeleteNamed", { name: group.name })}
                 onClick={() => !saving && setRemoving(group)}
-                className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <TrashIcon className="h-4 w-4" />
               </button>

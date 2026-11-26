@@ -129,6 +129,17 @@ const dailyWork: (Route & { key: PermissionKey })[] = [
     url: `/properties/${propertyId}/calendar-settings`,
     key: "pms.settings.manage",
   },
+  // VAY-2612: the Rooms page's linked inventory and room order are Rooms & Rates work.
+  {
+    method: "GET",
+    url: `/properties/${propertyId}/linked-inventory-groups`,
+    key: "pms.rooms_rates.read",
+  },
+  {
+    method: "PATCH",
+    url: `/properties/${propertyId}/rooms/reorder`,
+    key: "pms.rooms_rates.manage",
+  },
 ];
 // Refunds, price corrections and setup stay with the account admin: no staff key opens them.
 const ownerOnly: Route[] = [
@@ -136,7 +147,6 @@ const ownerOnly: Route[] = [
   { method: "POST", url: `${reservation}/correct-prices` },
   { method: "PUT", url: `/properties/${propertyId}/check-in-checklist` },
   { method: "PUT", url: `/properties/${propertyId}/check-out-inspection` },
-  { method: "PATCH", url: `/properties/${propertyId}/rooms/reorder` },
   { method: "PATCH", url: `/properties/${propertyId}/profile` },
 ];
 

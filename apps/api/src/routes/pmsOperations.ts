@@ -83,7 +83,7 @@ import {
   type ResourceRelationship,
 } from "@vayada/backend-auth";
 import { hasPermission, type PropertyAccessRepository } from "@vayada/backend-authorization";
-import { enforceRoutePolicy } from "./policy.js";
+import { enforceRoutePolicy, firstHeldPermission } from "./policy.js";
 import { enforcePmsPropertyRoutePolicy } from "./pmsPropertyPolicy.js";
 
 export const PMS_OPERATIONS_CONTRACT_VERSION = "pms-operations.v1" as const;
@@ -1534,7 +1534,13 @@ export async function registerPmsOperationsRoutes(
           return sendPmsOperationsError(reply, originNotAllowed());
         }
         const { propertyId } = request.params;
-        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        // Ordering rooms is Rooms & Rates work (VAY-2612).
+        const permission = firstHeldPermission(request, [
+          "pms.rooms_rates.manage",
+          "pms.operations.manage",
+        ]);
+        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId, undefined, permission))
+          return reply;
         const command = toRoomOrderCommand(propertyId, request);
         if ("error" in command) return sendPmsOperationsError(reply, command.error);
         const result = await commandRepository.reorderRooms!(command.value);
@@ -1646,7 +1652,17 @@ export async function registerPmsOperationsRoutes(
         return sendPmsOperationsError(reply, originNotAllowed());
       }
       const { propertyId } = request.params;
-      if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+      // The Rooms page shows which room types share inventory to anyone who can read it (VAY-2612).
+      if (
+        !(await enforcePmsPropertyAccessPolicy(
+          request,
+          reply,
+          propertyId,
+          "pms.rooms_rates.read",
+          options.propertyAccessRepository,
+        ))
+      )
+        return reply;
       if (!repository.listLinkedInventoryGroupsByPropertyId) {
         return sendPmsOperationsError(
           reply,
@@ -4622,39 +4638,6 @@ function paginateReservationResult(
   };
 }
 
-function enforcePmsOperationsReadPolicy(
-  request: FastifyRequest,
-  reply: FastifyReply,
-  propertyId: string,
-): boolean {
-  try {
-    enforceRoutePolicy(request, {
-      permission: "pms.operations.read",
-      entitlement: {
-        product: "pms",
-        key: "property-management",
-        resource: {
-          product: "pms",
-          resourceType: "pms_property",
-          resourceId: propertyId,
-        },
-      },
-      resource: {
-        product: "pms",
-        resourceType: "pms_property",
-        resourceId: propertyId,
-        allowedRelationships: ["owner", "operator", "front_desk"],
-      },
-    });
-    return true;
-  } catch (error) {
-    const contractError = toPmsOperationsAccessError(error, request, propertyId);
-    if (!contractError) throw error;
-    sendPmsOperationsError(reply, contractError);
-    return false;
-  }
-}
-
 async function enforcePmsPropertyAccessPolicy(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -4714,10 +4697,11 @@ function enforcePmsOperationsManagePolicy(
     "operator",
     "front_desk",
   ],
+  permission: PermissionKey = "pms.operations.manage",
 ): boolean {
   try {
     enforceRoutePolicy(request, {
-      permission: "pms.operations.manage",
+      permission,
       entitlement: {
         product: "pms",
         key: "property-management",
