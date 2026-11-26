@@ -48,7 +48,7 @@ export type AccountBookingPageSummary = {
     headerImage: { mediaId: string; url: string } | null;
   };
   defaults: AccountBookingPageSettings;
-  /** Every property of the account, by name. */
+  /** Every property of the account, by name; deleted (retired) ones are left out (VAY-2615). */
   properties: AccountBookingPageProperty[];
   /** Only accounts with two or more active properties can create a page or turn it live. */
   canSave: boolean;
@@ -144,8 +144,8 @@ type PropertyRow = {
 
 /**
  * The agency booking page (VAY-2456) as Booking Admin reads and saves it. One page per account; the
- * account's properties are its active owner/operator catalog links. Whether a property's booking page is
- * set up is read live with the public site's rule for setup publications (`visibleActiveBookingPublication`,
+ * account's properties are its active owner/operator catalog links, deleted ones left out.
+ * Whether a property's booking page is set up is read live with the public site's rule for setup publications (`visibleActiveBookingPublication`,
  * only while the site serves them); a hotel served only from a legacy profile counts as not set up.
  * Pricing prerequisites are the guest read's to check (VAY-2458). Saving locks only the page row, checks the revision and
  * replaces the included list; it takes no lock on identity or pricing rows beyond the key-share checks of
@@ -381,7 +381,8 @@ async function accountRow(client: Queryable, organizationId: string): Promise<Ac
   return result.rows[0] ?? null;
 }
 
-/** The account's properties: its active owner/operator catalog links, by name. */
+/** The account's properties: its active owner/operator catalog links, by name. A deleted (retired)
+ * property keeps its link but leaves the list, as it leaves Manage Properties (VAY-2493, VAY-2615). */
 async function propertyRows(
   client: Queryable,
   organizationId: string,
@@ -424,6 +425,7 @@ async function propertyRows(
          AND link.status = 'active'
          AND link.relationship IN ('owner', 'operator')
      )
+       AND property.lifecycle_status <> 'retired'
        AND ($2::boolean IS FALSE OR included.property_id IS NOT NULL)
      ORDER BY property.display_name, property.id`,
     [organizationId, includedOnly],
