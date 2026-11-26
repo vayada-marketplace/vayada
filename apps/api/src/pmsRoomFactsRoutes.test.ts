@@ -535,6 +535,22 @@ describe("PMS room-facts routes", () => {
     ]);
   });
 
+  it("opens only the capacity read to Rooms & Rates read, for adding a room (VAY-2612)", async () => {
+    const ports = fakePorts();
+    app = await testApp(ports, { permissions: ["pms.room_status.read", "pms.rooms_rates.read"] });
+    const statuses: number[] = [];
+    for (const path of ["", `/${roomTypeId}`, `/${roomTypeId}/units`, `/${roomTypeId}/capacity`]) {
+      const response = await injectJson(app, {
+        method: "GET",
+        url: `/properties/${propertyId}/room-types${path}`,
+        headers: { authorization: "Bearer valid-token" },
+      });
+      statuses.push(response.statusCode);
+    }
+    expect(statuses).toEqual([403, 403, 403, 200]);
+    expect(ports.reads).toEqual([["capacity", propertyId, roomTypeId]]);
+  });
+
   it.each(["facts", "binding", "capacity"])("returns 404 for missing %s reads", async (kind) => {
     const ports = fakePorts({ missing: true });
     app = await testApp(ports);

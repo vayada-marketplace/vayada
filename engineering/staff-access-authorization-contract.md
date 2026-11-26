@@ -110,6 +110,8 @@ what its members can do:
 | Record a payment at the desk: mark a booking paid, mark a checkout charge paid, waive an open checkout charge (VAY-2575)                                                                                                                                                     | `pms.reservation.update`                                     |
 | Read reviews, review details, guest reviews and reply status (VAY-2575)                                                                                                                                                                                                      | `pms.inbox.read`                                             |
 | Reply to a review, submit a guest review (VAY-2575)                                                                                                                                                                                                                          | `pms.inbox.reply`                                            |
+| Add, rename and retire rooms, set a room's status, change the room order (VAY-2612)                                                                                                                                                                                          | `pms.rooms_rates.manage`                                     |
+| Read linked inventory groups and a room type's room capacity (VAY-2612)                                                                                                                                                                                                      | `pms.rooms_rates.read`                                       |
 
 These routes check the member's own property access, like every other staff
 route, and answers to members without `pms.guest_contact.read` hide guest email
@@ -120,7 +122,7 @@ Money and setup keep the owner-only keys `pms.operations.manage` and
 money taken), confirming a booking-page bank transfer or PayPal payment (the money
 reaches the hotel away from the desk; cash or card the desk took itself for a
 confirmed stay stays desk work, VAY-2575), refunds, price corrections, a paid manual booking, a cancel that keeps
-charges, room types, rooms and room status (VAY-2557), prices, the operating
+charges, room types and linked inventory changes (VAY-2617), prices, the operating
 calendar and auto-open, check-in and check-out template edits, the channel manager
 (including the no-show report to Booking.com) and the property profile.
 

@@ -36,6 +36,8 @@ vi.mock("@/lib/i18n", () => ({
 vi.mock("next/link", () => ({ default: "a" }));
 // The Rooms list opens a copy's Prices tab when its copied prices can't be saved (VAY-2487).
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+// RoomsPage reads the member's keys (VAY-2612); an account admin here.
+vi.mock("@/lib/settings/PmsAccessContext", () => ({ useHasPmsPermission: () => true }));
 
 const roomTypes = [
   { id: "type-1", name: "One bedroom" },

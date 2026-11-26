@@ -10,7 +10,8 @@ export const AUTHORITY_SITES = {
   },
   pms_physical_room_scope: {
     threaded: true,
-    where: "lockAuthorizedPmsPhysicalRoomScope, for physical-room management",
+    where:
+      "lockAuthorizedPmsPhysicalRoomScope, for physical-room management (owner key, or Rooms & Rates edit via lockMemberPermissions)",
   },
   pms_calendar_room_follow_up: {
     threaded: true,
@@ -28,7 +29,10 @@ export const AUTHORITY_SITES = {
     where: "room count and room label: their routes refuse AI requests",
   },
   pms_manage_scope: { threaded: false, where: "lockPmsManageScope: closures, operating calendar" },
-  member_permissions: { threaded: false, where: "lockMemberPermissions: booking page, setup" },
+  member_permissions: {
+    threaded: false,
+    where: "lockMemberPermissions: booking page, setup, physical rooms for staff",
+  },
   replacement_pricing: {
     threaded: false,
     where: "lockReplacementPricingAuthorization: pricing-v2",

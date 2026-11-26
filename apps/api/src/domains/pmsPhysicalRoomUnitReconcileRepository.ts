@@ -17,6 +17,7 @@ import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import { lockPmsPhysicalRoomUnitMutationScope } from "./pmsPhysicalRoomUnitMutationLock.js";
 import { lockPmsRoomOrder } from "./pmsRoomOrder.js";
+import { lockMemberPermissions } from "./memberPermissions.js";
 
 const OPERATION = "pms.physical_room_units.reconcile";
 
@@ -150,6 +151,8 @@ async function executeReconcile(
 /**
  * Rechecks the user's room-management rights inside the command's transaction. An AI request is
  * also held to its narrowing (VAY-2522): the database knows only the user's own rights.
+ * The owner key always passes. With `staffPermission`, a member whose real permissions (team
+ * role, overrides, PMS switch, assigned properties) hold it passes too (VAY-2612).
  */
 export async function lockAuthorizedPmsPhysicalRoomScope(
   client: PmsPhysicalRoomUnitReconcileClient,
@@ -157,11 +160,12 @@ export async function lockAuthorizedPmsPhysicalRoomScope(
     readonly narrowing: AuthorityNarrowing | null;
   },
   occurredAt: Date,
+  staffPermission?: "pms.rooms_rates.manage",
 ): Promise<boolean> {
   if (command.audit.actor.kind !== "user") return false;
   if (!narrowingAllowsChange(command.narrowing, command.propertyId)) return false;
-  const result = await client.query(
-    `SELECT property.id
+  const result = await client.query<{ roleKey: string }>(
+    `SELECT membership.role_key AS "roleKey"
      FROM hotel_catalog.properties property
      JOIN identity.organizations organization
        ON organization.id = $1::uuid
@@ -181,16 +185,30 @@ export async function lockAuthorizedPmsPhysicalRoomScope(
        ON membership.organization_id = organization.id
       AND membership.user_id = actor.id
       AND membership.status = 'active'
-     JOIN identity.role_permission_grants permission_grant
-       ON permission_grant.organization_kind = 'hotel_group'
-      AND permission_grant.role_key = membership.role_key
-      AND permission_grant.permission_key = 'pms.operations.manage'
      WHERE property.id = $2::uuid
-     FOR SHARE OF property, organization, resource, actor, membership
-     FOR KEY SHARE OF permission_grant`,
+     FOR SHARE OF property, organization, resource, actor, membership`,
     [command.organizationId, command.propertyId, command.audit.actor.userId],
   );
-  if ((result.rowCount ?? 0) < 1) return false;
+  const roleKey = result.rows[0]?.roleKey;
+  if (!roleKey) return false;
+  const ownerKey = await client.query(
+    `SELECT permission_key
+     FROM identity.role_permission_grants
+     WHERE organization_kind = 'hotel_group'
+       AND role_key = $1
+       AND permission_key = 'pms.operations.manage'
+     FOR KEY SHARE`,
+    [roleKey],
+  );
+  if ((ownerKey.rowCount ?? 0) < 1) {
+    if (!staffPermission) return false;
+    const permissions = await lockMemberPermissions(
+      client,
+      { organizationId: command.organizationId, actorUserId: command.audit.actor.userId },
+      { propertyId: command.propertyId },
+    );
+    if (!permissions?.includes(staffPermission)) return false;
+  }
 
   const entitlements = await client.query<{
     status: string;

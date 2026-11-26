@@ -71,7 +71,14 @@ async function execute(
   try {
     await client.query("BEGIN");
     await lockPmsInventoryMutationScope(client, command.propertyId);
-    if (!(await lockAuthorizedPmsPhysicalRoomScope(client, command, new Date(acceptedAt)))) {
+    if (
+      !(await lockAuthorizedPmsPhysicalRoomScope(
+        client,
+        command,
+        new Date(acceptedAt),
+        "pms.rooms_rates.manage",
+      ))
+    ) {
       await client.query("ROLLBACK");
       return failure("setup_scope_unavailable", "Room management access is no longer available.");
     }

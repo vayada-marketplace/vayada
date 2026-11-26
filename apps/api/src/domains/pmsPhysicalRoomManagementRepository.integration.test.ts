@@ -8,7 +8,7 @@ import { createPgPmsRoomFactsCommandRepository } from "./pmsRoomFactsCommandRepo
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { ManagePhysicalRoomCommand } from "@vayada/domain-pms";
+import type { ManagePhysicalRoomCommand, PhysicalRoomChanges } from "@vayada/domain-pms";
 import { createPgPmsPhysicalRoomManagementRepository } from "./pmsPhysicalRoomManagementRepository.js";
 import { createTargetPmsOperationsCommandRepository } from "./pmsOperationsCommandRepository.js";
 import { createTargetPmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
@@ -314,6 +314,125 @@ describe.skipIf(!url)("physical-room management PostgreSQL", () => {
         ])
       ).rows[0].count,
     ).toBe(1);
+  });
+  it("lets staff whose real permissions hold Rooms & Rates edit manage rooms (VAY-2612)", async () => {
+    const membershipId = (
+      await admin.query(
+        "SELECT id FROM identity.organization_memberships WHERE organization_id=$1",
+        [organizationId],
+      )
+    ).rows[0].id as string;
+    const member = (set: string, values: unknown[] = []) =>
+      admin.query(`UPDATE identity.organization_memberships SET ${set} WHERE id=$1`, [
+        membershipId,
+        ...values,
+      ]);
+    const refused = { ok: false, error: { code: "setup_scope_unavailable" } };
+    const room = async () =>
+      (
+        await admin.query("SELECT status,room_number FROM pms.rooms WHERE property_id=$1", [
+          propertyId,
+        ])
+      ).rows;
+
+    // A Hotel Admin limited to properties this one isn't among.
+    await member("role_key='hotel_manager', property_access_mode='assigned'");
+    expect(await repository.managePhysicalRoom(command(1))).toMatchObject(refused);
+    await admin.query(
+      `INSERT INTO identity.organization_resource_links
+         (organization_id, product, resource_type, resource_id, relationship, status)
+       VALUES ($1::uuid, 'hotel_catalog', 'property', $2, 'owner', 'active')`,
+      [organizationId, propertyId],
+    );
+    await admin.query(
+      "INSERT INTO identity.membership_property_assignments(membership_id,property_id) VALUES($1,$2)",
+      [membershipId, propertyId],
+    );
+    const created = await repository.managePhysicalRoom(command(1));
+    if (!created.ok) throw new Error(JSON.stringify(created));
+    const roomUnitId = created.response.roomUnitId;
+    const update = (
+      expectedRevision: number,
+      changes: PhysicalRoomChanges,
+    ): ManagePhysicalRoomCommand => ({
+      ...command(expectedRevision),
+      action: "update",
+      roomUnitId,
+      changes,
+    });
+    expect(
+      await repository.managePhysicalRoom(
+        update(2, { operationalLabel: "Villa 1", status: "maintenance" }),
+      ),
+    ).toMatchObject({ ok: true, response: { outcome: "updated", roomUnitsRevision: 3 } });
+
+    // Room counts on a room type stay with the owner (VAY-2617).
+    const { audit, idempotencyKey } = command(3);
+    const reconcile = createPgPmsPhysicalRoomUnitReconcileRepository({ connectionString: url });
+    try {
+      const input = parseReconcilePhysicalRoomUnitsCommand({
+        organizationId,
+        propertyId,
+        roomTypeId,
+        expectedRevision: 3,
+        targetActiveUnitCount: 2,
+        audit,
+        idempotencyKey,
+      });
+      if (!input) throw new Error("Invalid reconcile fixture");
+      expect(await reconcile.reconcilePhysicalRoomUnits(input)).toMatchObject(refused);
+    } finally {
+      await reconcile.close();
+    }
+
+    const available = () => update(3, { status: "available" });
+    // The PMS switched off for this member, then Front desk (Rooms & Rates read only).
+    await member("pms_access_enabled=false");
+    expect(await repository.managePhysicalRoom(available())).toMatchObject(refused);
+    await member("pms_access_enabled=true, role_key='front_desk'");
+    expect(await repository.managePhysicalRoom(available())).toMatchObject(refused);
+
+    // The account's own Agency manager role (the Hotel Admin preset): refused with Rooms & Rates
+    // edit denied for this member, allowed without the override.
+    const agencyManager = (
+      await admin.query(
+        "SELECT id FROM identity.organization_roles WHERE organization_id=$1 AND preset_key='agency_manager'",
+        [organizationId],
+      )
+    ).rows[0].id as string;
+    await member(
+      `role_key='hotel_manager', role_definition_id=$2,
+       permission_overrides='{"grant":[],"deny":["pms.rooms_rates.manage"]}'::jsonb`,
+      [agencyManager],
+    );
+    expect(await repository.managePhysicalRoom(available())).toMatchObject(refused);
+    await member("permission_overrides=NULL");
+    expect(await repository.managePhysicalRoom(available())).toMatchObject({
+      ok: true,
+      response: { outcome: "updated", roomUnitsRevision: 4 },
+    });
+
+    // A custom team role that holds Rooms & Rates edit.
+    const role = await admin.query<{ id: string }>(
+      `INSERT INTO identity.organization_roles
+         (organization_id, name, security_class, base_role_key, default_permissions)
+       VALUES ($1, 'Rooms editor', 'staff', 'hotel_custom', $2::jsonb) RETURNING id`,
+      [
+        organizationId,
+        JSON.stringify(["pms.room_status.read", "pms.rooms_rates.read", "pms.rooms_rates.manage"]),
+      ],
+    );
+    await member("role_key='hotel_custom', role_definition_id=$2", [role.rows[0]!.id]);
+    const retire: ManagePhysicalRoomCommand = {
+      ...command(4),
+      action: "retire",
+      roomUnitId,
+    };
+    expect(await repository.managePhysicalRoom(retire)).toMatchObject({
+      ok: true,
+      response: { outcome: "retired" },
+    });
+    expect(await room()).toEqual([{ status: "retired", room_number: "Villa 1" }]);
   });
   it("holds an AI change to its narrowing inside the transaction (VAY-2522)", async () => {
     const created = await repository.managePhysicalRoom(command(1));

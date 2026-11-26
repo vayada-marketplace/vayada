@@ -1,4 +1,4 @@
-import { UnauthorizedError, authorityNarrowing } from "@vayada/backend-auth";
+import { UnauthorizedError, authorityNarrowing, type PermissionKey } from "@vayada/backend-auth";
 import { AuthorizationError } from "@vayada/backend-authorization";
 import {
   parseReconcilePhysicalRoomUnitsCommand,
@@ -16,7 +16,7 @@ import {
 import { z } from "zod";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
-import { enforceRoutePolicy } from "./policy.js";
+import { enforceRoutePolicy, firstHeldPermission } from "./policy.js";
 
 type Params = { propertyId: string; roomTypeId: string };
 type AuthorizedScope = {
@@ -187,7 +187,12 @@ export async function registerPmsPhysicalRoomManagementRoutes(
       method: action === "create" ? "POST" : action === "update" ? "PUT" : "DELETE",
       url: `/properties/:propertyId/room-types/:roomTypeId/physical-units${action === "create" ? "" : "/:roomUnitId"}`,
       onRequest: async (request, reply) => {
-        const scope = authorizeRequest(request, reply);
+        // Adding, renaming, retiring rooms and their status are Rooms & Rates work (VAY-2612).
+        const scope = authorizeRequest(
+          request,
+          reply,
+          firstHeldPermission(request, ["pms.rooms_rates.manage", "pms.operations.manage"]),
+        );
         if (scope) authorized.set(request, scope);
       },
       handler: async (request, reply) => {
@@ -262,9 +267,13 @@ export async function registerPmsPhysicalRoomManagementRoutes(
   }
 }
 
-function authorizeRequest(request: FastifyRequest, reply: FastifyReply): AuthorizedScope | null {
+function authorizeRequest(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  permission: PermissionKey = "pms.operations.manage",
+): AuthorizedScope | null {
   try {
-    const baseContext = enforceRoutePolicy(request, { permission: "pms.operations.manage" });
+    const baseContext = enforceRoutePolicy(request, { permission });
     if (baseContext.selectedOrganization.kind !== "hotel_group") {
       reply.status(403).send({ code: "invalid_organization_scope" });
       return null;
@@ -281,7 +290,7 @@ function authorizeRequest(request: FastifyRequest, reply: FastifyReply): Authori
       resourceId: propertyId,
     } as const;
     const context = enforceRoutePolicy(request, {
-      permission: "pms.operations.manage",
+      permission,
       entitlement: { product: "pms", key: "property-management", resource },
       resource: { ...resource, allowedRelationships: ["owner", "operator", "front_desk"] },
     });

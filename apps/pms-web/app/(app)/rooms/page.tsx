@@ -39,6 +39,7 @@ import {
 } from "@/components/pricing/RoomsPrices";
 import { airbnbImportHref } from "@/components/settings/airbnbImportHref";
 import { useTranslation } from "@/lib/i18n";
+import { useHasPmsPermission } from "@/lib/settings/PmsAccessContext";
 import { imageReferenceUrl } from "@/services/upload";
 import LinkedInventoryDrawer from "./LinkedInventoryDrawer";
 import LinkedInventoryGroupsPanel from "./LinkedInventoryGroupsPanel";
@@ -84,6 +85,7 @@ function RoomTypeCard({
   duplicating,
   linkedGroup,
   prices,
+  canManageRooms,
 }: {
   room: RoomType;
   rooms: Room[];
@@ -93,6 +95,8 @@ function RoomTypeCard({
   linkedGroup?: LinkedInventoryGroup;
   /** The property's published prices; null until read. */
   prices: PropertyPrices["prices"];
+  /** Adding, renaming, retiring rooms and their status need Rooms & Rates edit (VAY-2612). */
+  canManageRooms: boolean;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -443,8 +447,9 @@ function RoomTypeCard({
                       <select
                         value={r.status}
                         onChange={(e) => handleStatusChange(r.id, e.target.value)}
+                        disabled={!canManageRooms}
                         aria-label={t("rooms.statusLabel")}
-                        className={`text-[11px] font-medium px-2.5 py-1 rounded-full border appearance-none cursor-pointer mr-2 disabled:cursor-not-allowed ${statusStyles[r.status] || statusStyles.available}`}
+                        className={`text-[11px] font-medium px-2.5 py-1 rounded-full border appearance-none cursor-pointer mr-2 disabled:cursor-not-allowed disabled:opacity-60 ${statusStyles[r.status] || statusStyles.available}`}
                       >
                         <option value="available">{t("rooms.statusAvailable")}</option>
                         <option value="maintenance">{t("rooms.statusMaintenance")}</option>
@@ -452,14 +457,16 @@ function RoomTypeCard({
                       </select>
                       <button
                         onClick={() => startRenameRoom(r.id, r.roomNumber)}
-                        className="p-1 text-gray-300 hover:text-primary-500 transition-colors disabled:cursor-not-allowed"
+                        disabled={!canManageRooms}
+                        className="p-1 text-gray-300 hover:text-primary-500 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                         aria-label={t("rooms.renameRoom")}
                       >
                         <PencilIcon className="w-3.5 h-3.5" />
                       </button>
                       <button
                         onClick={() => handleDeleteRoom(r.id)}
-                        className="p-1 text-gray-300 hover:text-red-500 transition-colors disabled:cursor-not-allowed"
+                        disabled={!canManageRooms}
+                        className="p-1 text-gray-300 hover:text-red-500 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                         aria-label={t("rooms.deleteRoom")}
                       >
                         <svg
@@ -540,6 +547,7 @@ function RoomTypeCard({
           ) : (
             <button
               onClick={() => setAddingRoom(true)}
+              disabled={!canManageRooms}
               className="mt-2 ml-5 inline-flex items-center gap-1.5 text-[11px] text-gray-500 font-medium hover:text-primary-600 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
             >
               <PlusIcon className="w-3.5 h-3.5" /> {t("rooms.addRoom")}
@@ -574,6 +582,12 @@ import { resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
 export default function RoomsPage() {
   const { t } = useTranslation();
   const router = useRouter();
+  // Room changes take Rooms & Rates edit; linked inventory and the Airbnb import stay with whoever
+  // may set up the hotel. Without the right, they are not offered or not read (VAY-2612).
+  const roomsRatesManage = useHasPmsPermission("pms.rooms_rates.manage");
+  const ownerKey = useHasPmsPermission("pms.operations.manage");
+  const canSetUpHotel = useHasPmsPermission("hotel_catalog.setup.manage");
+  const canManageRooms = roomsRatesManage || ownerKey;
   const [importPropertyId, setImportPropertyId] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
@@ -708,8 +722,10 @@ export default function RoomsPage() {
             {/* Set up once and rarely touched: the Airbnb import, linked inventory and room order (VAY-2338). */}
             <RoomsMenu
               buttonRef={menuButton}
-              airbnbHref={importPropertyId ? airbnbImportHref(importPropertyId) : null}
-              canReorder={individualRooms.length > 1}
+              airbnbHref={
+                importPropertyId && canSetUpHotel ? airbnbImportHref(importPropertyId) : null
+              }
+              canReorder={canManageRooms && individualRooms.length > 1}
               onLinkedInventory={() => setLinkedOpen(true)}
             />
           </>
@@ -744,7 +760,7 @@ export default function RoomsPage() {
         </p>
       )}
       {/* Shown only while an Airbnb import has rooms to review; the wrapper spaces it like the banners. */}
-      {importPropertyId && (
+      {importPropertyId && canSetUpHotel && (
         <div className="mb-4 empty:hidden [&>section]:my-0">
           <PreparedHotelImportPanel
             key={`prepared-${importPropertyId}`}
@@ -811,6 +827,7 @@ export default function RoomsPage() {
               duplicating={duplicatingRoomTypeIds.has(room.id)}
               linkedGroup={linkedGroups?.find((group) => group.memberRoomTypeIds.includes(room.id))}
               prices={propertyPrices.prices}
+              canManageRooms={canManageRooms}
             />
           ))}
         </div>
@@ -820,6 +837,7 @@ export default function RoomsPage() {
         <LinkedInventoryDrawer onClose={() => setLinkedOpen(false)} returnFocus={menuButton}>
           {linkedGroups ? (
             <LinkedInventoryGroupsPanel
+              canEdit={ownerKey}
               groups={linkedGroups}
               roomTypes={rooms}
               onChange={(update) => setLinkedGroups((groups) => (groups ? update(groups) : groups))}
