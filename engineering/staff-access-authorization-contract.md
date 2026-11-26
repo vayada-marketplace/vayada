@@ -112,6 +112,7 @@ what its members can do:
 | Reply to a review, submit a guest review (VAY-2575)                                                                                                                                                                                                                          | `pms.inbox.reply`                                            |
 | Add, rename and retire rooms, set a room's status, change the room order (VAY-2612)                                                                                                                                                                                          | `pms.rooms_rates.manage`                                     |
 | Read linked inventory groups and a room type's room capacity (VAY-2612)                                                                                                                                                                                                      | `pms.rooms_rates.read`                                       |
+| Read the Channel manager page: connection, channels and markups, rooms sold, sync times and open problems; read-only (VAY-2606)                                                                                                                                              | `pms.channel_manager.read`                                   |
 
 These routes check the member's own property access, like every other staff
 route, and answers to members without `pms.guest_contact.read` hide guest email
@@ -123,8 +124,9 @@ money taken), confirming a booking-page bank transfer or PayPal payment (the mon
 reaches the hotel away from the desk; cash or card the desk took itself for a
 confirmed stay stays desk work, VAY-2575), refunds, price corrections, a paid manual booking, a cancel that keeps
 charges, room types and linked inventory changes (VAY-2617), prices, the operating
-calendar and auto-open, check-in and check-out template edits, the channel manager
-(including the no-show report to Booking.com) and the property profile.
+calendar and auto-open, check-in and check-out template edits, every channel manager
+action, marking a channel problem as seen included (the no-show report to Booking.com
+too), and the property profile.
 
 Invite and edit commands accept only `hotel_manager`, `front_desk`,
 `housekeeping`, or `hotel_custom` as a staff role. They reject `hotel_owner`;

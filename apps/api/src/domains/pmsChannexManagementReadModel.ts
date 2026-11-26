@@ -4,6 +4,10 @@ import {
 } from "./channexAlertDiagnostics.js";
 import { listChannexAlerts, type ChannexAlert } from "./channexOperationalAlerts.js";
 import {
+  readChannelManagerView,
+  type ChannelManagerChannelReader,
+} from "./pmsChannelManagerView.js";
+import {
   CHANNEX_MANAGEMENT_CONTRACT_VERSION,
   type ChannexConnectedChannel,
   type ChannexManagementCapabilityModes,
@@ -12,6 +16,7 @@ import {
   type ChannexManagementOperationType,
   type ChannexManagementSnapshot,
   type ChannexSyncDomainState,
+  type ChannelManagerView,
 } from "@vayada/domain-pms-channex";
 import pg from "pg";
 import { CHANNEX_ARI_MAPPING_MISSING_SQL } from "./pmsChannexAriMapping.js";
@@ -51,6 +56,8 @@ export type PmsChannexManagementReadRepository = {
     alertId: string,
   ): Promise<ChannexAlertDiagnostics | null>;
   getAlerts?(propertyId: string): Promise<ChannexAlert[]>;
+  /** VAY-2606: the read-only Channel manager page. */
+  getChannelManagerView?(propertyId: string): Promise<ChannelManagerView>;
   acknowledgeAlert?(propertyId: string, alertId: string, userId: string): Promise<boolean>;
   close?(): Promise<void>;
 };
@@ -60,6 +67,7 @@ export function createPgPmsChannexManagementReadRepository(config: {
   pool?: Pool;
   now?: () => Date;
   stagingAlertPropertyId?: string;
+  readChannels?: ChannelManagerChannelReader;
 }): PmsChannexManagementReadRepository {
   const pool =
     config.pool ?? new pg.Pool({ connectionString: required(config.connectionString), max: 5 });
@@ -67,6 +75,11 @@ export function createPgPmsChannexManagementReadRepository(config: {
   return {
     getAlertDiagnostics: (propertyId, alertId) =>
       getChannexAlertDiagnostics(pool, propertyId, alertId),
+    getChannelManagerView: (propertyId) =>
+      readChannelManagerView(pool, propertyId, {
+        now: config.now?.(),
+        readChannels: config.readChannels,
+      }),
     getAlerts: (propertyId) =>
       listChannexAlerts(pool, propertyId, propertyId === config.stagingAlertPropertyId),
     async acknowledgeAlert(propertyId, alertId, userId) {

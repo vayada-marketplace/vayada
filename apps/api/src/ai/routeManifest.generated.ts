@@ -167,6 +167,7 @@ export const ROUTE_MANIFEST = [
   "GET /api/pms/properties/:propertyId/calendar-auto-open",
   "GET /api/pms/properties/:propertyId/calendar-settings",
   "GET /api/pms/properties/:propertyId/calendar-shuffles",
+  "GET /api/pms/properties/:propertyId/channel-manager",
   "GET /api/pms/properties/:propertyId/channex",
   "GET /api/pms/properties/:propertyId/channex/alerts",
   "GET /api/pms/properties/:propertyId/channex/alerts/:alertId/diagnostics",

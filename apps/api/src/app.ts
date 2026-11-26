@@ -1266,6 +1266,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   if (options.pmsChannexManagement) {
     app.register(registerPmsChannexManagementRoutes, {
       prefix: "/api/pms",
+      propertyAccessRepository: options.auth?.propertyAccessRepository,
       ...options.pmsChannexManagement,
     });
   }

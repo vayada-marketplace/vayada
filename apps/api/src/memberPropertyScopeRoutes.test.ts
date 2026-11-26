@@ -90,6 +90,7 @@ const keys: PermissionKey[] = [
   "booking.addons.read",
   "pms.operations.read",
   "pms.inbox.read",
+  "pms.channel_manager.read",
 ];
 let roleKeys: readonly PermissionKey[] = keys;
 const rolePermissions: RolePermissionRepository = {
@@ -169,6 +170,9 @@ const storage = {
       async getAlerts(propertyId: string) {
         return record(propertyId, []);
       },
+      async getChannelManagerView(propertyId: string) {
+        return record(propertyId, {});
+      },
     },
     capabilityModes: {},
   },
@@ -205,6 +209,7 @@ const areas = [
   ["add-ons", (id: string) => `/api/booking/hotels/${id}/addon-items`],
   ["reviews", (id: string) => `/api/pms/properties/${id}/reviews`],
   ["Channex alerts", (id: string) => `/api/pms/properties/${id}/channex/alerts`],
+  ["Channel manager (VAY-2606)", (id: string) => `/api/pms/properties/${id}/channel-manager`],
   ["operating calendar", (id: string) => `/api/pms/properties/${id}/operating-calendar`],
   ["room setup", (id: string) => `/api/pms/setup/properties/${id}/room-types`],
 ] as const;
