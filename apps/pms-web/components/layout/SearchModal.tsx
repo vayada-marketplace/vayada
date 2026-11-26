@@ -14,6 +14,7 @@ import {
   localToday,
 } from "@/lib/guests/guestDisplay";
 import { useGuestsSectionOn } from "@/lib/guests/useGuestsSectionOn";
+import { useHasPmsPermission } from "@/lib/settings/PmsAccessContext";
 import { SearchResultList, searchResultOptionId, type SearchResult } from "@vayada/settings-ui";
 
 interface PageEntry {
@@ -190,6 +191,8 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
   // With Guests off in Feature Hub, search leaves out the Guests page and guests (VAY-2423). Read
   // when the header mounts, so the answer is known before anyone types.
   const guestsOn = useGuestsSectionOn();
+  // VAY-2606: the Channel manager is listed only for people the menu shows it to.
+  const canOpenChannelManager = useHasPmsPermission("pms.channel_manager.read");
 
   // Load room types once (small dataset, OK to filter client-side)
   useEffect(() => {
@@ -226,6 +229,7 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
       // can jump between sections regardless of UI language.
       const pageResults: SearchResult[] = PAGES.filter((p) => {
         if (p.id === "guests" && !guestsOn) return false;
+        if (p.id === "channel-manager" && !canOpenChannelManager) return false;
         const label = t(p.labelKey).toLowerCase();
         return label.includes(q) || p.id.includes(q);
       }).map((p) => ({
@@ -332,7 +336,7 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [query, rooms, locale, t, guestsOn]);
+  }, [query, rooms, locale, t, guestsOn, canOpenChannelManager]);
 
   const navigate = useCallback(
     (result: SearchResult) => {
