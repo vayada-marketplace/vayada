@@ -13,6 +13,20 @@ export const PMS_WEB_ROOM_ID = "room_101";
 export const PMS_WEB_RESERVATION_ID = "guest_booking_ada";
 export const PMS_WEB_INBOX_THREAD_ID = "thread_ada";
 
+/** VAY-2606: the read-only Channel manager page, for a hotel without a Channex connection. */
+export const pmsWebChannelManagerView = {
+  contractVersion: "pms-channel-manager-view.v1",
+  propertyId: PMS_WEB_PROPERTY_ID,
+  connection: { status: "disconnected" },
+  channels: { status: "unavailable" },
+  rooms: [],
+  sync: {
+    prices: { status: "never", lastSuccessAt: null, retryAt: null },
+    bookings: { status: "never", lastCheckedAt: null, latest: null },
+  },
+  problems: [],
+};
+
 export const pmsWebChannexSnapshot = {
   contractVersion: "pms-channex-management.v1",
   propertyId: PMS_WEB_PROPERTY_ID,
@@ -900,6 +914,9 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
   );
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/channex/alerts`, (route) =>
     route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/channel-manager`, (route) =>
+    route.fulfill({ json: pmsWebChannelManagerView }),
   );
   let inboxThread = { ...pmsWebInboxThread };
   let providerActionAccepted = false;
