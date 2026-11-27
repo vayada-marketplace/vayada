@@ -363,6 +363,7 @@ export const ROUTE_CLASSES: Partial<Record<RouteKey, RouteClass>> = {
   "GET /api/pms/properties/:propertyId/calendar-settings": later(),
   "PATCH /api/pms/properties/:propertyId/calendar-settings": later(),
   "GET /api/pms/properties/:propertyId/calendar-shuffles": later(),
+  "GET /api/pms/properties/:propertyId/channel-manager": later(),
   "GET /api/pms/properties/:propertyId/channex": later(),
   "GET /api/pms/properties/:propertyId/channex/alerts": later(),
   "POST /api/pms/properties/:propertyId/channex/alerts/:alertId/:action": later(),

@@ -100,7 +100,7 @@ const CORE_NAV_ITEMS: Omit<NavItem, "badge">[] = [
     labelKey: "layout.sidebar.channelManager",
     href: "/channel-manager",
     icon: ChannelsIcon,
-    unavailable: true,
+    // VAY-2606: view only, for account admins and staff with the Channel manager permission.
     requiredAny: ["pms.channel_manager.read"],
   },
   {

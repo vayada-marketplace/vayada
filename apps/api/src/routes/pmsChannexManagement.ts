@@ -8,12 +8,14 @@ import {
   type ChannexManagementCapabilityModes,
   type ChannexManagementOperationType,
 } from "@vayada/domain-pms-channex";
+import type { PropertyAccessRepository } from "@vayada/backend-authorization";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import type { PmsChannexManagementCommandPort } from "../domains/pmsChannexManagementCommands.js";
 import type { PmsChannexIframeSessionPort } from "../domains/pmsChannexIframeSession.js";
 import type { PmsChannexManagementReadRepository } from "../domains/pmsChannexManagementReadModel.js";
+import { enforcePmsPropertyRoutePolicy } from "./pmsPropertyPolicy.js";
 import { enforceRoutePolicy } from "./policy.js";
 
 export type PmsChannexManagementRoutesOptions = {
@@ -34,6 +36,8 @@ export type PmsChannexManagementRoutesOptions = {
    * provisioning, inventory rules and ARI alert recovery are refused for everyone (the claimed
    * worker never claims those jobs). */
   claimedOwnedPropertyIds?: readonly string[];
+  /** VAY-2606: limits the Channel manager page to the hotels a staff member works for. */
+  propertyAccessRepository?: PropertyAccessRepository;
 };
 
 export async function registerPmsChannexManagementRoutes(
@@ -106,6 +110,32 @@ export async function registerPmsChannexManagementRoutes(
       const { propertyId } = request.params;
       enforcePmsChannexPolicy(request, propertyId, "pms.operations.read");
       return options.repository.getSnapshot(propertyId, options.capabilityModes);
+    },
+  );
+
+  // VAY-2606: the read-only Channel manager page. Account admins and staff whose role has the Channel manager
+  // permission read it for the hotels they work for; every write on the page stays on pms.operations.manage.
+  app.get<{ Params: { propertyId: string } }>(
+    "/properties/:propertyId/channel-manager",
+    async (request, reply) => {
+      const { propertyId } = request.params;
+      if (!z.uuid().safeParse(propertyId).success)
+        return reply.code(400).send({ code: "invalid_property" });
+      if (!options.propertyAccessRepository)
+        return reply.code(503).send({ code: "authorization_unavailable" });
+      await enforcePmsPropertyRoutePolicy(
+        request,
+        {
+          propertyId,
+          permission: "pms.channel_manager.read",
+          allowedRelationships: ["owner", "operator", "front_desk"],
+        },
+        options.propertyAccessRepository,
+      );
+      reply.header("Cache-Control", "private, no-store");
+      if (!options.repository.getChannelManagerView)
+        return reply.code(503).send({ code: "channel_manager_unavailable" });
+      return options.repository.getChannelManagerView(propertyId);
     },
   );
 

@@ -104,146 +104,17 @@ export interface ChannexSnapshot {
   activeOperation: ChannexOperation | null;
 }
 
-export interface ChannelMarkup {
-  channel: string;
-  markupPct: number;
-}
-
-async function endpoint(action: string, suffix = "channex") {
+async function endpoint(action: string) {
   const propertyId = await resolveSelectedPmsPropertyId(action);
-  return `/api/pms/properties/${encodeURIComponent(propertyId)}/${suffix}`;
+  return `/api/pms/properties/${encodeURIComponent(propertyId)}/channex`;
 }
 
-async function command(
-  operationType: Exclude<ChannexOperationType, "update_markups" | "update_inventory_rules">,
-) {
-  return pmsOperationsClient.post<ChannexOperation>(
-    await endpoint(`starting Channex ${operationType}`, "channex/commands"),
-    identity(operationType),
-    pmsOperationsRequestOptions,
-  );
-}
-
-function identity(operationType: ChannexOperationType) {
-  const commandId = crypto.randomUUID();
-  return { commandId, idempotencyKey: `${operationType}:${commandId}`, operationType };
-}
-
-export interface ChannexAlert {
-  stagingRecoveryAvailable?: boolean;
-  id: string;
-  eventType: string;
-  impact: Record<string, string | null>;
-  firstOccurredAt: string;
-  lastOccurredAt: string;
-  acknowledgedAt: string | null;
-  resolvedAt: string | null;
-  recoveryRound: number;
-  occurrences: number;
-  recovery: {
-    status: string;
-    verified?: boolean;
-    attemptsMade: number;
-    maxAttempts: number;
-    retryAfter: string | null;
-  }[];
-}
-
-export interface ChannexAlertDiagnostics {
-  alertId: string;
-  recoveryRound: number;
-  observedAt: string;
-  newerOccurrence: boolean;
-  linkedJobCount: number;
-  latestReceipt: { receiptId: string; occurredAt: string; receivedAt: string } | null;
-  recovery: {
-    jobId: string;
-    operation: "booking_import" | "sync_bookings" | "sync_ari";
-    status: string;
-    updatedAt: string;
-    attemptsMade: number;
-    failure: string | null;
-  }[];
-}
-
+/** The Channex snapshot the calendar reads its connected channels from (VAY-2606 moved the Channel manager page
+ * to its own read-only view, services/channelManager). */
 export const channexService = {
-  async getAlertDiagnostics(propertyId: string, alertId: string) {
-    return pmsOperationsClient.get<ChannexAlertDiagnostics>(
-      `/api/pms/properties/${encodeURIComponent(propertyId)}/channex/alerts/${encodeURIComponent(alertId)}/diagnostics`,
-      pmsOperationsRequestOptions,
-    );
-  },
-
-  async updateInventoryRules(
-    rules: ChannexInventoryRule[],
-    expectedOperationId: string | null,
-    commandId: string,
-  ) {
-    return pmsOperationsClient.put<ChannexOperation>(
-      await endpoint("updating channel inventory rules", "channex/inventory-rules"),
-      { rules, expectedOperationId, commandId, idempotencyKey: `inventory-rules:${commandId}` },
-      pmsOperationsRequestOptions,
-    );
-  },
-  async getAlerts() {
-    return pmsOperationsClient.get<ChannexAlert[]>(
-      await endpoint("loading channel alerts", "channex/alerts"),
-      pmsOperationsRequestOptions,
-    );
-  },
-  async alertAction(alertId: string, action: "acknowledge" | "recover", round: number) {
-    return pmsOperationsClient.post(
-      await endpoint(
-        "recovering a channel alert",
-        `channex/alerts/${encodeURIComponent(alertId)}/${action}`,
-      ),
-      { round },
-      pmsOperationsRequestOptions,
-    );
-  },
   async getSnapshot() {
     return pmsOperationsClient.get<ChannexSnapshot>(
       await endpoint("loading channel management"),
-      pmsOperationsRequestOptions,
-    );
-  },
-
-  async getOperation(operationId: string) {
-    return pmsOperationsClient.get<ChannexOperation>(
-      await endpoint(
-        "loading a Channex operation",
-        `channex/operations/${encodeURIComponent(operationId)}`,
-      ),
-      pmsOperationsRequestOptions,
-    );
-  },
-
-  provision: () => command("provision"),
-  syncAri: () => command("sync_ari"),
-  syncBookings: () => command("sync_bookings"),
-  installMessagingApp: () => command("install_messaging"),
-
-  async getIframeUrl() {
-    const session = await pmsOperationsClient.post<{ iframeUrl: string; expiresAt: string }>(
-      await endpoint("opening Channex channel settings", "channex/iframe-session"),
-      undefined,
-      pmsOperationsRequestOptions,
-    );
-    return { iframe_url: session.iframeUrl, expiresAt: session.expiresAt };
-  },
-
-  async updateMarkups(markups: ChannelMarkup[]) {
-    const request = identity("update_markups");
-    return pmsOperationsClient.put<ChannexOperation>(
-      await endpoint("updating channel markups", "channex/markups"),
-      {
-        commandId: request.commandId,
-        idempotencyKey: request.idempotencyKey,
-        markups: markups.map(({ channel, markupPct }) => ({
-          channel,
-          markupPercent: markupPct,
-        })),
-      },
       pmsOperationsRequestOptions,
     );
   },
