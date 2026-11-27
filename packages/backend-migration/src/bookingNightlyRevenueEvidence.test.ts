@@ -493,6 +493,10 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking nightly revenue evidence (PostgreSQ
         },
         peer,
       );
+      // The peer's 23505 can arrive while this test still awaits COMMIT, before `rejects` below
+      // attaches its handler. Handle it from the start so it is never an unhandled rejection, which
+      // fails the run although every test passed; `rejects` still asserts the code.
+      collision.catch(() => undefined);
       await expect
         .poll(async () => {
           const result = await client.query<{ blockers: number }>(
