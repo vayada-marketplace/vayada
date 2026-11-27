@@ -106,3 +106,29 @@ it("reads a too-small room's price for the part of the party it takes", async ()
   );
   expect((await getStayPrices("a", stay)).rooms[0]).not.toHaveProperty("part");
 });
+
+// VAY-2613: "Minimum stay 2 nights for these dates" instead of only "Not available".
+it("reads the minimum stay that refuses a rate, and leaves out one it can't read", async () => {
+  const offers = (minNights: unknown) => ({
+    ...body,
+    rooms: [
+      {
+        ...body.rooms[0]!,
+        offers: [{ publicOfferKey: "key-b", status: "unavailable", minNights }],
+      },
+    ],
+  });
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(offers(3)))));
+  expect((await getStayPrices("a", stay)).rooms[0]!.offers).toEqual([
+    { publicOfferKey: "key-b", status: "unavailable", minNights: 3 },
+  ]);
+  for (const minNights of [1, 0, 2.5, "3", null]) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(JSON.stringify(offers(minNights)))),
+    );
+    expect((await getStayPrices("a", stay)).rooms[0]!.offers).toEqual([
+      { publicOfferKey: "key-b", status: "unavailable" },
+    ]);
+  }
+});
