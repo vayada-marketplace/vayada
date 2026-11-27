@@ -3,6 +3,7 @@ import { PUBLIC_PRICING_SELECTION_VERSION } from "@vayada/domain-booking";
 import { readGuestModuleSwitches } from "./bookingGuestModules.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { lockPublicPricingChargeTotals } from "./publicPricingChargeTotals.js";
+import { lockPublicPricingMinimumStays } from "./publicPricingRefusals.js";
 
 type Occupancy = { maxGuests: number; maxAdults: number; maxChildren: number };
 export type Offered = {
@@ -32,7 +33,10 @@ type OfferPrice =
   | ({ publicOfferKey: string; status: "priced" } & NonNullable<
       Awaited<ReturnType<typeof stayTotal>>
     >)
-  | { publicOfferKey: string; status: "unavailable" | "unpriced" };
+  /** VAY-2613, the booking page's read only: `minNights` when a minimum stay from this arrival
+   * is what refuses the rate. */
+  | { publicOfferKey: string; status: "unavailable"; minNights?: number }
+  | { publicOfferKey: string; status: "unpriced" };
 
 /** A party never needs more rooms of one type than this on the booking page. */
 const MAX_ROOMS = 9;
@@ -195,7 +199,9 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
     slug: string,
     requested: StayPricesQuery,
     offered: Offered,
-    withParts: boolean,
+    /** The booking page's own read: it prices parts of a group (VAY-2393) and says why a rate
+     * is refused (VAY-2613). */
+    bookingPage: boolean,
     shared?: { left: number },
   ) {
     const scoped = await short(pool, async (client) => {
@@ -223,6 +229,11 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
     const wholeParty = !!one && one.adults === query.adults && one.children === query.children;
     const parts: { index: number; room: (typeof offered.rooms)[number]; adults: number }[] = [];
     const partOffers = new Map<number, { adults: number; offers: OfferPrice[] }>();
+    // Rates refused in a free room, with the guests they were priced for (VAY-2613).
+    const refused: {
+      offer: OfferPrice;
+      guests: { adults: number; childAges: readonly number[] };
+    }[] = [];
     const suggestedRooms = fewestRooms(
       offered.rooms.filter((room) => (free.get(room.roomTypeId) ?? 0) >= 1),
       query,
@@ -235,7 +246,7 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
         : roomsForParty(room.occupancy, query.adults, query.children);
       const left = free.get(room.roomTypeId) ?? 0;
       const available = roomCount !== null && left >= roomCount;
-      const offers = [];
+      const offers: OfferPrice[] = [];
       for (const offer of room.offers) {
         // Past the per-request cap an offer is "unpriced": still bookable, priced on /book.
         if (available && (budget-- <= 0 || (shared && shared.left-- <= 0))) {
@@ -257,17 +268,17 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
                 ),
               )
             : null;
-        offers.push(
-          price
-            ? { publicOfferKey: offer.publicOfferKey, status: "priced" as const, ...price }
-            : { publicOfferKey: offer.publicOfferKey, status: "unavailable" as const },
-        );
+        const result: OfferPrice = price
+          ? { publicOfferKey: offer.publicOfferKey, status: "priced", ...price }
+          : { publicOfferKey: offer.publicOfferKey, status: "unavailable" };
+        if (!price && available) refused.push({ offer: result, guests: guests[0]! });
+        offers.push(result);
       }
       // Additive (VAY-2393): a free room too small for the whole party takes part of it, so
       // the guest can book it and pick a second room for the rest; priced below. Only while
       // the rest (with every child) fits a free room: this type's second one, or another's.
       const partAdults =
-        withParts && wholeParty && roomCount === null && left >= 1
+        bookingPage && wholeParty && roomCount === null && left >= 1
           ? adultsForPart(room.occupancy, query)
           : null;
       if (partAdults !== null) {
@@ -306,13 +317,30 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
             { publicOfferKey: offer.publicOfferKey, adults, childAges: [] },
           ]),
         );
-        part.push(
-          price
-            ? { publicOfferKey: offer.publicOfferKey, status: "priced" as const, ...price }
-            : { publicOfferKey: offer.publicOfferKey, status: "unavailable" as const },
-        );
+        const result: OfferPrice = price
+          ? { publicOfferKey: offer.publicOfferKey, status: "priced", ...price }
+          : { publicOfferKey: offer.publicOfferKey, status: "unavailable" };
+        if (!price) refused.push({ offer: result, guests: { adults, childAges: [] } });
+        part.push(result);
       }
       partOffers.set(index, { adults, offers: part });
+    }
+    // VAY-2613: the booking page says when a minimum stay refuses a rate. One more short read,
+    // only when a free room's rate was refused; it only explains, so a failed read (a lock
+    // timeout) leaves the plain "unavailable" rather than failing the guest's prices.
+    if (bookingPage && refused.length) {
+      const minimum = await short(pool, (client) =>
+        lockPublicPricingMinimumStays(
+          client,
+          slug,
+          { checkIn: query.checkIn, checkOut: query.checkOut },
+          refused.map(({ offer, guests }) => ({ publicOfferKey: offer.publicOfferKey, guests })),
+        ),
+      ).catch(() => new Map<string, number>());
+      for (const { offer } of refused) {
+        const nights = minimum.get(offer.publicOfferKey);
+        if (offer.status === "unavailable" && nights !== undefined) offer.minNights = nights;
+      }
     }
     return {
       version: "public-pricing-stay-prices.v1" as const,

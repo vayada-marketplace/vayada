@@ -14,6 +14,7 @@ export default function RateOption({
   subParts,
   discountPercent,
   unavailable,
+  unavailableText,
   loading,
   disabled = false,
   blocked,
@@ -35,6 +36,8 @@ export default function RateOption({
   discountPercent?: number;
   /** No price for this stay: shown, but can't be picked. */
   unavailable: boolean;
+  /** VAY-2613: why, in place of "Not available" ("Min. 2 nights"). */
+  unavailableText?: string;
   /** Prices are on their way: show placeholders where they go. */
   loading: boolean;
   disabled?: boolean;
@@ -106,7 +109,7 @@ export default function RateOption({
             </p>
           ) : unavailable ? (
             <p className="text-sm font-medium text-gray-500 whitespace-nowrap">
-              {t("notAvailable")}
+              {unavailableText ?? t("notAvailable")}
             </p>
           ) : totalLabel === null ? (
             loading && (

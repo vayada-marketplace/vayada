@@ -1,9 +1,4 @@
 import { freeCancellationUntil } from "@vayada/domain-booking/replacement-pricing";
-import {
-  calculateReplacementRoomStay,
-  projectReplacementRoomNight,
-  type PricingConfiguration,
-} from "@vayada/domain-pms";
 import type { Pool, PoolClient } from "pg";
 import { readFreeWindows } from "./agencyNextFreeDates.js";
 import {
@@ -20,6 +15,7 @@ import { createPublicPricingDisplayPool } from "./publicPricingDisplayPool.js";
 import { createPublicPricingOfferCatalog } from "./publicPricingOfferCatalog.js";
 import { lockPublicPricingPublication } from "./publicPricingPublication.js";
 import { publicPricingOfferBindings } from "./publicPricingRoomStay.js";
+import { roomRefusal, type Refusal } from "./publicPricingRefusals.js";
 import {
   createPublicPricingStayPrices,
   fewestRooms,
@@ -161,10 +157,8 @@ type StayPricesRead = NonNullable<
 type Dates = { checkIn: string; checkOut: string };
 type Guests = { adults: number; childAges: readonly (number | null)[] };
 
-/** Why a free room's rates refuse the stay (`roomRefusal`). */
-export type Refusal =
-  | { status: "minimum_stay"; minNights: number }
-  | { status: "too_small" | "closed" };
+// VAY-2613: shared with the booking page's stay prices.
+export { roomRefusal, type Refusal };
 
 /** Where a search reads from; `createPgLiveStaySearch` wires the real reads. */
 export type LiveStaySearchSources = {
@@ -676,43 +670,6 @@ const withinBudget = (search: LiveStaySearch, totalMinor: string | null) =>
   !search.budgetMinor || totalMinor === null
     ? null
     : BigInt(totalMinor) <= BigInt(search.budgetMinor);
-
-/**
- * Why a free room's listed rates (`offerIds`) don't price a stay, from the published prices' own
- * rules, as the quote's calculation applies them: a minimum stay from that arrival
- * ("minimum_stay", the smallest any rate asks), guests the prices don't take ("too_small"), else
- * any other rule ("closed").
- */
-export function roomRefusal(
-  room: PricingConfiguration,
-  offerIds: readonly string[],
-  dates: Dates,
-  guests: { adults: number; childAges: readonly number[] },
-): Refusal {
-  const terms = Object.fromEntries(room.offers.map((offer) => [offer.id, offer.termsRevision]));
-  let minNights: number | null = null,
-    tooSmall = offerIds.length > 0;
-  for (const offerId of offerIds) {
-    const request = {
-      propertyId: room.propertyId,
-      roomTypeId: room.roomTypeId,
-      offerId,
-      expectedRevision: room.revision,
-      expectedTermsRevisions: terms,
-      guests: { adults: guests.adults, childAgesAtCheckIn: [...guests.childAges] },
-    };
-    const stay = calculateReplacementRoomStay(room, { ...request, ...dates });
-    if (stay.kind === "unavailable" && stay.reason === "invalid_guests") continue;
-    tooSmall = false;
-    if (stay.kind !== "unavailable" || stay.reason !== "restriction") continue;
-    const arrival = projectReplacementRoomNight(room, { ...request, date: dates.checkIn });
-    const rules = arrival.kind === "projected" ? arrival.night.restrictions : null;
-    if (rules && !rules.closedToArrival && rules.minArrivalNights > nightsOf(dates))
-      minNights = Math.min(minNights ?? rules.minArrivalNights, rules.minArrivalNights);
-  }
-  if (minNights !== null) return { status: "minimum_stay", minNights };
-  return { status: tooSmall ? "too_small" : "closed" };
-}
 
 /** One read-only snapshot on the display pool, always rolled back. */
 async function inSnapshot<T>(pool: Pool, read: (client: PoolClient) => Promise<T>): Promise<T> {
