@@ -384,6 +384,9 @@ test("shows the same lowest night in the Rooms list and the Prices tab, from tod
   const panel = main(page).getByRole("region", { name: "Picked dates" });
   const now = new Date();
   const today = `${now.getDate()} ${now.toLocaleString("en-GB", { month: "long" })} ${now.getFullYear()}`;
+  // The calendar opens on the sample stay's month (next Friday's), which is next month in a month's
+  // last days; "Today" brings it to this month.
+  await calendar.getByRole("button", { name: "Today", exact: true }).click();
   await calendar.getByRole("button", { name: new RegExp(`^${today}, €`) }).click();
   await panel.getByRole("button", { name: "Own price for this date" }).click();
   await panel.getByLabel("Own price: Per room").fill("60");
