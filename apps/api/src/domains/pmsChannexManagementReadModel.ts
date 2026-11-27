@@ -68,6 +68,7 @@ export function createPgPmsChannexManagementReadRepository(config: {
   now?: () => Date;
   stagingAlertPropertyId?: string;
   readChannels?: ChannelManagerChannelReader;
+  onChannelsUnavailable?: (error: unknown) => void;
 }): PmsChannexManagementReadRepository {
   const pool =
     config.pool ?? new pg.Pool({ connectionString: required(config.connectionString), max: 5 });
@@ -79,6 +80,7 @@ export function createPgPmsChannexManagementReadRepository(config: {
       readChannelManagerView(pool, propertyId, {
         now: config.now?.(),
         readChannels: config.readChannels,
+        onChannelsUnavailable: config.onChannelsUnavailable,
       }),
     getAlerts: (propertyId) =>
       listChannexAlerts(pool, propertyId, propertyId === config.stagingAlertPropertyId),

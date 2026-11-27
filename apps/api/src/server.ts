@@ -288,6 +288,7 @@ import {
 } from "./integrations/channexManagement.js";
 import { preflightChannexManagementWorker } from "./jobs/channexManagementWorkerStartup.js";
 import { createChannexPropertyTimeZoneRead } from "./integrations/channexPropertyCutOff.js";
+import { createChannexChannelManagerChannelReader } from "./integrations/channexChannelManagerChannels.js";
 import { resolveChannexManagementDatabaseRouting } from "./channexManagementDatabaseRouting.js";
 import { bootstrapPublishedChannexOffer } from "./integrations/channexPublishedOfferBootstrap.js";
 import { runPmsInboxProviderActions } from "./jobs/pmsInboxProviderActions.js";
@@ -757,6 +758,19 @@ const pmsChannexManagementRepository = pmsOperationsRepository
   ? createPgPmsChannexManagementReadRepository({
       connectionString: targetDatabaseUrl,
       stagingAlertPropertyId: stagingAlertProperty(config),
+      // VAY-2606: the Channel manager page reads Booking.com, Airbnb and their markups from Channex (GET only).
+      readChannels:
+        config.channexManagement.apiBaseUrl && config.channexManagement.apiKey
+          ? createChannexChannelManagerChannelReader({
+              apiBaseUrl: config.channexManagement.apiBaseUrl,
+              apiKey: config.channexManagement.apiKey,
+            })
+          : undefined,
+      onChannelsUnavailable: (error) =>
+        app.log.warn(
+          { code: error instanceof Error ? error.message.slice(0, 120) : "unknown" },
+          "Channel manager: Channex channels could not be read",
+        ),
     })
   : undefined;
 const channexCommandsMutating = Object.entries(config.channexManagement.capabilityModes).some(

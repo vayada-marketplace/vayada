@@ -342,10 +342,13 @@ test.describe("pms-web smoke", () => {
     await expect(page.getByRole("button", { name: /new booking/i }).first()).toBeEnabled();
 
     await page.goto("/channel-manager");
-    await expect(page.getByRole("heading", { level: 1, name: /channel/i })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Channex connection" })).toBeVisible();
-    await expect(page.getByText(/observe-only mode/i)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Enable connection" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { level: 1, name: "Channel manager" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Booking.com and Airbnb aren't connected yet" }),
+    ).toBeVisible();
+    // VAY-2606: view only. Nothing on the page changes what Booking.com or Airbnb sell.
+    for (const name of ["Enable connection", "Sync now", "Open channel settings", "Provision"])
+      await expect(page.getByRole("button", { name })).toHaveCount(0);
 
     await page.goto("/inbox");
     await expect(page.getByRole("heading", { level: 1, name: "Inbox" })).toBeVisible();
