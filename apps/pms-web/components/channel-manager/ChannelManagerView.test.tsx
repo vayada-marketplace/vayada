@@ -328,6 +328,14 @@ describe("markup as the page shows it", () => {
     [
       {
         kind: "rules",
+        rules: [{ operation: "increase_by_percent", value: "21.17" }],
+        currency: "EUR",
+      },
+      "+21.17%",
+    ],
+    [
+      {
+        kind: "rules",
         rules: [
           { operation: "increase_by_percent", value: "5.00" },
           { operation: "increase_by_amount", value: "12.00" },
