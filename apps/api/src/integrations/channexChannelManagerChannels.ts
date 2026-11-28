@@ -187,18 +187,21 @@ function rateRules(derived: unknown): { rules: Rules } {
   if (!Array.isArray(rate) || rate.length > 20) return { rules: null };
   const rules: ChannelManagerMarkupRule[] = [];
   for (const rule of rate) {
+    // Channex reads a decimal comma as a point: Tiga's Booking.com rule "21,17" adds 21.17%. Only one or two
+    // digits after a comma count, so "1,000" (a thousand, or one?) stays unknown.
     if (
       !Array.isArray(rule) ||
       rule.length !== 2 ||
       !OPERATIONS.has(rule[0]) ||
       typeof rule[1] !== "string" ||
-      !/^\d{1,9}(?:\.\d{1,4})?$/.test(rule[1])
+      !/^\d{1,9}(?:\.\d{1,4}|,\d{1,2})?$/.test(rule[1])
     )
       return { rules: null };
+    const value = Number(rule[1].replace(",", "."));
     // A zero rule changes nothing; Channex uses ["increase_by_percent", "0"] to exempt a mapping.
-    if (Number(rule[1]) === 0) continue;
-    // "5" and "5.00" are the same rule.
-    rules.push({ operation: rule[0], value: String(Number(rule[1])) });
+    if (value === 0) continue;
+    // "5", "5.00" and "5,00" are the same rule.
+    rules.push({ operation: rule[0], value: String(value) });
   }
   return { rules };
 }

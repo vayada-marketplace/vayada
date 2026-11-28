@@ -354,11 +354,44 @@ describe("a channel's markup as Channex applies it", () => {
     });
   });
 
+  it("reads a decimal comma as Channex does (Tiga's Booking.com +21.17%)", () => {
+    expect(
+      markup({ derived_option: { rate: [rule("increase_by_percent", "21,17")] } }, [{}, {}], "EUR"),
+    ).toEqual({
+      kind: "rules",
+      rules: [{ operation: "increase_by_percent", value: "21.17" }],
+      currency: "EUR",
+    });
+    // "21,17" and "21.170" are the same rule, so the mappings don't vary.
+    expect(
+      markup(
+        { derived_option: { rate: [rule("increase_by_percent", "21,17")] } },
+        [{}, { derived_option: { rate: [rule("increase_by_percent", "21.170")] } }],
+        null,
+      ),
+    ).toMatchObject({
+      kind: "rules",
+      rules: [{ operation: "increase_by_percent", value: "21.17" }],
+    });
+    expect(
+      markup({ derived_option: { rate: [rule("increase_by_amount", "12,5")] } }, [], "EUR"),
+    ).toMatchObject({ rules: [{ operation: "increase_by_amount", value: "12.5" }] });
+    expect(
+      markup({ derived_option: { rate: [rule("increase_by_percent", "0,00")] } }, [], null),
+    ).toMatchObject({ rules: [] });
+  });
+
   it.each([
     [[rule("multiply_by", "2")]],
     [[rule("increase_by_percent", "12%")]],
     [[["increase_by_percent"]]],
     ["12"],
+    // A comma that could group thousands, or isn't one decimal comma, isn't read.
+    [[rule("increase_by_percent", "1,000")]],
+    [[rule("increase_by_amount", "1.234,56")]],
+    [[rule("increase_by_percent", "21,1,7")]],
+    [[rule("increase_by_percent", "21,")]],
+    [[rule("increase_by_percent", ",5")]],
   ])("never guesses a rule it can't read (%j)", (rate) => {
     expect(markup({ derived_option: { rate } }, [], null)).toEqual({ kind: "unknown" });
   });
